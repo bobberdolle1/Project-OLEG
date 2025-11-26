@@ -1,0 +1,100 @@
+version: '3.9'
+
+services:
+  # Основной сервис бота
+  oleg-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oleg-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite:///./data/oleg.db
+      - LOG_FILE=/app/logs/oleg.log
+    volumes:
+      # Сохранение базы данных между перезагрузками
+      - oleg-data:/app/data
+      # Сохранение логов
+      - oleg-logs:/app/logs
+    networks:
+      - oleg-network
+    depends_on:
+      - ollama
+    healthcheck:
+      test: ["CMD", "python", "-c", "import logging; print('alive')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Ollama сервис для локального запуска моделей ИИ
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-service
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    ports:
+      # Открываем только для локальной сети
+      - "11434:11434"
+    volumes:
+      # Кэш моделей Ollama
+      - ollama-models:/root/.ollama
+      # Кэш для KV
+      - ollama-cache:/root/.cache
+    networks:
+      - oleg-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Опциональный: PostgreSQL для масштабирования (закомментирован по умолчанию)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: oleg-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: oleg_db
+  #     POSTGRES_USER: oleg
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   networks:
+  #     - oleg-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U oleg"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  oleg-data:
+    driver: local
+  oleg-logs:
+    driver: local
+  ollama-models:
+    driver: local
+  ollama-cache:
+    driver: local
+  # postgres-data:
+  #   driver: local
+
+networks:
+  oleg-network:
+    driver: bridge

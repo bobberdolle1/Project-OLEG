@@ -12,7 +12,6 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=sqlite:///./data/oleg.db
       - LOG_FILE=/app/logs/oleg.log
     volumes:
       # Сохранение базы данных между перезагрузками

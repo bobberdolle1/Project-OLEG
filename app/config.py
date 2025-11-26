@@ -33,6 +33,11 @@ class Settings:
     ollama_timeout: int = int(
         os.getenv("OLLAMA_TIMEOUT", "90")
     )
+    ollama_cache_enabled: bool = os.getenv("OLLAMA_CACHE_ENABLED", "true").lower() == "true"
+    ollama_cache_ttl: int = int(os.getenv("OLLAMA_CACHE_TTL", "3600")) # seconds
+    ollama_cache_max_size: int = int(os.getenv("OLLAMA_CACHE_MAX_SIZE", "128"))
+    toxicity_analysis_enabled: bool = os.getenv("TOXICITY_ANALYSIS_ENABLED", "true").lower() == "true"
+    toxicity_threshold: int = int(os.getenv("TOXICITY_THRESHOLD", "75"))
 
     # Database
     database_url: str = os.getenv(

@@ -7,6 +7,10 @@ from aiogram import Router
 from aiogram.types import Message
 from aiogram import F
 from aiogram.types import ChatPermissions
+from sqlalchemy import select, delete
+
+from app.database.session import get_session
+from app.database.models import User, Warning
 
 logger = logging.getLogger(__name__)
 
@@ -229,5 +233,128 @@ async def cmd_kick(msg: Message):
         )
     except Exception as e:
         logger.error(f"Kick failed: {e}")
-        await msg.reply(f"Не смог кикнуть: {e}")
+@router.message(F.text.startswith("/warn"))
+async def cmd_warn(msg: Message):
+    """
+    Issues a warning to a user.
+    Usage: /warn [reply] [reason]
+    """
+    if not await is_admin(msg):
+        await msg.reply("Только для админов, брат.")
+        return
 
+    if not msg.reply_to_message or not msg.reply_to_message.from_user:
+        return await msg.reply("Укажи пользователя реплаем.")
+    
+    target_user = msg.reply_to_message.from_user
+    reason = " ".join(msg.text.split()[1:]) if len(msg.text.split()) > 1 else "Без причины"
+    
+    async_session = get_session()
+    async with async_session() as session:
+        # Ensure target user exists
+        user_res = await session.execute(select(User).filter_by(tg_user_id=target_user.id))
+        user = user_res.scalars().first()
+        if not user:
+            user = User(tg_user_id=target_user.id, username=target_user.username, first_name=target_user.first_name, last_name=target_user.last_name)
+            session.add(user)
+            await session.flush()
+        
+        # Add a strike
+        user.strikes += 1
+        
+        # Log the warning
+        warning = Warning(
+            user_id=user.id,
+            moderator_id=msg.from_user.id,
+            reason=reason
+        )
+        session.add(warning)
+        await session.commit()
+        
+        await msg.reply(f"Пользователю @{target_user.username or target_user.id} выдано предупреждение. Всего предупреждений: {user.strikes}. Причина: {reason}")
+        
+        # Take action if strikes threshold is met
+        if user.strikes >= 3:
+            await msg.bot.ban_chat_member(
+                chat_id=msg.chat.id,
+                user_id=target_user.id,
+                until_date=datetime.utcnow() + timedelta(days=1)
+            )
+            await msg.answer(f"Пользователь @{target_user.username or target_user.id} забанен на 24 часа за 3 предупреждения.")
+
+
+@router.message(F.text.startswith("/unwarn"))
+async def cmd_unwarn(msg: Message):
+    """
+    Removes the last warning from a user.
+    Usage: /unwarn [reply]
+    """
+    if not await is_admin(msg):
+        await msg.reply("Только для админов, брат.")
+        return
+
+    if not msg.reply_to_message or not msg.reply_to_message.from_user:
+        return await msg.reply("Укажи пользователя реплаем.")
+    
+    target_user = msg.reply_to_message.from_user
+    
+    async_session = get_session()
+    async with async_session() as session:
+        user_res = await session.execute(select(User).filter_by(tg_user_id=target_user.id))
+        user = user_res.scalars().first()
+        if not user or user.strikes == 0:
+            return await msg.reply("У пользователя нет предупреждений.")
+        
+        # Remove a strike
+        user.strikes -= 1
+        
+        # Remove the last warning from history
+        last_warning_res = await session.execute(
+            select(Warning)
+            .filter_by(user_id=user.id)
+            .order_by(Warning.created_at.desc())
+        )
+        last_warning = last_warning_res.scalars().first()
+        if last_warning:
+            await session.delete(last_warning)
+        
+        await session.commit()
+        await msg.reply(f"Снято одно предупреждение с пользователя @{target_user.username or target_user.id}. Осталось: {user.strikes}.")
+
+
+@router.message(commands="strikes")
+async def cmd_strikes(msg: Message):
+    """
+    Displays the number of strikes for a user.
+    Usage: /strikes [reply]
+    """
+    if not await is_admin(msg):
+        await msg.reply("Только для админов, брат.")
+        return
+
+    if not msg.reply_to_message or not msg.reply_to_message.from_user:
+        return await msg.reply("Укажи пользователя реплаем.")
+    
+    target_user = msg.reply_to_message.from_user
+    
+    async_session = get_session()
+    async with async_session() as session:
+        user_res = await session.execute(select(User).filter_by(tg_user_id=target_user.id))
+        user = user_res.scalars().first()
+        
+        if not user or user.strikes == 0:
+            return await msg.reply("У пользователя нет предупреждений.")
+        
+        warnings_res = await session.execute(
+            select(Warning)
+            .filter_by(user_id=user.id)
+            .order_by(Warning.created_at.desc())
+        )
+        warnings = warnings_res.scalars().all()
+        
+        response = f"Предупреждения пользователя @{target_user.username or target_user.id} ({user.strikes} всего):\n"
+        for w in warnings:
+            moderator = await msg.bot.get_chat_member(msg.chat.id, w.moderator_id)
+            response += f"- {w.created_at.strftime('%Y-%m-%d')}: {w.reason} (выдал: @{moderator.user.username or w.moderator_id})\n"
+        
+        await msg.reply(response)

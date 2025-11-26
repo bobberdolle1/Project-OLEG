@@ -4,12 +4,20 @@ from datetime import datetime, timedelta
 from typing import List
 import httpx
 from sqlalchemy import select
+import cachetools
+import asyncio
+import json
+import json
 
 from app.config import settings
 from app.database.session import get_session
 from app.database.models import MessageLog
 
 logger = logging.getLogger(__name__)
+
+# Cache for Ollama responses
+ollama_cache: cachetools.TTLCache | None = None
+ollama_cache_lock = asyncio.Lock()
 
 SYSTEM_PROMPT = (
     "Ты — Олег, грубоватый, прямолинейный, матерящийся, "
@@ -69,7 +77,7 @@ QUOTE_THEMES = [
 
 
 async def _ollama_chat(
-    messages: list[dict], temperature: float = 0.7, retry: int = 2
+    messages: list[dict], temperature: float = 0.7, retry: int = 2, use_cache: bool = True
 ) -> str:
     """
     Отправить запрос к Ollama API и получить ответ от модели.
@@ -78,6 +86,7 @@ async def _ollama_chat(
         messages: Список сообщений (система, пользователь, ассистент)
         temperature: Параметр температуры для генерации (0-1)
         retry: Количество попыток повтора при ошибке
+        use_cache: Использовать ли кэш для этого запроса
 
     Returns:
         Текст ответа от модели
@@ -85,6 +94,20 @@ async def _ollama_chat(
     Raises:
         httpx.HTTPError: При критической ошибке Ollama
     """
+    if not settings.ollama_cache_enabled or not use_cache:
+        logger.debug("Ollama cache disabled or bypassed for this request.")
+    else:
+        global ollama_cache
+        if ollama_cache is None:
+            ollama_cache = cachetools.TTLCache(maxsize=settings.ollama_cache_max_size, ttl=settings.ollama_cache_ttl)
+
+        # Create a cache key from messages. Use a tuple of tuples for hashability.
+        cache_key = tuple(tuple(m.items()) for m in messages)
+
+        async with ollama_cache_lock:
+            if cache_key in ollama_cache:
+                logger.debug(f"Cache hit for Ollama request (key: {cache_key[:20]}...)")
+                return ollama_cache[cache_key]
     url = f"{settings.ollama_base_url}/api/chat"
     payload = {
         "model": settings.ollama_model,
@@ -105,6 +128,12 @@ async def _ollama_chat(
                 data = r.json()
                 msg = data.get("message", {})
                 content = msg.get("content") or ""
+                
+                if settings.ollama_cache_enabled and use_cache:
+                    async with ollama_cache_lock:
+                        ollama_cache[cache_key] = content
+                        logger.debug(f"Cache stored for Ollama request (key: {cache_key[:20]}...)")
+                
                 return content.strip()
         except httpx.TimeoutException as e:
             logger.warning(
@@ -514,7 +543,7 @@ async def generate_creative() -> str:
     txt = await _ollama_chat([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt},
-    ], temperature=0.9)
+    ], temperature=0.9, use_cache=False)
 
     # Форматируем вывод в зависимости от типа
     if mode == "story":
@@ -525,3 +554,34 @@ async def generate_creative() -> str:
         formatted = txt
 
     return formatted + _disclaimer()
+
+
+async def analyze_toxicity(text: str) -> dict | None:
+    """
+    Analyzes text for toxicity using a specialized Ollama prompt.
+
+    Args:
+        text: The text to analyze.
+
+    Returns:
+        A dictionary with toxicity analysis results or None if analysis fails.
+    """
+    system_prompt = (
+        "You are a toxicity detection expert. Analyze the user's message and "
+        "respond with a JSON object containing three fields: "
+        "'is_toxic' (true/false), 'category' (e.g., 'insult', 'threat', 'profanity'), "
+        "and 'score' (a float between 0.0 and 1.0). "
+        "Your response must be only the JSON object, with no other text or explanations. "
+        "Example: {\"is_toxic\": true, \"category\": \"insult\", \"score\": 0.92}"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text},
+    ]
+
+    try:
+        response_text = await _ollama_chat(messages, temperature=0.0, use_cache=True)
+        return json.loads(response_text)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.error(f"Failed to analyze toxicity: {e}")
+        return None

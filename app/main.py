@@ -7,9 +7,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db
-from app.handlers import qna, games, moderation
+from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics
 from app.handlers import antiraid
 from app.middleware.logging import MessageLoggerMiddleware
+from app.middleware.spam_filter import SpamFilterMiddleware, load_spam_patterns
+from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
 from app.jobs.scheduler import setup_scheduler
 
 # Инициализировать логирование
@@ -27,11 +29,17 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     await setup_scheduler(bot)
     logger.info("Планировщик запущен")
 
+    logger.info("Загрузка спам-паттернов...")
+    await load_spam_patterns()
+    logger.info("Спам-паттерны загружены")
+
 
 def build_dp() -> Dispatcher:
     """Построить диспетчер с обработчиками."""
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(MessageLoggerMiddleware())
+    dp.message.middleware(SpamFilterMiddleware())
+    dp.message.middleware(ToxicityAnalysisMiddleware())
 
     # Routers
     dp.include_routers(
@@ -39,6 +47,14 @@ def build_dp() -> Dispatcher:
         moderation.router,
         antiraid.router,
         qna.router,
+        achievements.router,
+        trading.router,
+        auctions.router,
+        quests.router,
+        guilds.router,
+        team_wars.router,
+        duos.router,
+        statistics.router,
     )
     return dp
 

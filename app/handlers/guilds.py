@@ -1,0 +1,173 @@
+import logging
+from aiogram import Router, F
+from aiogram.types import Message
+from sqlalchemy import select, and_, delete
+from sqlalchemy.orm import joinedload
+from datetime import datetime
+
+from app.database.session import get_session
+from app.database.models import User, Guild, GuildMember
+from app.handlers.games import ensure_user # Reusing ensure_user from games handler
+
+logger = logging.getLogger(__name__)
+
+router = Router()
+
+
+@router.message(F.text.startswith("/create_guild"))
+async def cmd_create_guild(msg: Message):
+    """
+    Handles the /create_guild command to create a new guild.
+    Usage: /create_guild <guild_name>
+    """
+    async_session = get_session()
+    user = await ensure_user(msg.from_user)
+
+    parts = (msg.text or "").split(maxsplit=1)
+    if len(parts) != 2:
+        return await msg.reply("Использование: /create_guild <название_гильдии>")
+    
+    guild_name = parts[1].strip()
+    if not guild_name:
+        return await msg.reply("Название гильдии не может быть пустым.")
+
+    async with async_session() as session:
+        # Check if user is already in a guild
+        member_res = await session.execute(select(GuildMember).filter_by(user_id=user.id))
+        if member_res.scalars().first():
+            return await msg.reply("Вы уже состоите в гильдии.")
+        
+        # Check if guild name already exists
+        guild_res = await session.execute(select(Guild).filter_by(name=guild_name))
+        if guild_res.scalars().first():
+            return await msg.reply("Гильдия с таким названием уже существует.")
+        
+        new_guild = Guild(
+            name=guild_name,
+            owner_user_id=user.id,
+            created_at=datetime.utcnow()
+        )
+        session.add(new_guild)
+        await session.flush() # To get guild_id
+
+        new_guild_member = GuildMember(
+            guild_id=new_guild.id,
+            user_id=user.id,
+            joined_at=datetime.utcnow(),
+            role="leader"
+        )
+        session.add(new_guild_member)
+        await session.commit()
+        await msg.reply(f"Гильдия '{guild_name}' успешно создана! Вы ее лидер.")
+
+
+@router.message(F.text.startswith("/join_guild"))
+async def cmd_join_guild(msg: Message):
+    """
+    Handles the /join_guild command to join an existing guild.
+    Usage: /join_guild <guild_name>
+    """
+    async_session = get_session()
+    user = await ensure_user(msg.from_user)
+
+    parts = (msg.text or "").split(maxsplit=1)
+    if len(parts) != 2:
+        return await msg.reply("Использование: /join_guild <название_гильдии>")
+    
+    guild_name = parts[1].strip()
+    if not guild_name:
+        return await msg.reply("Название гильдии не может быть пустым.")
+
+    async with async_session() as session:
+        # Check if user is already in a guild
+        member_res = await session.execute(select(GuildMember).filter_by(user_id=user.id))
+        if member_res.scalars().first():
+            return await msg.reply("Вы уже состоите в гильдии.")
+        
+        # Find the guild
+        guild_res = await session.execute(select(Guild).filter_by(name=guild_name))
+        guild = guild_res.scalars().first()
+        if not guild:
+            return await msg.reply("Гильдия с таким названием не найдена.")
+        
+        # Add user to guild
+        new_guild_member = GuildMember(
+            guild_id=guild.id,
+            user_id=user.id,
+            joined_at=datetime.utcnow(),
+            role="member"
+        )
+        session.add(new_guild_member)
+        await session.commit()
+        await msg.reply(f"Вы успешно присоединились к гильдии '{guild_name}'.")
+
+
+@router.message(commands="leave_guild")
+async def cmd_leave_guild(msg: Message):
+    """
+    Handles the /leave_guild command for a user to leave their current guild.
+    """
+    async_session = get_session()
+    user = await ensure_user(msg.from_user)
+
+    async with async_session() as session:
+        member_res = await session.execute(
+            select(GuildMember)
+            .filter_by(user_id=user.id)
+            .options(joinedload(GuildMember.guild))
+        )
+        guild_member = member_res.scalars().first()
+
+        if not guild_member:
+            return await msg.reply("Вы не состоите ни в какой гильдии.")
+        
+        guild = guild_member.guild
+        if guild.owner_user_id == user.id:
+            # If owner leaves, delete guild and all members
+            await session.delete(guild_member)
+            await session.execute(delete(GuildMember).filter_by(guild_id=guild.id))
+            await session.delete(guild)
+            await session.commit()
+            return await msg.reply(f"Вы покинули гильдию '{guild.name}'. Так как вы были лидером, гильдия расформирована.")
+        else:
+            await session.delete(guild_member)
+            await session.commit()
+            return await msg.reply(f"Вы покинули гильдию '{guild.name}'.")
+
+
+@router.message(commands="guild_info")
+async def cmd_guild_info(msg: Message):
+    """
+    Handles the /guild_info command to display information about the user's guild.
+    """
+    async_session = get_session()
+    user = await ensure_user(msg.from_user)
+
+    async with async_session() as session:
+        guild_member_res = await session.execute(
+            select(GuildMember)
+            .filter_by(user_id=user.id)
+            .options(
+                joinedload(GuildMember.guild).joinedload(Guild.owner),
+                joinedload(GuildMember.guild).joinedload(Guild.members).joinedload(GuildMember.user)
+            )
+        )
+        guild_member = guild_member_res.scalars().first()
+
+        if not guild_member:
+            return await msg.reply("Вы не состоите ни в какой гильдии.")
+        
+        guild = guild_member.guild
+        owner_name = guild.owner.username or guild.owner.first_name or str(guild.owner.tg_user_id)
+        
+        members_list = []
+        for member in guild.members:
+            member_name = member.user.username or member.user.first_name or str(member.user.tg_user_id)
+            members_list.append(f"- {member_name} ({member.role})")
+        
+        guild_info_text = (
+            f"🛡️ Гильдия: {guild.name}\n"
+            f"👑 Лидер: {owner_name}\n"
+            f"👥 Участники ({len(guild.members)}):\n" + "\n".join(members_list)
+        )
+        await msg.reply(guild_info_text)

@@ -19,23 +19,31 @@ router = Router()
 DUR_RE = re.compile(r"(\d+)([мчд])", re.IGNORECASE)
 
 
+from app.database.models import Admin
+
 async def is_admin(msg: Message) -> bool:
     """
-    Проверить, является ли пользователь администратором чата.
+    Проверить, является ли пользователь администратором чата по базе данных.
 
     Args:
         msg: Сообщение Telegram
 
     Returns:
-        True, если пользователь админ или создатель чата
+        True, если пользователь админ по базе данных
     """
-    if not msg.chat:
-        return False
-    member = await msg.bot.get_chat_member(
-        msg.chat.id, msg.from_user.id
-    )
-    status = getattr(member, "status", None)
-    return status in {"administrator", "creator"}
+    async_session = get_session()
+
+    async with async_session() as session:
+        # Ищем пользователя в таблице админов для этого чата
+        admin_res = await session.execute(
+            select(Admin).filter_by(
+                user_id=msg.from_user.id,
+                chat_id=msg.chat.id
+            )
+        )
+        admin = admin_res.scalars().first()
+
+        return admin is not None
 
 
 def parse_duration(text: str) -> timedelta | None:
@@ -334,17 +342,17 @@ async def cmd_strikes(msg: Message):
 
     if not msg.reply_to_message or not msg.reply_to_message.from_user:
         return await msg.reply("Укажи пользователя реплаем.")
-    
+
     target_user = msg.reply_to_message.from_user
-    
+
     async_session = get_session()
     async with async_session() as session:
         user_res = await session.execute(select(User).filter_by(tg_user_id=target_user.id))
         user = user_res.scalars().first()
-        
+
         if not user or user.strikes == 0:
             return await msg.reply("У пользователя нет предупреждений.")
-        
+
         warnings_res = await session.execute(
             select(Warning)
             .filter_by(user_id=user.id)
@@ -358,6 +366,39 @@ async def cmd_strikes(msg: Message):
             response += f"- {w.created_at.strftime('%Y-%m-%d')}: {w.reason} (выдал: @{moderator.user.username or w.moderator_id})\n"
 
         await msg.reply(response)
+
+
+async def is_user_blacklisted(user_id: int, chat_id: int) -> bool:
+    """
+    Проверяет, находится ли пользователь в черном списке.
+
+    Args:
+        user_id: ID пользователя
+        chat_id: ID чата (если None, проверяет глобальный бан)
+
+    Returns:
+        True, если пользователь в черном списке
+    """
+    from app.database.models import Blacklist
+
+    async_session = get_session()
+    async with async_session() as session:
+        # Сначала проверяем локальный бан (для конкретного чата)
+        if chat_id:
+            local_ban_res = await session.execute(
+                select(Blacklist).filter_by(user_id=user_id, chat_id=chat_id)
+            )
+            local_ban = local_ban_res.scalars().first()
+            if local_ban:
+                return True
+
+        # Затем проверяем глобальный бан (для всех чатов)
+        global_ban_res = await session.execute(
+            select(Blacklist).filter_by(user_id=user_id, chat_id=None)
+        )
+        global_ban = global_ban_res.scalars().first()
+
+        return global_ban is not None
 
 
 @router.message(F.text.startswith("олег режим"))

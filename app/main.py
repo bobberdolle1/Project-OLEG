@@ -10,12 +10,14 @@ from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
+from app.handlers.private_admin import router as private_admin_router
 from app.services.content_downloader import router as content_downloader_router
 from app.middleware.logging import MessageLoggerMiddleware
 from app.middleware.spam_filter import SpamFilterMiddleware, load_spam_patterns
 from app.middleware.spam_control import SpamControlMiddleware
 from app.middleware.mode_filter import ModeFilterMiddleware
 from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
+from app.middleware.blacklist_filter import BlacklistMiddleware
 from app.jobs.scheduler import setup_scheduler
 
 # Инициализировать логирование
@@ -52,6 +54,7 @@ def build_dp() -> Dispatcher:
     """Построить диспетчер с обработчиками."""
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(MessageLoggerMiddleware())
+    dp.message.middleware(BlacklistMiddleware())  # Middleware для проверки черного списка
     dp.message.middleware(ModeFilterMiddleware())  # Middleware для режимов модерации
     dp.message.middleware(SpamFilterMiddleware())
     dp.message.middleware(SpamControlMiddleware())  # Middleware для защиты от "дрючки"
@@ -74,6 +77,7 @@ def build_dp() -> Dispatcher:
         quotes.router,
         reactions_router,  # Роутер для обработки реакций
         content_downloader_router,  # Роутер для скачивания контента
+        private_admin_router,  # Роутер для админ-панели в ЛС
     )
     return dp
 

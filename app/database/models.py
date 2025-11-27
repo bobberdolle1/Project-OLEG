@@ -25,6 +25,9 @@ class User(Base):
     question_history: Mapped[list["UserQuestionHistory"]] = relationship(back_populates="user")
     warnings: Mapped[list["Warning"]] = relationship(back_populates="user")
     quotes: Mapped[list["Quote"]] = relationship(back_populates="user")
+    admin_roles: Mapped[list["Admin"]] = relationship(back_populates="user")
+    blacklist_entries: Mapped[list["Blacklist"]] = relationship(back_populates="user")
+    private_chat: Mapped["PrivateChat"] = relationship(back_populates="user", uselist=False)
 
 
 class MessageLog(Base):
@@ -341,3 +344,58 @@ class ModerationConfig(Base):
     swear_filter: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_warn_threshold: Mapped[int] = mapped_column(Integer, default=3)  # Порог для авто-варнов
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ChatConfig(Base):
+    __tablename__ = "chat_configs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    chat_name: Mapped[str] = mapped_column(String(255))
+    chat_type: Mapped[str] = mapped_column(String(20), default="main")  # 'main' или 'auxiliary'
+    moderation_mode: Mapped[str] = mapped_column(String(20), default="normal")  # 'light', 'normal', 'dictatorship'
+    dailysummary_topic_id: Mapped[int] = mapped_column(Integer, default=1)
+    memes_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Связь с пользователем (владельцем чата)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class Admin(Base):
+    __tablename__ = "admins"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    role: Mapped[str] = mapped_column(String(20), default="moderator")  # 'owner', 'moderator'
+    added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Кто добавил
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Связь с пользователем
+    user: Mapped["User"] = relationship(back_populates="admin_roles")
+
+
+class Blacklist(Base):
+    __tablename__ = "blacklist"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Если NULL, то глобальный бан
+    reason: Mapped[str] = mapped_column(Text)
+    added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="blacklist_entries")
+
+
+class PrivateChat(Base):
+    __tablename__ = "private_chats"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    message_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON для хранения контекста
+    last_interaction: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    toxicity_level: Mapped[float] = mapped_column(Float, default=0.0)  # Уровень токсичности пользователя
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)  # Заблокирован ли пользователь
+
+    user: Mapped["User"] = relationship(back_populates="private_chat")

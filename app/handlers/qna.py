@@ -79,6 +79,45 @@ async def get_current_chat_toxicity(chat_id: int) -> float:
         return 0.0  # Возвращаем 0 при ошибке
 
 
+async def adjust_toxicity_for_private_chat(user_id: int, text: str) -> float:
+    """
+    Адаптирует уровень токсичности для ответа в личных сообщениях
+    в зависимости от поведения пользователя.
+
+    Args:
+        user_id: ID пользователя
+        text: Текст сообщения от пользователя
+
+    Returns:
+        Уровень токсичности для генерации ответа (0-100)
+    """
+    # В реальной реализации можно анализировать:
+    # 1. Историю сообщений с пользователем
+    # 2. Слова и тон в сообщении
+    # 3. Частоту сообщений (возможный спам)
+    # 4. Использование ненормативной лексики
+
+    # Простая эвристика для демонстрации
+    toxicity = 30  # базовый уровень
+
+    # Повышаем токсичность на основании некоторых признаков
+    if any(word in text.lower() for word in ["идиот", "дурак", "тупой", "нах", "еба", "сука", "бля"]):
+        toxicity += 20
+
+    if text.isupper() and len(text) > 10:
+        toxicity += 15  # Капс часто указывает на агрессию
+
+    if "?" in text and "???" in text:
+        # Тройной вопрос может быть саркастическим
+        toxicity += 10
+
+    # Понижаем токсичность для вежливого общения
+    if any(phrase in text.lower() for phrase in ["пожалуйста", "спасибо", "привет", "здраствуй"]):
+        toxicity = max(0, toxicity - 10)
+
+    return min(100, toxicity)  # Ограничиваем максимальный уровень 100
+
+
 async def potentially_roast_toxic_user(msg: Message):
     """
     Потенциально "наезжает" на токсичного пользователя, если уровень токсичности высок.
@@ -131,16 +170,34 @@ async def general_qna(msg: Message):
         # Получаем уровень токсичности в чате
         chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
 
-        reply = await generate_reply(
-            user_text=text,
-            username=msg.from_user.username,
-            toxicity_level=chat_toxicity  # Передаем уровень токсичности
-        )
+        # Если в личных сообщениях, учитываем поведение пользователя
+        if msg.chat.type == "private":
+            # Здесь в реальной реализации нужно анализировать поведение пользователя
+            # и адаптировать стиль ответа соответственно
+            user_adapted_toxicity = await adjust_toxicity_for_private_chat(msg.from_user.id, text)
+            reply = await generate_reply(
+                user_text=text,
+                username=msg.from_user.username,
+                toxicity_level=user_adapted_toxicity  # Передаем адаптированный уровень токсичности
+            )
+        else:
+            reply = await generate_reply(
+                user_text=text,
+                username=msg.from_user.username,
+                toxicity_level=chat_toxicity  # Передаем уровень токсичности
+            )
+
         await msg.reply(reply, disable_web_page_preview=True)
 
         # В случае высокой токсичности, бот может "наехать" на самых токсичных пользователей
-        if chat_toxicity > 70:
+        if chat_toxicity > 70 and msg.chat.type != "private":
             await potentially_roast_toxic_user(msg)
+        elif msg.chat.type == "private" and "спам" in text.lower():
+            # В личных сообщениях реагируем на спам
+            try:
+                await msg.reply("Хватит спамить, чувак. Я тебе не робот для рекламы.")
+            except:
+                pass
 
         # Save to history
         async with async_session() as session:
@@ -192,8 +249,23 @@ async def cmd_myhistory(msg: Message):
                 f"В: {entry.question}\n"
                 f"О: {entry.answer[:100]}..." # Truncate long answers
             )
-        
+
         await msg.reply("\n\n".join(history_list), disable_web_page_preview=True)
+
+
+@router.message(commands="reset")
+async def cmd_reset_context(msg: Message):
+    """
+    Сброс контекста в личных сообщениях.
+    """
+    if msg.chat.type != 'private':
+        await msg.reply("Эту команду можно использовать только в личных сообщениях.")
+        return
+
+    # В реальной реализации нужно очистить историю сообщений для этого пользователя
+    # В текущем виде система не хранит контекст в нужном формате, поэтому
+    # просто сообщим пользователю о сбросе
+    await msg.reply("Контекст диалога сброшен. Олег теперь не помнит, что ты тролль.")
 
 
 @router.message(F.voice)

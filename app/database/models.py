@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint, func
+from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint, func, Float, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .session import Base
@@ -292,14 +292,7 @@ class ToxicityConfig(Base):
     mute_duration: Mapped[int] = mapped_column(Integer, default=5) # in minutes
 
 
-class ToxicityConfig(Base):
-    __tablename__ = "toxicity_configs"
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    threshold: Mapped[float] = mapped_column(Float, default=0.8) # Toxicity score threshold
-    action: Mapped[str] = mapped_column(String(64), default="warn") # "warn", "delete", "mute"
-    mute_duration: Mapped[int] = mapped_column(Integer, default=5) # in minutes
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 
 class ToxicityLog(Base):
@@ -320,7 +313,7 @@ class Quote(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     text: Mapped[str] = mapped_column(Text)
     username: Mapped[str] = mapped_column(String(64))
-    image_data: Mapped[bytes] = mapped_column(Text)  # Изображение цитаты в байтах
+    image_data: Mapped[bytes] = mapped_column(LargeBinary)  # Изображение цитаты в байтах
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Комментарий Олега
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
     is_golden_fund: Mapped[bool] = mapped_column(Boolean, default=False)  # В "золотом фонде" или нет
@@ -346,22 +339,21 @@ class ModerationConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class ChatConfig(Base):
-    __tablename__ = "chat_configs"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
-    chat_name: Mapped[str] = mapped_column(String(255))
-    chat_type: Mapped[str] = mapped_column(String(20), default="main")  # 'main' или 'auxiliary'
-    moderation_mode: Mapped[str] = mapped_column(String(20), default="normal")  # 'light', 'normal', 'dictatorship'
-    dailysummary_topic_id: Mapped[int] = mapped_column(Integer, default=1)
-    memes_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    system_prompt_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Переопределение системного промпта для чата
-    welcome_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Сообщение приветствия
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+class Chat(Base):
+    __tablename__ = "chats"
 
-    # Связь с пользователем (владельцем чата)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True) # Telegram Chat ID
+    title: Mapped[str] = mapped_column(String(255))
+    is_forum: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    summary_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    creative_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    moderation_mode: Mapped[str] = mapped_column(String(20), default="normal")
+
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class Admin(Base):

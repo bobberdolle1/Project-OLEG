@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select, and_, delete
 from sqlalchemy.orm import joinedload
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(F.text.startswith("/create_guild"))
+@router.message(Command("create_guild"))
 async def cmd_create_guild(msg: Message):
     """
     Handles the /create_guild command to create a new guild.
@@ -61,7 +62,7 @@ async def cmd_create_guild(msg: Message):
         await msg.reply(f"Гильдия '{guild_name}' успешно создана! Вы ее лидер.")
 
 
-@router.message(F.text.startswith("/join_guild"))
+@router.message(Command("join_guild"))
 async def cmd_join_guild(msg: Message):
     """
     Handles the /join_guild command to join an existing guild.
@@ -102,7 +103,7 @@ async def cmd_join_guild(msg: Message):
         await msg.reply(f"Вы успешно присоединились к гильдии '{guild_name}'.")
 
 
-@router.message(commands="leave_guild")
+@router.message(Command("leave_guild"))
 async def cmd_leave_guild(msg: Message):
     """
     Handles the /leave_guild command for a user to leave their current guild.
@@ -135,7 +136,7 @@ async def cmd_leave_guild(msg: Message):
             return await msg.reply(f"Вы покинули гильдию '{guild.name}'.")
 
 
-@router.message(commands="guild_info")
+@router.message(Command("guild_info"))
 async def cmd_guild_info(msg: Message):
     """
     Handles the /guild_info command to display information about the user's guild.

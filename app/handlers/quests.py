@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select, and_
 from sqlalchemy.orm import joinedload
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(commands="quests")
+@router.message(Command("quests"))
 async def cmd_quests(msg: Message):
     """
     Handles the /quests command, displaying a user's assigned daily quests.

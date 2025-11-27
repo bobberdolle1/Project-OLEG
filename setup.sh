@@ -36,7 +36,7 @@ if [ ! -f .env ]; then
         echo ""
         echo "⚠️  ВАЖНО: Отредактируйте .env и установите:"
         echo "   - TELEGRAM_BOT_TOKEN (токен от @BotFather)"
-        echo "   - PRIMARY_CHAT_ID (ID вашего чата)"
+        echo "   - OWNER_ID (ID вашего Telegram аккаунта для полного доступа)"
         echo ""
         echo "   Затем запустите скрипт снова!"
         exit 1

@@ -3,6 +3,7 @@
 import logging
 import random
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from datetime import datetime
 
@@ -20,7 +21,7 @@ router = Router()
 VOICE_VIDEO_COUNTER = {"count": 0, "tolerance": 3}
 
 
-@router.message(F.text.startswith("/start"))
+@router.message(Command("start"))
 async def cmd_start(msg: Message):
     """Команда /start — приветствие."""
     await msg.reply("Я Олег. Чё надо? Пиши по делу.")
@@ -175,9 +176,9 @@ async def general_qna(msg: Message):
         if msg.chat.type in ['group', 'supergroup']:  # Только для групповых чатов
             async_session_local = get_session()
             async with async_session_local() as session:
-                from app.database.models import ChatConfig
+                from app.database.models import Chat
                 chat_config_res = await session.execute(
-                    select(ChatConfig).filter_by(chat_id=msg.chat.id)
+                    select(Chat).filter_by(id=msg.chat.id)
                 )
                 chat_config = chat_config_res.scalars().first()
 
@@ -240,7 +241,7 @@ async def general_qna(msg: Message):
         )
 
 
-@router.message(commands="myhistory")
+@router.message(Command("myhistory"))
 async def cmd_myhistory(msg: Message):
     """
     Handles the /myhistory command, displaying a user's question history.
@@ -271,7 +272,7 @@ async def cmd_myhistory(msg: Message):
         await msg.reply("\n\n".join(history_list), disable_web_page_preview=True)
 
 
-@router.message(commands="reset")
+@router.message(Command("reset"))
 async def cmd_reset_context(msg: Message):
     """
     Сброс контекста в личных сообщениях.

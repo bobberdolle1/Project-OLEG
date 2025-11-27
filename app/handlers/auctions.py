@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(F.text.startswith("/create_auction"))
+@router.message(Command("create_auction"))
 async def cmd_create_auction(msg: Message):
     """
     Handles the /create_auction command to create an auction.
@@ -74,7 +75,7 @@ async def cmd_create_auction(msg: Message):
         )
 
 
-@router.message(commands="list_auctions")
+@router.message(Command("list_auctions"))
 async def cmd_list_auctions(msg: Message):
     """
     Handles the /list_auctions command to list all active auctions.
@@ -109,7 +110,7 @@ async def cmd_list_auctions(msg: Message):
         await msg.reply("\n".join(auction_list))
 
 
-@router.message(F.text.startswith("/bid"))
+@router.message(Command("bid"))
 async def cmd_bid(msg: Message):
     """
     Handles the /bid command to place a bid on an auction.

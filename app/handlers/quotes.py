@@ -449,7 +449,7 @@ from aiogram.types import MessageReactionUpdated
 # Создаем отдельный роутер для реакций
 reactions_router = Router()
 
-@reactions_router.message_reaction_updated()
+@reactions_router.message_reaction()
 async def handle_message_reaction(update: MessageReactionUpdated):
     """
     Обрабатывает реакции на сообщения, включая цитаты.

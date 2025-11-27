@@ -11,16 +11,8 @@ class Settings:
 
     # Telegram
     bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    primary_chat_id: int | None = (
-        int(os.getenv("PRIMARY_CHAT_ID"))
-        if os.getenv("PRIMARY_CHAT_ID")
-        else None
-    )
-    summary_topic_id: int = int(
-        os.getenv("SUMMARY_TOPIC_ID", "1")
-    )
-    creative_topic_id: int = int(
-        os.getenv("CREATIVE_TOPIC_ID", "1121")
+    owner_id: int | None = (
+        int(os.getenv("OWNER_ID")) if os.getenv("OWNER_ID") else None
     )
 
     # Ollama

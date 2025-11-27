@@ -2,13 +2,13 @@
 
 import logging
 from aiogram import Router, F
-from aiogram.types import Message, ChatMemberUpdated
+from aiogram.types import Message, ChatMemberUpdated, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from sqlalchemy import select
 import re
 
 from app.database.session import get_session
-from app.database.models import ChatConfig, User
+from app.database.models import Chat, User
 from app.services.ollama_client import _ollama_chat
 
 logger = logging.getLogger(__name__)
@@ -16,27 +16,26 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Обновляем модель ChatConfig, чтобы она использовалась в новых чатах
-async def create_chat_config(chat_id: int, chat_title: str, chat_type: str):
+async def create_chat(chat_id: int, chat_title: str, chat_type: str, owner_user_id: int, is_forum: bool):
     """Создает конфигурацию для нового чата."""
     async_session = get_session()
     async with async_session() as session:
         # Проверяем, существует ли уже конфигурация для этого чата
         config_res = await session.execute(
-            select(ChatConfig).filter_by(chat_id=chat_id)
+            select(Chat).filter_by(id=chat_id)
         )
         config = config_res.scalars().first()
         
         if config:
             # Если уже существует, обновляем название
-            config.chat_name = chat_title
-            config.chat_type = chat_type
+            config.title = chat_title
         else:
             # Создаем новую конфигурацию
-            config = ChatConfig(
-                chat_id=chat_id,
-                chat_name=chat_title,
-                chat_type=chat_type,
-                moderation_mode="normal"  # Режим по умолчанию
+            config = Chat(
+                id=chat_id,
+                title=chat_title,
+                is_forum=is_forum,
+                owner_user_id=owner_user_id,
             )
             session.add(config)
         
@@ -44,122 +43,27 @@ async def create_chat_config(chat_id: int, chat_title: str, chat_type: str):
         return config
 
 
-async def scan_chat_context(bot, chat_id: int) -> str:
-    """
-    Сканирует контекст чата (описание, закрепленные сообщения) и генерирует системный промпт.
-    
-    Args:
-        bot: Экземпляр бота
-        chat_id: ID чата
-        
-    Returns:
-        Сгенерированный системный промпт для этого чата
-    """
-    try:
-        # Получаем информацию о чате
-        chat = await bot.get_chat(chat_id)
-        
-        context_info = []
-        
-        # Добавляем описание чата, если оно есть
-        if chat.description:
-            context_info.append(f"Описание чата: {chat.description}")
-        
-        # Пытаемся получить закрепленное сообщение
-        try:
-            pinned_message = await bot.get_chat(chat_id).pinned_message
-            if pinned_message:
-                message_text = pinned_message.text or (pinned_message.caption if hasattr(pinned_message, 'caption') else '')
-                if message_text:
-                    context_info.append(f"Закрепленное сообщение: {message_text}")
-        except Exception:
-            # Если не удалось получить закрепленное сообщение, продолжаем без него
-            pass
-        
-        # Если есть контекст, генерируем промпт
-        if context_info:
-            context_text = "\n".join(context_info)
-            
-            # Генерируем системный промпт на основе контекста
-            prompt = f"""
-            На основе следующей информации о чате, сгенерируй краткий системный промпт для ИИ-бота Олега.
-            Промпт должен отражать тематику чата и особенности общения (формальный/неформальный стиль, 
-            запреты, одобрения и т.д.).
-            
-            Контекст чата:
-            {context_text}
-            
-            Сгенерируй только промпт, без дополнительных пояснений:
-            """
-            
-            system_prompt = await _ollama_chat([
-                {"role": "system", "content": "Ты помощник, который генерирует системные промпты для ИИ-бота."},
-                {"role": "user", "content": prompt}
-            ], temperature=0.3)
-            
-            # Возвращаем сгенерированный промпт или стандартный, если не удалось
-            if system_prompt and len(system_prompt.strip()) > 10:
-                return system_prompt.strip()
-        
-        # Если не удалось получить контекст или сгенерировать промпт, возвращаем стандартный
-        return (
-            "Ты — Олег, грубоватый, прямолинейный, матерящийся, "
-            "но полезный бот. Говори коротко, по делу, с иронией и сленгом. "
-            "Можешь ругнуться, но без оскорблений по запрещённым признакам. "
-            "Контекст — текущий чат."
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при сканировании контекста чата {chat_id}: {e}")
-        # Возвращаем стандартный промпт, если возникла ошибка
-        return (
-            "Ты — Олег, грубоватый, прямолинейный, матерящийся, "
-            "но полезный бот. Говори коротко, по делу, с иронией и сленгом. "
-            "Можешь ругнуться, но без оскорблений по запрещённым признакам. "
-            "Контекст — текущий чат."
-        )
-
 
 async def send_welcome_message(bot, chat_id: int, chat_title: str):
     """
-    Отправляет приветственное сообщение в чат на основе контекста.
+    Отправляет приветственное сообщение в чат.
     
     Args:
         bot: Экземпляр бота
         chat_id: ID чата
         chat_title: Название чата
     """
+    welcome_messages = [
+        f"О, новый чатик '{chat_title}'! Я Олег, ваш персональный надзиратель. Следите за базаром, не троллите почем зря, и будете жить.",
+        f"Так, {chat_title}, значит. Я Олег, и я здесь, чтобы вносить порядок. Или хаос. По настроению.",
+        f"Привет, {chat_title}. Я Олег. Посмотрим, как вы тут себя ведете.",
+        f"Зовите меня Олег. Я ваш новый лучший друг и худший кошмар. Зависит от вас.",
+        f"Наконец-то я в {chat_title}. Олег на месте. Начинаем веселье.",
+    ]
     try:
-        # Генерируем приветствие на основе контекста
-        welcome_prompt = f"""
-        Сгенерируй дружелюбное, но в стиле Олега, приветственное сообщение для нового чата "{chat_title}".
-        Сообщение должно быть кратким, отражать суть чата (если она понятна) и 
-        сообщать, что ты Олег - модерационный бот.
-        Не используй формальный стиль, будь дерзковатым, но вежливым.
-        Примеры: "О, чат про [тема]. Я Олег, буду следить за порядком. [правила кратко]"
-        """
-        
-        welcome_message = await _ollama_chat([
-            {"role": "system", "content": "Ты Олег, грубоватый, но полезный бот. Генерируй приветственное сообщение."},
-            {"role": "user", "content": welcome_prompt}
-        ], temperature=0.7)
-        
-        # Отправляем приветствие в чат
-        await bot.send_message(chat_id=chat_id, text=welcome_message)
-        
+        await bot.send_message(chat_id=chat_id, text=random.choice(welcome_messages))
     except Exception as e:
         logger.error(f"Ошибка при отправке приветствия в чат {chat_id}: {e}")
-        # Если не удалось сгенерировать, отправляем стандартное сообщение
-        try:
-            await bot.send_message(
-                chat_id=chat_id, 
-                text=(
-                    f"О, новый чатик '{chat_title}'! Я Олег, ваш персональный надзиратель. "
-                    f"Следите за базаром, не троллите почем зря, и будете жить."
-                )
-            )
-        except Exception as e2:
-            logger.error(f"Ошибка при отправке стандартного приветствия: {e2}")
-
 
 @router.my_chat_member(ChatMemberUpdatedFilter(JOIN_TRANSITION))
 async def bot_added_to_chat(event: ChatMemberUpdated):
@@ -168,20 +72,19 @@ async def bot_added_to_chat(event: ChatMemberUpdated):
     """
     chat_id = event.chat.id
     chat_title = event.chat.title or "Без названия"
-    chat_type = event.chat.type  # 'group', 'supergroup', 'channel', 'private'
-    
+    chat_type = event.chat.type
+    is_forum = event.chat.is_forum or False
+
     logger.info(f"Бот добавлен в чат {chat_title} (ID: {chat_id}, тип: {chat_type})")
-    
+
+    # Ищем создателя чата
+    chat_admins = await event.bot.get_chat_administrators(chat_id)
+    creator = next((admin for admin in chat_admins if admin.status == 'creator'), None)
+    owner_id = creator.user.id if creator else None
+
     # Создаем конфигурацию для чата
-    await create_chat_config(chat_id, chat_title, chat_type)
-    
-    # Сканируем контекст чата и настраиваем промпт
-    context_prompt = await scan_chat_context(event.bot, chat_id)
-    
-    # Сохраняем промпт в конфигурации (в реальном приложении нужно обновить модель, чтобы хранить промпт)
-    # Пока что просто логируем
-    logger.info(f"Сгенерирован промпт для чата {chat_title}: {context_prompt[:100]}...")
-    
+    await create_chat(chat_id, chat_title, chat_type, owner_id, is_forum)
+
     # Отправляем приветственное сообщение
     await send_welcome_message(event.bot, chat_id, chat_title)
 
@@ -230,24 +133,15 @@ async def new_chat_member_welcome(msg: Message):
             # Получаем контекст чата для персонализации приветствия
             async_session = get_session()
             async with async_session() as session:
-                from app.database.models import ChatConfig
+                from app.database.models import Chat
                 chat_config_res = await session.execute(
-                    select(ChatConfig).filter_by(chat_id=msg.chat.id)
+                    select(Chat).filter_by(id=msg.chat.id)
                 )
                 chat_config = chat_config_res.scalars().first()
 
-                # Генерируем персонализированное приветствие
-                if chat_config and chat_config.welcome_message:
-                    # Если у чата есть специальное приветствие
-                    base_welcome = chat_config.welcome_message
-                else:
-                    # Генерируем универсальное приветствие с учетом типа чата
-                    context_info = f"чат '{msg.chat.title}'" if msg.chat.title else "этот чат"
-                    if chat_config:
-                        # Используем информацию из контекста чата
-                        base_welcome = f"О, новое лицо! Привет, {new_member.full_name}, зашел в {context_info}."
-                    else:
-                        base_welcome = f"Привет, {new_member.full_name}! Добро пожаловать в {context_info}."
+                # Генерируем универсальное приветствие с учетом типа чата
+                context_info = f"чат '{msg.chat.title}'" if msg.chat.title else "этот чат"
+                base_welcome = f"О, новое лицо! Привет, {new_member.full_name}, зашел в {context_info}."
 
             # Добавляем стиль Олега к приветствию
             oleg_style_welcome = f"{base_welcome} Не тролли почем зря, а то получишь от Олега."

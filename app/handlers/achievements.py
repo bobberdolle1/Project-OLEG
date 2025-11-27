@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(commands="my_achievements")
+@router.message(Command("my_achievements"))
 async def cmd_my_achievements(msg: Message):
     """
     Handles the /my_achievements command, displaying a user's unlocked achievements.
@@ -39,7 +40,7 @@ async def cmd_my_achievements(msg: Message):
         await msg.reply("Ваши достижения:\n" + "\n".join(achievements_list))
 
 
-@router.message(commands="achievements_leaderboard")
+@router.message(Command("achievements_leaderboard"))
 async def cmd_achievements_leaderboard(msg: Message):
     """
     Displays a leaderboard of users with the most achievements.

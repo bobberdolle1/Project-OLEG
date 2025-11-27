@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select, and_, or_, or_
 from sqlalchemy.orm import joinedload
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(F.text.startswith("/war_declare"))
+@router.message(Command("war_declare"))
 async def cmd_war_declare(msg: Message):
     """
     Handles the /war_declare command to declare war on another guild.
@@ -103,7 +104,7 @@ async def cmd_war_declare(msg: Message):
             )
 
 
-@router.message(F.text.startswith("/war_accept"))
+@router.message(Command("war_accept"))
 async def cmd_war_accept(msg: Message):
     """
     Handles the /war_accept command to accept a war declaration.
@@ -172,7 +173,7 @@ async def cmd_war_accept(msg: Message):
             )
 
 
-@router.message(commands="war_info")
+@router.message(Command("war_info"))
 async def cmd_war_info(msg: Message):
     """
     Handles the /war_info command to display information about ongoing wars.
@@ -187,7 +188,7 @@ async def cmd_war_info(msg: Message):
             .filter_by(user_id=user.id)
             .options(joinedload(GuildMember.guild))
         )
-        guild_member = guild_member_res.scalars().first()
+        guild_member = member_res.scalars().first()
 
         if not guild_member:
             return await msg.reply("Вы не состоите ни в какой гильдии, чтобы просматривать информацию о войнах.")

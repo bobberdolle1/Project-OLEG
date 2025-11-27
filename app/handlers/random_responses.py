@@ -10,7 +10,7 @@ from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import ChatConfig, User
+from app.database.models import Chat, User
 
 logger = logging.getLogger(__name__)
 

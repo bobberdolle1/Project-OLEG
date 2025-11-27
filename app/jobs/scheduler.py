@@ -17,17 +17,38 @@ _scheduler: AsyncIOScheduler | None = None
 
 
 async def job_daily_summary(bot: Bot):
-    if not settings.primary_chat_id:
-        return
-    text = await summarize_chat()
-    await bot.send_message(chat_id=settings.primary_chat_id, message_thread_id=settings.summary_topic_id, text=text, disable_web_page_preview=True)
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(select(Chat))
+        chats = result.scalars().all()
 
+        for chat in chats:
+            if chat.summary_topic_id:
+                text = await summarize_chat(chat.id)
+                await bot.send_message(
+                    chat_id=chat.id,
+                    message_thread_id=chat.summary_topic_id,
+                    text=text,
+                    disable_web_page_preview=True
+                )
+                await asyncio.sleep(1)
 
 async def job_creative(bot: Bot):
-    if not settings.primary_chat_id:
-        return
-    text = await generate_creative()
-    await bot.send_message(chat_id=settings.primary_chat_id, message_thread_id=settings.creative_topic_id, text=text, disable_web_page_preview=True)
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(select(Chat))
+        chats = result.scalars().all()
+
+        for chat in chats:
+            if chat.creative_topic_id:
+                text = await generate_creative(chat.id)
+                await bot.send_message(
+                    chat_id=chat.id,
+                    message_thread_id=chat.creative_topic_id,
+                    text=text,
+                    disable_web_page_preview=True
+                )
+                await asyncio.sleep(1)
 
 
 async def job_close_auctions(bot: Bot):
@@ -312,32 +333,33 @@ async def job_sync_chat_members(bot: Bot):
     """
     Periodically checks chat members and updates their status in the database.
     """
-    if not settings.primary_chat_id:
-        return
-
     async_session = get_session()
     async with async_session() as session:
-        active_users_res = await session.execute(
-            select(User).filter(User.status == "active")
-        )
-        active_users = active_users_res.scalars().all()
+        result = await session.execute(select(Chat))
+        chats = result.scalars().all()
 
-        for user in active_users:
-            try:
-                chat_member = await bot.get_chat_member(
-                    chat_id=settings.primary_chat_id,
-                    user_id=user.tg_user_id
-                )
-                if chat_member.status in ["left", "kicked"]:
-                    user.status = "left"
-                    logger.info(f"User {user.tg_user_id} has left the chat. Updating status.")
-            except Exception:
-                user.status = "left" # User not found in chat
-                logger.info(f"User {user.tg_user_id} not found in chat. Updating status.")
+        for chat in chats:
+            active_users_res = await session.execute(
+                select(User).filter(User.status == "active")
+            )
+            active_users = active_users_res.scalars().all()
+
+            for user in active_users:
+                try:
+                    chat_member = await bot.get_chat_member(
+                        chat_id=chat.id,
+                        user_id=user.tg_user_id
+                    )
+                    if chat_member.status in ["left", "kicked"]:
+                        user.status = "left"
+                        logger.info(f"User {user.tg_user_id} has left the chat {chat.id}. Updating status.")
+                except Exception:
+                    user.status = "left" # User not found in chat
+                    logger.info(f"User {user.tg_user_id} not found in chat {chat.id}. Updating status.")
+                
+                await asyncio.sleep(0.1) # Rate limit
             
-            await asyncio.sleep(0.1) # Rate limit
-        
-        await session.commit()
+            await session.commit()
 
 
 

@@ -10,7 +10,6 @@ from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses
 from app.handlers.private_admin import router as private_admin_router
 from app.handlers.chat_join import router as chat_join_router
-from app.handlers.admin_commands import router as admin_commands_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -92,7 +91,6 @@ def build_dp() -> Dispatcher:
         quotes.router,
         vision.router,  # Роутер для обработки изображений
         random_responses.router,  # Роутер для рандомных ответов
-        admin_commands_router,  # Роутер для команд администратора
         reactions_router,  # Роутер для обработки реакций
         content_downloader_router,  # Роутер для скачивания контента
         private_admin_router,  # Роутер для админ-панели в ЛС

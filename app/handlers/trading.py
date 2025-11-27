@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(F.text.startswith("/sell"))
+@router.message(Command("sell"))
 async def cmd_sell(msg: Message):
     """
     Handles the /sell command to create a trade offer.
@@ -67,7 +68,7 @@ async def cmd_sell(msg: Message):
         )
 
 
-@router.message(commands="trades")
+@router.message(Command("trades"))
 async def cmd_trades(msg: Message):
     """
     Handles the /trades command to list all active trade offers.
@@ -94,7 +95,7 @@ async def cmd_trades(msg: Message):
         await msg.reply("\n".join(trade_list))
 
 
-@router.message(F.text.startswith("/buy"))
+@router.message(Command("buy"))
 async def cmd_buy(msg: Message):
     """
     Handles the /buy command to purchase a trade offer.
@@ -163,7 +164,7 @@ async def cmd_buy(msg: Message):
         await msg.reply(f"Вы успешно купили {trade_offer.item_quantity} {trade_offer.item_type} за {trade_offer.price} монет!")
 
 
-@router.message(F.text.startswith("/cancel"))
+@router.message(Command("cancel"))
 async def cmd_cancel(msg: Message):
     """
     Handles the /cancel command to cancel an active trade offer.

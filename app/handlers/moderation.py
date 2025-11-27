@@ -3,10 +3,9 @@
 import logging
 import re
 from datetime import datetime, timedelta
-from aiogram import Router
-from aiogram.types import Message
-from aiogram import F
-from aiogram.types import ChatPermissions
+from aiogram import Router, F
+from aiogram.filters import Command
+from aiogram.types import Message, ChatPermissions
 from sqlalchemy import select, delete
 
 from app.database.session import get_session
@@ -241,7 +240,7 @@ async def cmd_kick(msg: Message):
         )
     except Exception as e:
         logger.error(f"Kick failed: {e}")
-@router.message(F.text.startswith("/warn"))
+@router.message(Command("warn"))
 async def cmd_warn(msg: Message):
     """
     Issues a warning to a user.
@@ -291,7 +290,7 @@ async def cmd_warn(msg: Message):
             await msg.answer(f"Пользователь @{target_user.username or target_user.id} забанен на 24 часа за 3 предупреждения.")
 
 
-@router.message(F.text.startswith("/unwarn"))
+@router.message(Command("unwarn"))
 async def cmd_unwarn(msg: Message):
     """
     Removes the last warning from a user.
@@ -330,7 +329,7 @@ async def cmd_unwarn(msg: Message):
         await msg.reply(f"Снято одно предупреждение с пользователя @{target_user.username or target_user.id}. Осталось: {user.strikes}.")
 
 
-@router.message(commands="strikes")
+@router.message(Command("strikes"))
 async def cmd_strikes(msg: Message):
     """
     Displays the number of strikes for a user.

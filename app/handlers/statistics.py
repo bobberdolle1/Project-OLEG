@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select
 from datetime import datetime, timedelta
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(commands="stats")
+@router.message(Command("stats"))
 async def cmd_stats(msg: Message):
     """
     Displays overall daily statistics.

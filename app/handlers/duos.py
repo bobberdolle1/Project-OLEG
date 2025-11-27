@@ -1,5 +1,6 @@
 import logging
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(F.text.startswith("/duo_invite"))
+@router.message(Command("duo_invite"))
 async def cmd_duo_invite(msg: Message):
     """
     Invites another player to form a duo.
@@ -67,7 +68,7 @@ async def cmd_duo_invite(msg: Message):
         )
 
 
-@router.message(F.text.startswith("/duo_accept"))
+@router.message(Command("duo_accept"))
 async def cmd_duo_accept(msg: Message):
     """
     Accepts a duo invitation.
@@ -128,7 +129,7 @@ async def cmd_duo_accept(msg: Message):
         )
 
 
-@router.message(commands="duo_leave")
+@router.message(Command("duo_leave"))
 async def cmd_duo_leave(msg: Message):
     """
     Leaves the current duo.
@@ -155,7 +156,7 @@ async def cmd_duo_leave(msg: Message):
         await msg.reply("Вы покинули дуэт. Дуэт расформирован.")
 
 
-@router.message(F.text.startswith("/pvp_duo"))
+@router.message(Command("pvp_duo"))
 async def cmd_pvp_duo(msg: Message):
     """
     Initiates a 2v2 PvP duel.
@@ -261,7 +262,7 @@ async def cmd_pvp_duo(msg: Message):
     await msg.reply(f"Дуэль дуэтов: {winning_names} победили {losing_names}!")
 
 
-@router.message(commands="top_duos")
+@router.message(Command("top_duos"))
 async def cmd_top_duos(msg: Message):
     """
     Displays a leaderboard of top duos by ELO rating.
@@ -290,7 +291,7 @@ async def cmd_top_duos(msg: Message):
         await msg.reply("\n".join(leaderboard_list))
 
 
-@router.message(commands="duo_profile")
+@router.message(Command("duo_profile"))
 async def cmd_duo_profile(msg: Message):
     """
     Displays the user's duo information and stats.

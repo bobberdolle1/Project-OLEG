@@ -11,6 +11,7 @@ import json
 from app.config import settings
 from app.database.session import get_session
 from app.database.models import MessageLog
+from app.services.vector_db import vector_db
 
 logger = logging.getLogger(__name__)
 
@@ -210,14 +211,15 @@ def _contains_prompt_injection(text: str) -> bool:
     return False
 
 
-async def generate_reply(user_text: str, username: str | None, toxicity_level: float = 0.0) -> str:
+async def generate_text_reply(user_text: str, username: str | None, toxicity_level: float = 0.0, override_system_prompt: str | None = None) -> str:
     """
-    Сгенерировать ответ от Олега на сообщение пользователя.
+    Сгенерировать текстовый ответ от Олега на сообщение пользователя.
 
     Args:
         user_text: Текст сообщения пользователя
         username: Никнейм пользователя
         toxicity_level: Уровень токсичности в чате (0-100)
+        override_system_prompt: Переопределенный системный промпт (если есть)
 
     Returns:
         Ответ от Олега или сообщение об ошибке
@@ -229,21 +231,233 @@ async def generate_reply(user_text: str, username: str | None, toxicity_level: f
 
     display_name = username or "пользователь"
 
-    # Адаптируем системный промпт в зависимости от уровня токсичности
-    adapted_system_prompt = adapt_system_prompt_by_toxicity(SYSTEM_PROMPT, toxicity_level)
+    # Используем переопределенный промпт, если он есть, иначе адаптируем стандартный
+    if override_system_prompt:
+        adapted_system_prompt = override_system_prompt
+    else:
+        # Адаптируем системный промпт в зависимости от уровня токсичности
+        adapted_system_prompt = adapt_system_prompt_by_toxicity(SYSTEM_PROMPT, toxicity_level)
 
     messages = [
         {"role": "system", "content": adapted_system_prompt},
         {"role": "user", "content": f"{display_name}: {user_text}"},
     ]
     try:
-        return await _ollama_chat(messages)
+        # Используем основную модель для текстовых ответов
+        return await _ollama_chat(messages, model=settings.ollama_base_model)
     except Exception as e:
         logger.error(f"Failed to generate reply: {e}")
         return (
             "Чё-то сломалось на сервере ИИ. "
             "Окончательно сломалось, да."
         )
+
+
+async def analyze_image_content(image_data: bytes, query: str = "Опиши, что ты видишь на изображении") -> str:
+    """
+    Анализирует изображение с помощью визуальной модели ИИ.
+
+    Args:
+        image_data: Данные изображения в байтах
+        query: Запрос к модели
+
+    Returns:
+        Описание изображения или сообщение об ошибке
+    """
+    try:
+        # Кодируем изображение в base64
+        import base64
+        image_base64 = base64.b64encode(image_data).decode('utf-8')
+
+        messages = [
+            {"role": "user", "content": query, "images": [image_base64]}
+        ]
+
+        # Используем визуальную модель для анализа изображения
+        return await _ollama_chat(messages, model=settings.ollama_vision_model)
+    except Exception as e:
+        logger.error(f"Failed to analyze image: {e}")
+        return (
+            "Не могу разобрать, что за херня на этой картинке. "
+            "Сервер ИИ сломался окончательно."
+        )
+
+
+async def search_memory_db(query: str) -> str:
+    """
+    Выполняет поиск в базе знаний (памяти) бота с помощью RAG-модели.
+
+    Args:
+        query: Запрос для поиска в базе знаний
+
+    Returns:
+        Результат поиска или сообщение об ошибке
+    """
+    try:
+        messages = [
+            {"role": "system", "content": "Ты - система поиска по базе знаний. Отвечай на вопросы, используя только информацию из базы знаний."},
+            {"role": "user", "content": f"Найди в базе знаний информацию по запросу: {query}"}
+        ]
+
+        # Используем модель для работы с памятью
+        return await _ollama_chat(messages, model=settings.ollama_memory_model)
+    except Exception as e:
+        logger.error(f"Failed to search memory DB: {e}")
+        return (
+            "Не могу найти информацию в памяти. "
+            "Видимо, база знаний сломалась."
+        )
+
+
+async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = None) -> List[Dict]:
+    """
+    Извлекает факты из сообщения с помощью LLM.
+
+    Args:
+        text: Текст сообщения
+        chat_id: ID чата
+        user_info: Информация о пользователе (имя, ID и т.д.)
+
+    Returns:
+        Список словарей с извлеченными фактами
+    """
+    extraction_prompt = f"""
+    Проанализируй следующее сообщение и извлеки из него важные факты о людях, правилах чата, предпочтениях и т.д.
+    Формат ответа: JSON массив объектов вида {{fact: "...", category: "...", importance: number}}
+    Где importance от 1 до 10 (10 - максимально важный факт)
+
+    Сообщение: {text}
+    """
+
+    try:
+        response = await _ollama_chat([
+            {"role": "system", "content": "Ты помощник по извлечению фактов из сообщений. Отвечай в формате JSON."},
+            {"role": "user", "content": extraction_prompt}
+        ], temperature=0.1, use_cache=False)
+
+        # Попробуем распарсить JSON
+        import json
+        facts = json.loads(response)
+
+        # Добавим метаданные к фактам
+        processed_facts = []
+        for fact_item in facts:
+            if isinstance(fact_item, dict) and 'fact' in fact_item:
+                metadata = {
+                    'chat_id': chat_id,
+                    'extracted_at': datetime.now().isoformat(),
+                    'importance': fact_item.get('importance', 5),
+                    'category': fact_item.get('category', 'general')
+                }
+
+                if user_info:
+                    metadata['user_info'] = user_info
+
+                processed_facts.append({
+                    'text': fact_item['fact'],
+                    'metadata': metadata
+                })
+
+        return processed_facts
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении фактов: {e}")
+        return []
+
+
+async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = None):
+    """
+    Сохраняет факт в векторную базу данных.
+
+    Args:
+        fact_text: Текст факта
+        chat_id: ID чата
+        metadata: Дополнительные метаданные
+    """
+    try:
+        if not metadata:
+            metadata = {}
+
+        metadata['chat_id'] = chat_id
+        metadata['stored_at'] = datetime.now().isoformat()
+
+        # Сохраняем факт в коллекцию для этого чата
+        collection_name = f"chat_{chat_id}_facts"
+        vector_db.add_fact(
+            collection_name=collection_name,
+            fact_text=fact_text,
+            metadata=metadata
+        )
+        logger.debug(f"Факт сохранен для чата {chat_id}: {fact_text[:100]}...")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении факта в память: {e}")
+
+
+async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 3) -> List[str]:
+    """
+    Извлекает контекст из памяти Олега, релевантный запросу.
+
+    Args:
+        query: Запрос пользователя
+        chat_id: ID чата
+        n_results: Количество результатов для возврата
+
+    Returns:
+        Список релевантных фактов
+    """
+    try:
+        collection_name = f"chat_{chat_id}_facts"
+        # Используем модель glm-4.6:cloud для поиска в базе знаний
+        facts = vector_db.search_facts(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            model=settings.ollama_memory_model  # Используем модель для поиска в памяти
+        )
+
+        # Извлекаем только тексты фактов
+        context_facts = [fact['text'] for fact in facts if 'text' in fact]
+
+        logger.debug(f"Извлечено {len(context_facts)} фактов из памяти для чата {chat_id}")
+        return context_facts
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении контекста из памяти: {e}")
+        return []
+
+
+async def generate_reply_with_context(user_text: str, username: str | None,
+                                   chat_id: int, toxicity_level: float = 0.0,
+                                   override_system_prompt: str | None = None) -> str:
+    """
+    Генерирует ответ с учетом контекста из памяти.
+
+    Args:
+        user_text: Текст сообщения пользователя
+        username: Имя пользователя
+        chat_id: ID чата
+        toxicity_level: Уровень токсичности
+        override_system_prompt: Переопределенный промпт
+    """
+    # Извлекаем контекст из памяти
+    context_facts = await retrieve_context_for_query(user_text, chat_id)
+
+    # Извлекаем новые факты из сообщения
+    user_info = {"username": username} if username else {}
+    new_facts = await extract_facts_from_message(user_text, chat_id, user_info)
+
+    # Сохраняем новые факты
+    for fact in new_facts:
+        await store_fact_to_memory(fact['text'], chat_id, fact['metadata'])
+
+    # Формируем расширенный системный промпт
+    if context_facts:
+        context_str = "\n".join([f"- {fact}" for fact in context_facts])
+        extended_context = f"\nКонтекст чата (знания Олега):\n{context_str}\n"
+    else:
+        extended_context = ""
+
+    # Используем основную функцию генерации, передавая расширенный промпт
+    full_user_text = user_text + extended_context
+    return await generate_text_reply(full_user_text, username, toxicity_level, override_system_prompt)
 
 
 def adapt_system_prompt_by_toxicity(original_prompt: str, toxicity_level: float) -> str:

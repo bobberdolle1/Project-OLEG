@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint
+from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .session import Base
@@ -355,6 +355,8 @@ class ChatConfig(Base):
     moderation_mode: Mapped[str] = mapped_column(String(20), default="normal")  # 'light', 'normal', 'dictatorship'
     dailysummary_topic_id: Mapped[int] = mapped_column(Integer, default=1)
     memes_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    system_prompt_override: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Переопределение системного промпта для чата
+    welcome_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Сообщение приветствия
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

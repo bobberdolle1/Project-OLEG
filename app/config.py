@@ -27,9 +27,25 @@ class Settings:
     ollama_base_url: str = os.getenv(
         "OLLAMA_BASE_URL", "http://localhost:11434"
     )
-    ollama_model: str = os.getenv(
-        "OLLAMA_MODEL", "deepseek-v3.1:671b-cloud"
+    # Модель для основных задач (чтение/генерация текста)
+    ollama_base_model: str = os.getenv(
+        "OLLAMA_BASE_MODEL", "deepseek-v3.1:671b-cloud"
     )
+
+    # Модель для визуального анализа (обработка изображений)
+    ollama_vision_model: str = os.getenv(
+        "OLLAMA_VISION_MODEL", "qwen3-vl:4b"
+    )
+
+    # Модель для работы с памятью и поиском (RAG)
+    ollama_memory_model: str = os.getenv(
+        "OLLAMA_MEMORY_MODEL", "glm-4.6:cloud"
+    )
+
+    # Модель по умолчанию (для обратной совместимости)
+    @property
+    def ollama_model(self) -> str:
+        return self.ollama_base_model
     ollama_timeout: int = int(
         os.getenv("OLLAMA_TIMEOUT", "90")
     )
@@ -38,6 +54,14 @@ class Settings:
     ollama_cache_max_size: int = int(os.getenv("OLLAMA_CACHE_MAX_SIZE", "128"))
     toxicity_analysis_enabled: bool = os.getenv("TOXICITY_ANALYSIS_ENABLED", "true").lower() == "true"
     toxicity_threshold: int = int(os.getenv("TOXICITY_THRESHOLD", "75"))
+
+    # ChromaDB (для RAG - "Мозг Олега")
+    chromadb_persist_dir: str = os.getenv("CHROMADB_PERSIST_DIR", "./data/chroma")  # Директория сохранения ChromaDB
+    chromadb_collection_name: str = os.getenv("CHROMADB_COLLECTION_NAME", "oleg_kb")  # Название коллекции для знаний
+
+    # Векторное хранилище
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")  # Модель для эмбеддингов
+    similarity_threshold: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))  # Порог схожести для RAG
 
     # Database
     database_url: str = os.getenv(

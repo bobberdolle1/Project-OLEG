@@ -9,7 +9,7 @@ from datetime import datetime
 from app.database.session import get_session
 from app.database.models import User, UserQuestionHistory
 from app.handlers.games import ensure_user # For getting user object
-from app.services.ollama_client import generate_reply
+from app.services.ollama_client import generate_text_reply as generate_reply
 from app.services.recommendations import generate_recommendation
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,20 @@ async def general_qna(msg: Message):
         # Получаем уровень токсичности в чате
         chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
 
+        # Проверяем, есть ли переопределенный промпт для этого чата
+        override_prompt = None
+        if msg.chat.type in ['group', 'supergroup']:  # Только для групповых чатов
+            async_session_local = get_session()
+            async with async_session_local() as session:
+                from app.database.models import ChatConfig
+                chat_config_res = await session.execute(
+                    select(ChatConfig).filter_by(chat_id=msg.chat.id)
+                )
+                chat_config = chat_config_res.scalars().first()
+
+                if chat_config and chat_config.system_prompt_override:
+                    override_prompt = chat_config.system_prompt_override
+
         # Если в личных сообщениях, учитываем поведение пользователя
         if msg.chat.type == "private":
             # Здесь в реальной реализации нужно анализировать поведение пользователя
@@ -178,13 +192,17 @@ async def general_qna(msg: Message):
             reply = await generate_reply(
                 user_text=text,
                 username=msg.from_user.username,
-                toxicity_level=user_adapted_toxicity  # Передаем адаптированный уровень токсичности
+                toxicity_level=user_adapted_toxicity,  # Передаем адаптированный уровень токсичности
+                override_system_prompt=override_prompt  # Передаем переопределенный промпт, если есть
             )
         else:
-            reply = await generate_reply(
+            # Для групповых чатов используем функцию с контекстом из памяти
+            reply = await generate_reply_with_context(
                 user_text=text,
                 username=msg.from_user.username,
-                toxicity_level=chat_toxicity  # Передаем уровень токсичности
+                chat_id=msg.chat.id,  # Передаем ID чата для извлечения контекста
+                toxicity_level=chat_toxicity,  # Передаем уровень токсичности
+                override_system_prompt=override_prompt  # Передаем переопределенный промпт, если есть
             )
 
         await msg.reply(reply, disable_web_page_preview=True)

@@ -9,6 +9,6 @@ pytz==2024.2
 python-dateutil==2.9.0.post0
 uvloop==0.21.0; sys_platform != 'win32'
 Pillow==10.0.0
-Flask==2.3.3
-Werkzeug==2.3.7
 yt-dlp==2023.10.13
+chromadb==0.6.0
+ollama==0.3.3

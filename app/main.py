@@ -7,10 +7,14 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db
-from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics
+from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes
+from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
+from app.services.content_downloader import router as content_downloader_router
 from app.middleware.logging import MessageLoggerMiddleware
 from app.middleware.spam_filter import SpamFilterMiddleware, load_spam_patterns
+from app.middleware.spam_control import SpamControlMiddleware
+from app.middleware.mode_filter import ModeFilterMiddleware
 from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
 from app.jobs.scheduler import setup_scheduler
 
@@ -30,15 +34,27 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     logger.info("Планировщик запущен")
 
     logger.info("Загрузка спам-паттернов...")
+    from app.middleware.spam_filter import load_spam_patterns, load_moderation_configs
     await load_spam_patterns()
     logger.info("Спам-паттерны загружены")
+
+    logger.info("Загрузка конфигураций модерации...")
+    await load_moderation_configs()
+    logger.info("Конфигурации модерации загружены")
+
+    logger.info("Запуск воркеров загрузки контента...")
+    from app.services.content_downloader import downloader
+    await downloader.start_workers()
+    logger.info("Воркеры загрузки контента запущены")
 
 
 def build_dp() -> Dispatcher:
     """Построить диспетчер с обработчиками."""
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(MessageLoggerMiddleware())
+    dp.message.middleware(ModeFilterMiddleware())  # Middleware для режимов модерации
     dp.message.middleware(SpamFilterMiddleware())
+    dp.message.middleware(SpamControlMiddleware())  # Middleware для защиты от "дрючки"
     dp.message.middleware(ToxicityAnalysisMiddleware())
 
     # Routers
@@ -55,6 +71,9 @@ def build_dp() -> Dispatcher:
         team_wars.router,
         duos.router,
         statistics.router,
+        quotes.router,
+        reactions_router,  # Роутер для обработки реакций
+        content_downloader_router,  # Роутер для скачивания контента
     )
     return dp
 
@@ -78,6 +97,11 @@ async def main():
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
     finally:
+        logger.info("Остановка воркеров загрузки контента...")
+        from app.services.content_downloader import downloader
+        await downloader.stop_workers()
+        logger.info("Воркеры загрузки контента остановлены")
+
         await bot.session.close()
         logger.info("Сессия бота закрыта")
 

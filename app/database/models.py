@@ -24,6 +24,7 @@ class User(Base):
     guild_memberships: Mapped[list["GuildMember"]] = relationship(back_populates="user")
     question_history: Mapped[list["UserQuestionHistory"]] = relationship(back_populates="user")
     warnings: Mapped[list["Warning"]] = relationship(back_populates="user")
+    quotes: Mapped[list["Quote"]] = relationship(back_populates="user")
 
 
 class MessageLog(Base):
@@ -308,3 +309,35 @@ class ToxicityLog(Base):
     category: Mapped[Optional[str]] = mapped_column(String(128))
     action_taken: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Quote(Base):
+    __tablename__ = "quotes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    username: Mapped[str] = mapped_column(String(64))
+    image_data: Mapped[bytes] = mapped_column(Text)  # Изображение цитаты в байтах
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Комментарий Олега
+    likes_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_golden_fund: Mapped[bool] = mapped_column(Boolean, default=False)  # В "золотом фонде" или нет
+    is_sticker: Mapped[bool] = mapped_column(Boolean, default=False)  # Является ли стикером
+    sticker_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # ID файла стикера в Telegram
+    telegram_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID чата в Telegram
+    telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID сообщения в Telegram
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    user: Mapped["User"] = relationship(back_populates="quotes")
+
+
+class ModerationConfig(Base):
+    __tablename__ = "moderation_configs"
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    mode: Mapped[str] = mapped_column(String(20), default="normal")  # light, normal, dictatorship
+    enabled_features: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON строка с настройками
+    banned_words: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON строка с запрещенными словами
+    flood_threshold: Mapped[int] = mapped_column(Integer, default=5)  # Порог флуда
+    spam_link_protection: Mapped[bool] = mapped_column(Boolean, default=True)
+    swear_filter: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_warn_threshold: Mapped[int] = mapped_column(Integer, default=3)  # Порог для авто-варнов
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

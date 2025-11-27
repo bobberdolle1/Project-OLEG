@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block header %}Настройки{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Основные настройки</h5>
+            </div>
+            <div class="card-body">
+                <form>
+                    <div class="mb-3">
+                        <label for="botToken" class="form-label">Telegram Bot Token</label>
+                        <input type="password" class="form-control" id="botToken" value="123456789:ABCdefGhIjKlmNoPQRsTUVwxyz" placeholder="Введите токен бота">
+                        <div class="form-text">Токен для доступа к Telegram Bot API</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="chatId" class="form-label">ID основного чата</label>
+                        <input type="text" class="form-control" id="chatId" value="-1001234567890" placeholder="Введите ID чата">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="model" class="form-label">Модель Ollama</label>
+                        <select class="form-select" id="model">
+                            <option selected>deepseek-v3.1:671b-cloud</option>
+                            <option>llama2:7b</option>
+                            <option>llama2:13b</option>
+                            <option>codellama:7b</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="ollamaUrl" class="form-label">URL Ollama сервера</label>
+                        <input type="url" class="form-control" id="ollamaUrl" value="http://localhost:11434" placeholder="http://localhost:11434">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="timezone" class="form-label">Часовой пояс</label>
+                        <select class="form-select" id="timezone">
+                            <option value="Europe/Moscow" selected>Europe/Moscow (MSK)</option>
+                            <option value="Europe/Kiev">Europe/Kiev</option>
+                            <option value="Europe/Minsk">Europe/Minsk</option>
+                            <option value="Asia/Yekaterinburg">Asia/Yekaterinburg</option>
+                            <option value="Asia/Novosibirsk">Asia/Novosibirsk</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Сохранить настройки</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Настройки безопасности</h5>
+            </div>
+            <div class="card-body">
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="enableAuth" checked>
+                    <label class="form-check-label" for="enableAuth">
+                        Включить авторизацию
+                    </label>
+                </div>
+                
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="enableLogging" checked>
+                    <label class="form-check-label" for="enableLogging">
+                        Вести логи действий
+                    </label>
+                </div>
+                
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="enableSpamControl" checked>
+                    <label class="form-check-label" for="enableSpamControl">
+                        Защита от "дрючки"
+                    </label>
+                </div>
+                
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="enablePromptInjection" checked>
+                    <label class="form-check-label" for="enablePromptInjection">
+                        Защита от промпт-инъекций
+                    </label>
+                </div>
+                
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="enableToxicityFilter">
+                    <label class="form-check-label" for="enableToxicityFilter">
+                        Фильтр токсичности
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Информация о системе</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <strong>Версия бота:</strong> 3.0
+                </div>
+                <div class="mb-2">
+                    <strong>Версия Python:</strong> 3.10+
+                </div>
+                <div class="mb-2">
+                    <strong>aiogram:</strong> 3.13.1
+                </div>
+                <div class="mb-2">
+                    <strong>Flask:</strong> 2.3.3
+                </div>
+                <div class="mb-2">
+                    <strong>СУБД:</strong> SQLite
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

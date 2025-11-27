@@ -57,6 +57,56 @@ def _should_reply(msg: Message) -> bool:
     return False
 
 
+async def get_current_chat_toxicity(chat_id: int) -> float:
+    """
+    Получает текущий уровень токсичности в чате.
+
+    Args:
+        chat_id: ID чата
+
+    Returns:
+        Уровень токсичности от 0 до 100
+    """
+    # Временно возвращаем фиксированное значение
+    # В реальной реализации будет вызов функции анализа токсичности
+    from app.services.ollama_client import analyze_chat_toxicity
+
+    try:
+        toxicity_percentage, _ = await analyze_chat_toxicity(24)
+        return toxicity_percentage
+    except Exception as e:
+        logger.error(f"Ошибка при анализе токсичности: {e}")
+        return 0.0  # Возвращаем 0 при ошибке
+
+
+async def potentially_roast_toxic_user(msg: Message):
+    """
+    Потенциально "наезжает" на токсичного пользователя, если уровень токсичности высок.
+
+    Args:
+        msg: Сообщение, триггернувшее "наезд"
+    """
+    # С вероятностью 30% "наезжаем" на пользователя
+    if random.random() < 0.3:
+        try:
+            target_user = msg.from_user
+            username = f"@{target_user.username}" if target_user.username else f"{target_user.first_name}"
+
+            # Создаем саркастический комментарий
+            roasts = [
+                f"{username}, а ты сегодня золотой, да? Слишком токсично для меня!",
+                f"{username}, остынь немного, а то уже всех задел!",
+                f"Токсичность на максимуме, {username}! Может, не будешь?",
+                f"{username}, ты как чайник, только не кипяток, а токсикоз!",
+                f"Эй, {username}, агрессия - это не сила, это слабость, братишка."
+            ]
+
+            roast_message = random.choice(roasts)
+            await msg.reply(roast_message)
+        except Exception as e:
+            logger.warning(f"Ошибка при 'наезде' на токсичного пользователя: {e}")
+
+
 @router.message(F.text)
 async def general_qna(msg: Message):
     """
@@ -77,11 +127,20 @@ async def general_qna(msg: Message):
             f"Q&A от @{msg.from_user.username or msg.from_user.id}: "
             f"{text[:50]}..."
         )
+
+        # Получаем уровень токсичности в чате
+        chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
+
         reply = await generate_reply(
             user_text=text,
-            username=msg.from_user.username
+            username=msg.from_user.username,
+            toxicity_level=chat_toxicity  # Передаем уровень токсичности
         )
         await msg.reply(reply, disable_web_page_preview=True)
+
+        # В случае высокой токсичности, бот может "наехать" на самых токсичных пользователей
+        if chat_toxicity > 70:
+            await potentially_roast_toxic_user(msg)
 
         # Save to history
         async with async_session() as session:
@@ -93,7 +152,7 @@ async def general_qna(msg: Message):
             )
             session.add(history_entry)
             await session.commit()
-        
+
         # Get and send recommendation
         recommendation = await generate_recommendation(session, user, text)
         if recommendation:

@@ -351,10 +351,55 @@ async def cmd_strikes(msg: Message):
             .order_by(Warning.created_at.desc())
         )
         warnings = warnings_res.scalars().all()
-        
+
         response = f"Предупреждения пользователя @{target_user.username or target_user.id} ({user.strikes} всего):\n"
         for w in warnings:
             moderator = await msg.bot.get_chat_member(msg.chat.id, w.moderator_id)
             response += f"- {w.created_at.strftime('%Y-%m-%d')}: {w.reason} (выдал: @{moderator.user.username or w.moderator_id})\n"
-        
+
         await msg.reply(response)
+
+
+@router.message(F.text.startswith("олег режим"))
+async def cmd_moderation_mode(msg: Message):
+    """
+    Команда: олег режим [light|normal|dictatorship]
+    Переключает режимы модерации в чате.
+    """
+    if not await is_admin(msg):
+        await msg.reply("Только для админов, брат.")
+        return
+
+    from app.middleware.mode_filter import set_moderation_mode
+    parts = msg.text.split()
+
+    if len(parts) < 2:
+        # Просто показываем текущий режим
+        from app.middleware.mode_filter import get_moderation_mode
+        current_mode = await get_moderation_mode(msg.chat.id)
+        mode_names = {
+            "light": "Лайт",
+            "normal": "Норма",
+            "dictatorship": "Диктатура"
+        }
+        current_name = mode_names.get(current_mode, current_mode)
+        await msg.reply(f"Текущий режим модерации: {current_name}")
+        return
+
+    mode = parts[1].lower()
+    if mode not in ["light", "normal", "dictatorship"]:
+        await msg.reply("Доступные режимы: light, normal, dictatorship")
+        return
+
+    mode_names = {
+        "light": "Лайт",
+        "normal": "Норма",
+        "dictatorship": "Диктатура"
+    }
+
+    success = await set_moderation_mode(msg.chat.id, mode)
+    if success:
+        await msg.reply(f"Режим модерации изменен на: {mode_names[mode]}")
+        logger.info(f"Moderation mode for chat {msg.chat.id} changed to {mode} by user {msg.from_user.id}")
+    else:
+        await msg.reply("Не удалось изменить режим модерации")

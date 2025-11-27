@@ -31,6 +31,43 @@ CASINO_DEFAULT_BET = 10
 PVP_STEAL_MIN_PCT = 10
 PVP_STEAL_MAX_PCT = 30
 
+# Словарь рангов для игры /grow
+RANKS = [
+    (10, "Микрочелик"),
+    (20, "Кнопочный воин"),
+    (30, "Среднячок"),
+    (40, "Тянет к проводочкам"),
+    (50, "Почти нормальный"),
+    (60, "Нормальный размер"),
+    (70, "Хороший экземпляр"),
+    (80, "Завидная длина"),
+    (90, "Амбал"),
+    (100, "Гигачад"),
+    (120, "Легенда"),
+    (150, "Миф"),
+    (200, "Мегамиф"),
+    (300, "Титан"),
+    (500, "Космический бур"),
+    (1000, "Божественный размер"),
+    (float('inf'), "Легендарный гигант")
+]
+
+
+def get_rank_by_size(size_cm: int) -> str:
+    """
+    Возвращает ранг по размеру "пиписи".
+
+    Args:
+        size_cm: Размер в сантиметрах
+
+    Returns:
+        Название ранга
+    """
+    for threshold, rank_name in RANKS:
+        if size_cm <= threshold:
+            return rank_name
+    return RANKS[-1][1]  # Возвращаем последний ранг, если размер больше всех порогов
+
 
 async def ensure_user(tg_user) -> User:
     """
@@ -150,15 +187,18 @@ async def cmd_grow(msg: Message):
              if s.tg_user_id == msg.from_user.id),
             1
         )
+        # Получить ранг по размеру
+        size_rank = get_rank_by_size(gs.size_cm)
         await msg.reply(
             f"+{gain} см 📈\n"
             f"Текущий: {gs.size_cm} см\n"
+            f"Ранг: {size_rank}\n"
             f"Место: #{rank}/{len(all_stats)}\n"
             f"Кулдаун: {cooldown_hours}ч"
         )
         logger.info(
             f"Grow: @{msg.from_user.username} "
-            f"+{gain} cm (total: {gs.size_cm})"
+            f"+{gain} cm (total: {gs.size_cm}, rank: {size_rank})"
         )
 
 
@@ -173,8 +213,9 @@ async def cmd_top(msg: Message):
         lines = []
         for i, s in enumerate(top10, start=1):
             name = s.username or str(s.tg_user_id)
-            lines.append(f"{i}. {name}: {s.size_cm} см")
-        await msg.reply("Топ-10:\n" + "\n".join(lines))
+            size_rank = get_rank_by_size(s.size_cm)
+            lines.append(f"{i}. {name}: {s.size_cm} см ({size_rank})")
+        await msg.reply("🏆 Топ-10:\n" + "\n".join(lines))
 
 
 @router.message(F.text.startswith("/top_rep"))
@@ -207,9 +248,12 @@ async def cmd_profile(msg: Message):
         if not user:
             return await msg.reply("Ваш профиль не найден. Пожалуйста, начните играть (например, /grow).")
 
+        # Получить ранг по размеру
+        size_rank = get_rank_by_size(game_stat.size_cm)
         profile_text = (
             f"📈 Ваш профиль, {user.username or user.first_name}:\n"
             f"📏 Размер: {game_stat.size_cm} см\n"
+            f"🏆 Ранг: {size_rank}\n"
             f"🏅 Репутация: {game_stat.reputation}\n"
             f"💰 Баланс: {wallet.balance} монет\n"
             f"⚔️ Побед в PvP: {game_stat.pvp_wins}\n"

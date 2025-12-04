@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-HELP_TEXT = """
+HELP_TEXT_TEMPLATE = """
 🤖 <b>Олег — Твой цифровой гигачад</b>
 
 <b>📋 Основные команды:</b>
@@ -57,7 +57,7 @@ HELP_TEXT = """
 /reset — Сбросить контекст (только в ЛС)
 
 <b>💬 Q&A:</b>
-Упомяни меня (@botname) или ответь на мое сообщение — я отвечу!
+Упомяни меня ({bot_username}) или ответь на мое сообщение — я отвечу!
 
 <b>📊 Автоматические функции:</b>
 • Ежедневный пересказ чата (08:00 МСК)
@@ -81,5 +81,7 @@ async def cmd_help(msg: Message):
     Args:
         msg: Входящее сообщение
     """
-    await msg.reply(HELP_TEXT, parse_mode="HTML")
+    bot_username = f"@{msg.bot._me.username}" if msg.bot._me and msg.bot._me.username else "@bot"
+    help_text = HELP_TEXT_TEMPLATE.format(bot_username=bot_username)
+    await msg.reply(help_text, parse_mode="HTML")
     logger.info(f"Help requested by @{msg.from_user.username or msg.from_user.id}")

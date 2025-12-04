@@ -111,7 +111,7 @@ class Auction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     seller: Mapped["User"] = relationship(foreign_keys=[seller_user_id])
-    bids: Mapped[list["Bid"]] = relationship(back_populates="auction")
+    bids: Mapped[list["Bid"]] = relationship(back_populates="auction", foreign_keys="[Bid.auction_id]")
     current_highest_bid: Mapped[Optional["Bid"]] = relationship(foreign_keys=[current_highest_bid_id], post_update=True)
 
 
@@ -123,7 +123,7 @@ class Bid(Base):
     amount: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
-    auction: Mapped["Auction"] = relationship(back_populates="bids")
+    auction: Mapped["Auction"] = relationship(back_populates="bids", foreign_keys=[auction_id])
     bidder: Mapped["User"] = relationship(foreign_keys=[bidder_user_id])
 
 
@@ -359,7 +359,7 @@ class Chat(Base):
 class Admin(Base):
     __tablename__ = "admins"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_user_id"), index=True)
     username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     role: Mapped[str] = mapped_column(String(20), default="moderator")  # 'owner', 'moderator'
@@ -367,29 +367,29 @@ class Admin(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Связь с пользователем
-    user: Mapped["User"] = relationship(back_populates="admin_roles")
+    user: Mapped["User"] = relationship(back_populates="admin_roles", foreign_keys=[user_id])
 
 
 class Blacklist(Base):
     __tablename__ = "blacklist"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_user_id"), index=True)
     username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Если NULL, то глобальный бан
     reason: Mapped[str] = mapped_column(Text)
     added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
-    user: Mapped["User"] = relationship(back_populates="blacklist_entries")
+    user: Mapped["User"] = relationship(back_populates="blacklist_entries", foreign_keys=[user_id])
 
 
 class PrivateChat(Base):
     __tablename__ = "private_chats"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_user_id"), unique=True, index=True)
     message_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON для хранения контекста
     last_interaction: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
     toxicity_level: Mapped[float] = mapped_column(Float, default=0.0)  # Уровень токсичности пользователя
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)  # Заблокирован ли пользователь
 
-    user: Mapped["User"] = relationship(back_populates="private_chat")
+    user: Mapped["User"] = relationship(back_populates="private_chat", foreign_keys=[user_id])

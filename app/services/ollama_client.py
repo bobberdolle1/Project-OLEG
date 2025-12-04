@@ -375,7 +375,6 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
 
         # Попробуем распарсить JSON
         import json
-from app.utils import utc_now
         facts = json.loads(response)
 
         # Добавим метаданные к фактам

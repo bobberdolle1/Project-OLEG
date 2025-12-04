@@ -8,6 +8,7 @@ from datetime import timedelta, datetime
 
 from app.database.session import get_session
 from app.database.models import SpamPattern, ModerationConfig
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,6 @@ class SpamFilterMiddleware(BaseMiddleware):
             elif config.mode == "normal":
                 # Normal restrictions
                 from aiogram.types import ChatPermissions
-from app.utils import utc_now
                 until_date = utc_now() + timedelta(minutes=5)
                 await event.bot.restrict_chat_member(
                     chat_id=chat_id,

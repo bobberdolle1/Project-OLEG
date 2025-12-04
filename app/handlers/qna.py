@@ -34,6 +34,7 @@ def _should_reply(msg: Message) -> bool:
     Проверить, должен ли бот ответить на сообщение.
 
     Бот отвечает в следующих случаях:
+    - Это личное сообщение (private chat)
     - Это ответ на сообщение бота (reply)
     - Бот упомянут в сообщении (@botname)
 
@@ -43,6 +44,10 @@ def _should_reply(msg: Message) -> bool:
     Returns:
         True, если нужно ответить
     """
+    # В личных сообщениях всегда отвечаем
+    if msg.chat.type == "private":
+        return True
+
     # Проверка: это ответ на сообщение бота?
     if msg.reply_to_message:
         if (
@@ -191,21 +196,18 @@ async def general_qna(msg: Message):
         if msg.chat.type == "private":
             # Здесь в реальной реализации нужно анализировать поведение пользователя
             # и адаптировать стиль ответа соответственно
-            user_adapted_toxicity = await adjust_toxicity_for_private_chat(msg.from_user.id, text)
             reply = await generate_reply(
                 user_text=text,
                 username=msg.from_user.username,
-                toxicity_level=user_adapted_toxicity,  # Передаем адаптированный уровень токсичности
-                override_system_prompt=override_prompt  # Передаем переопределенный промпт, если есть
+                chat_context=override_prompt
             )
         else:
             # Для групповых чатов используем функцию с контекстом из памяти
             reply = await generate_reply_with_context(
                 user_text=text,
                 username=msg.from_user.username,
-                chat_id=msg.chat.id,  # Передаем ID чата для извлечения контекста
-                toxicity_level=chat_toxicity,  # Передаем уровень токсичности
-                override_system_prompt=override_prompt  # Передаем переопределенный промпт, если есть
+                chat_id=msg.chat.id,
+                chat_context=override_prompt
             )
 
         await msg.reply(reply, disable_web_page_preview=True)

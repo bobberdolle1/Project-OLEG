@@ -21,7 +21,6 @@ services:
     networks:
       - oleg-network
     depends_on:
-      - ollama
       - chromadb
     healthcheck:
       test: ["CMD", "python", "-c", "import logging; print('alive')"]
@@ -34,44 +33,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  # Ollama сервис для локального запуска моделей ИИ
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama-service
-    restart: unless-stopped
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
-    ports:
-      # Открываем только для локальной сети
-      - "11434:11434"
-    volumes:
-      # Кэш моделей Ollama
-      - ollama-models:/root/.ollama
-      # Кэш для KV
-      - ollama-cache:/root/.cache
-    networks:
-      - oleg-network
-    command: >
-      sh -c "
-      ollama serve &
-      sleep 30s &&
-      ollama pull deepseek-v3.1:671b-cloud &&
-      ollama pull qwen3-vl:4b &&
-      ollama pull glm-4.6:cloud &&
-      tail -f /dev/null
-      "
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
 
   # ChromaDB - векторная база данных для RAG (Мозг Олега)
   chromadb:
@@ -153,10 +114,6 @@ volumes:
   oleg-data:
     driver: local
   oleg-logs:
-    driver: local
-  ollama-models:
-    driver: local
-  ollama-cache:
     driver: local
   chroma-data:
     driver: local

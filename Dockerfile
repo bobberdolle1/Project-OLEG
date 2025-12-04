@@ -1,10 +1,10 @@
 # Multi-stage build для оптимизации размера образа
-FROM python:3.11-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
 # Установка Poetry
-RUN pip install --no-cache-dir poetry==1.7.1
+RUN pip install --upgrade pip && pip install --no-cache-dir poetry==1.7.1
 
 # Копирование зависимостей
 COPY pyproject.toml poetry.lock* ./
@@ -15,7 +15,7 @@ RUN python -m venv /opt/venv && \
     poetry install --no-root --only main
 
 # Финальный образ
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 

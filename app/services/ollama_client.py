@@ -89,7 +89,8 @@ QUOTE_THEMES = [
 
 
 async def _ollama_chat(
-    messages: list[dict], temperature: float = 0.7, retry: int = 2, use_cache: bool = True
+    messages: list[dict], temperature: float = 0.7, retry: int = 2, use_cache: bool = True,
+    model: str | None = None
 ) -> str:
     """
     Отправить запрос к Ollama API и получить ответ от модели.
@@ -99,6 +100,7 @@ async def _ollama_chat(
         temperature: Параметр температуры для генерации (0-1)
         retry: Количество попыток повтора при ошибке
         use_cache: Использовать ли кэш для этого запроса
+        model: Модель для использования (по умолчанию settings.ollama_model)
 
     Returns:
         Текст ответа от модели
@@ -106,6 +108,8 @@ async def _ollama_chat(
     Raises:
         httpx.HTTPError: При критической ошибке Ollama
     """
+    model_to_use = model or settings.ollama_model
+    
     if not settings.ollama_cache_enabled or not use_cache:
         logger.debug("Ollama cache disabled or bypassed for this request.")
     else:
@@ -122,7 +126,7 @@ async def _ollama_chat(
                 return ollama_cache[cache_key]
     url = f"{settings.ollama_base_url}/api/chat"
     payload = {
-        "model": settings.ollama_model,
+        "model": model_to_use,
         "messages": messages,
         "stream": False,
         "options": {

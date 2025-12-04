@@ -13,9 +13,6 @@ from app.handlers.chat_join import router as chat_join_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
-from app.handlers.private_admin import router as private_admin_router
-from app.handlers.chat_join import router as chat_join_router
-from app.services.content_downloader import router as content_downloader_router
 from app.middleware.logging import MessageLoggerMiddleware
 from app.middleware.spam_filter import SpamFilterMiddleware, load_spam_patterns
 from app.middleware.spam_control import SpamControlMiddleware

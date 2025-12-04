@@ -128,19 +128,23 @@ class SpamFilterMiddleware(BaseMiddleware):
             # Apply restrictions based on mode
             if config.mode == "dictatorship":
                 # Full restrictions in dictatorship mode
-                mute_duration = timedelta(hours=1)
-                await event.chat.restrict(
+                from aiogram.types import ChatPermissions
+                until_date = datetime.utcnow() + timedelta(hours=1)
+                await event.bot.restrict_chat_member(
+                    chat_id=chat_id,
                     user_id=user_id,
-                    permissions={}, # No permissions = mute
-                    until_date=mute_duration
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=until_date
                 )
             elif config.mode == "normal":
                 # Normal restrictions
-                mute_duration = timedelta(minutes=5)
-                await event.chat.restrict(
+                from aiogram.types import ChatPermissions
+                until_date = datetime.utcnow() + timedelta(minutes=5)
+                await event.bot.restrict_chat_member(
+                    chat_id=chat_id,
                     user_id=user_id,
-                    permissions={}, # No permissions = mute
-                    until_date=mute_duration
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=until_date
                 )
 
             # Notify user about the action

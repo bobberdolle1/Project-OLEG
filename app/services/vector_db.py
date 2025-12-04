@@ -20,8 +20,13 @@ class VectorDB:
     def init_db(self):
         """Инициализирует соединение с ChromaDB."""
         try:
-            self.client = chromadb.Client(Settings(anonymized_telemetry=False))
-            logger.info("ChromaDB успешно инициализирована")
+            from app.config import settings
+            # Используем PersistentClient для сохранения данных на диск
+            self.client = chromadb.PersistentClient(
+                path=settings.chromadb_persist_dir,
+                settings=Settings(anonymized_telemetry=False)
+            )
+            logger.info(f"ChromaDB успешно инициализирована (путь: {settings.chromadb_persist_dir})")
         except Exception as e:
             logger.error(f"Ошибка при инициализации ChromaDB: {e}")
             raise
@@ -71,7 +76,7 @@ class VectorDB:
             logger.error(f"Ошибка при добавлении факта: {e}")
             raise
     
-    def search_facts(self, collection_name: str, query: str, n_results: int = 5) -> List[Dict]:
+    def search_facts(self, collection_name: str, query: str, n_results: int = 5, model: str = None) -> List[Dict]:
         """
         Ищет релевантные факты в коллекции.
         
@@ -79,6 +84,7 @@ class VectorDB:
             collection_name: Название коллекции
             query: Запрос для поиска
             n_results: Количество результатов для возврата
+            model: Модель для использования (не используется в ChromaDB, для совместимости)
             
         Returns:
             Список словарей с найденными фактами

@@ -14,9 +14,8 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    status: Mapped[str] = mapped_column(String(16), default='active', index=True) # active, left
+    status: Mapped[str] = mapped_column(String(16), default='active', index=True)  # active, left
     strikes: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(16), default='active', index=True) # active, left
 
     game: Mapped["GameStat"] = relationship(back_populates="user", uselist=False)
     user_achievements: Mapped[list["UserAchievement"]] = relationship(back_populates="user")

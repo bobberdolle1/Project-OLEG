@@ -11,6 +11,9 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_FILE=/app/logs/oleg.log
+    ports:
+      # Metrics endpoint for Prometheus
+      - "9090:9090"
     volumes:
       # Сохранение базы данных между перезагрузками
       - oleg-data:/app/data
@@ -24,7 +27,7 @@ services:
       - chromadb
       - redis
     healthcheck:
-      test: ["CMD", "python", "-c", "import logging; print('alive')"]
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -141,6 +144,47 @@ services:
   #       max-size: "5m"
   #       max-file: "2"
 
+  # Prometheus для сбора метрик (опционально)
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: oleg-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9091:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus-data:/prometheus
+  #   networks:
+  #     - oleg-network
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.enable-lifecycle'
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+
+  # Grafana для визуализации (опционально)
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: oleg-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #     - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+  #   environment:
+  #     - GF_SECURITY_ADMIN_USER=admin
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #     - GF_USERS_ALLOW_SIGN_UP=false
+  #   networks:
+  #     - oleg-network
+  #   depends_on:
+  #     - prometheus
+
 volumes:
   oleg-data:
     driver: local
@@ -153,6 +197,10 @@ volumes:
   redis-data:
     driver: local
   # postgres-data:
+  #   driver: local
+  # prometheus-data:
+  #   driver: local
+  # grafana-data:
   #   driver: local
 
 networks:

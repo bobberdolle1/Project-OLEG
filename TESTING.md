@@ -1,42 +1,20 @@
-# Руководство по тестированию
+# 🧪 Тестирование — Олег 4.0
 
-## 🧪 Запуск тестов
+> 33 теста для уверенности в коде
 
-### Все тесты
+---
+
+## ⚡ Быстрый запуск
+
 ```bash
+# Все тесты
 pytest
-```
 
-### С покрытием кода
-```bash
+# С покрытием
 pytest --cov=app --cov-report=html
-```
 
-Отчет будет в `htmlcov/index.html`
-
-### Только unit тесты
-```bash
-pytest tests/unit/
-```
-
-### Только integration тесты
-```bash
-pytest tests/integration/
-```
-
-### Конкретный файл
-```bash
-pytest tests/unit/test_rate_limiter.py
-```
-
-### С подробным выводом
-```bash
+# Подробный вывод
 pytest -v
-```
-
-### С выводом print()
-```bash
-pytest -s
 ```
 
 ---
@@ -45,232 +23,231 @@ pytest -s
 
 ```
 tests/
-├── conftest.py              # Общие фикстуры
-├── unit/                    # Unit тесты (быстрые, изолированные)
-│   ├── test_rate_limiter.py
-│   ├── test_redis_client.py
-│   ├── test_config.py
-│   └── test_utils.py
-└── integration/             # Integration тесты (медленные, с БД)
-    └── test_database.py
+├── conftest.py              # Фикстуры
+├── unit/                    # Unit тесты (быстрые)
+│   ├── test_rate_limiter.py # Rate limiting
+│   ├── test_redis_client.py # Redis операции
+│   ├── test_config.py       # Конфигурация
+│   ├── test_utils.py        # Утилиты
+│   ├── test_metrics.py      # Метрики
+│   └── test_ollama_fallback.py # Fallback
+└── integration/             # Integration тесты
+    └── test_database.py     # Операции с БД
 ```
 
 ---
 
-## ✅ Покрытие тестами
+## 📊 Покрытие
 
-### Rate Limiter (`test_rate_limiter.py`)
-- ✅ Разрешает запросы в пределах лимита
-- ✅ Блокирует запросы сверх лимита
-- ✅ Сбрасывается после окна времени
-- ✅ Разные пользователи имеют отдельные лимиты
-- ✅ Корректно вычисляет оставшееся время
+| Модуль | Тесты | Описание |
+|--------|-------|----------|
+| `rate_limiter` | 5 | Лимиты, окна, пользователи |
+| `redis_client` | 5 | Подключение, операции, fallback |
+| `config` | 6 | Валидация, defaults, Redis/PG |
+| `utils` | 3 | utc_now, timezone |
+| `metrics` | 7 | Counters, gauges, histograms |
+| `ollama_fallback` | 5 | Timeout, HTTP, connection errors |
+| `database` | 2 | User, GameStat |
 
-### Redis Client (`test_redis_client.py`)
-- ✅ Обрабатывает отсутствие пакета redis
-- ✅ Возвращает None при недоступности
-- ✅ JSON операции (get_json, set_json)
-- ✅ Graceful обработка ошибок подключения
-
-### Config (`test_config.py`)
-- ✅ Значения по умолчанию
-- ✅ Валидация токена бота
-- ✅ Валидация уровня логирования
-- ✅ Case-insensitive уровень логирования
-- ✅ Конфигурация Redis
-- ✅ PostgreSQL URL
-
-### Utils (`test_utils.py`)
-- ✅ utc_now() возвращает datetime
-- ✅ utc_now() с timezone
-- ✅ utc_now() возвращает текущее время
-
-### Database (`test_database.py`)
-- ✅ Создание пользователя
-- ✅ Связь User-GameStat
+**Всего: 33 теста**
 
 ---
 
-## 🔧 Настройка окружения для тестов
+## 🎯 Запуск по категориям
 
-### 1. Установить зависимости
 ```bash
-pip install -r requirements.txt
-```
+# Только unit
+pytest tests/unit/
 
-### 2. Создать тестовую БД (автоматически)
-Тесты используют in-memory SQLite, настройка не требуется.
+# Только integration
+pytest tests/integration/
 
-### 3. Запустить тесты
-```bash
-pytest
+# Конкретный файл
+pytest tests/unit/test_rate_limiter.py
+
+# Конкретный тест
+pytest tests/unit/test_rate_limiter.py::test_rate_limiter_blocks_requests_over_limit
 ```
 
 ---
 
-## 📝 Написание новых тестов
+## 🔧 Полезные флаги
 
-### Unit тест (пример)
+```bash
+pytest -v              # Подробный вывод
+pytest -s              # Показать print()
+pytest -x              # Остановиться на первой ошибке
+pytest -l              # Показать локальные переменные
+pytest --pdb           # Отладчик при ошибке
+pytest -k "redis"      # Тесты с "redis" в имени
+pytest -m "not slow"   # Пропустить медленные
+```
+
+---
+
+## 📈 Покрытие кода
+
+```bash
+# HTML отчет
+pytest --cov=app --cov-report=html
+open htmlcov/index.html
+
+# Terminal отчет
+pytest --cov=app --cov-report=term-missing
+
+# XML для CI
+pytest --cov=app --cov-report=xml
+```
+
+---
+
+## ✍️ Написание тестов
+
+### Unit тест
+
 ```python
-# tests/unit/test_my_feature.py
 import pytest
-from app.services.my_feature import my_function
 
-
-def test_my_function_returns_correct_value():
-    """Test that my_function returns expected value."""
-    result = my_function(input_value=42)
+def test_my_function():
+    # Arrange
+    input_value = 42
+    
+    # Act
+    result = my_function(input_value)
+    
+    # Assert
     assert result == 84
 ```
 
-### Async unit тест
+### Async тест
+
 ```python
 import pytest
 
-
 @pytest.mark.asyncio
 async def test_async_function():
-    """Test async function."""
     result = await my_async_function()
     assert result is not None
 ```
 
-### Integration тест с БД
-```python
-import pytest
-from app.database.session import get_session
-from app.database.models import User
+### С моками
 
-
-@pytest.mark.asyncio
-async def test_database_operation():
-    """Test database operation."""
-    async_session = get_session()
-    
-    async with async_session() as session:
-        user = User(tg_user_id=123, username="test")
-        session.add(user)
-        await session.commit()
-        
-        # Cleanup
-        await session.delete(user)
-        await session.commit()
-```
-
----
-
-## 🎯 Best Practices
-
-### 1. Именование тестов
-- Используй префикс `test_`
-- Описывай что тестируется: `test_rate_limiter_blocks_requests_over_limit`
-
-### 2. Структура теста (AAA)
-```python
-def test_something():
-    # Arrange (подготовка)
-    user_id = 12345
-    
-    # Act (действие)
-    result = rate_limiter.is_allowed(user_id)
-    
-    # Assert (проверка)
-    assert result is True
-```
-
-### 3. Изоляция тестов
-- Каждый тест должен быть независимым
-- Используй фикстуры для общей настройки
-- Очищай данные после теста
-
-### 4. Моки для внешних зависимостей
 ```python
 from unittest.mock import AsyncMock, patch
-
 
 @pytest.mark.asyncio
 async def test_with_mock():
     with patch('app.services.ollama_client._ollama_chat') as mock:
-        mock.return_value = "Mocked response"
-        result = await generate_text_reply("test")
-        assert result == "Mocked response"
+        mock.return_value = "Mocked"
+        result = await generate_reply("test")
+        assert result == "Mocked"
+```
+
+### С фикстурами
+
+```python
+@pytest.fixture
+def rate_limiter():
+    return RateLimiter(max_requests=3, window_seconds=10)
+
+@pytest.mark.asyncio
+async def test_rate_limiter(rate_limiter):
+    assert await rate_limiter.is_allowed(123) is True
 ```
 
 ---
 
-## 🐛 Отладка тестов
+## 🐛 Отладка
 
-### Запустить один тест
 ```bash
-pytest tests/unit/test_rate_limiter.py::test_rate_limiter_allows_requests_within_limit
-```
-
-### С отладчиком
-```bash
+# Запустить с отладчиком
 pytest --pdb
-```
 
-### Показать локальные переменные при ошибке
-```bash
-pytest -l
-```
+# Показать полный traceback
+pytest --tb=long
 
-### Остановиться на первой ошибке
-```bash
-pytest -x
+# Остановиться на первой ошибке
+pytest -x --pdb
 ```
 
 ---
 
-## 📊 CI/CD Integration
+## 🔄 CI/CD
 
-### GitHub Actions (пример)
+### GitHub Actions
+
 ```yaml
 name: Tests
-
 on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: pytest --cov=app --cov-report=xml
-      - uses: codecov/codecov-action@v2
+      - uses: codecov/codecov-action@v4
 ```
 
 ---
 
-## 🎓 Дополнительные ресурсы
+## 📝 Best Practices
 
-- [pytest документация](https://docs.pytest.org/)
+1. **Именование**: `test_<что>_<ожидание>`
+   ```python
+   def test_rate_limiter_blocks_requests_over_limit():
+   ```
+
+2. **AAA паттерн**: Arrange → Act → Assert
+
+3. **Изоляция**: Каждый тест независим
+
+4. **Моки**: Для внешних зависимостей (Redis, Ollama)
+
+5. **Фикстуры**: Для общей настройки
+
+---
+
+## ❓ FAQ
+
+**Q: Тесты падают с "No module named 'app'"**
+```bash
+# Запускай из корня проекта
+cd oleg-bot && pytest
+```
+
+**Q: Как пропустить медленные тесты?**
+```python
+@pytest.mark.slow
+def test_slow():
+    pass
+```
+```bash
+pytest -m "not slow"
+```
+
+**Q: Как тестировать с реальной БД?**
+```python
+# В conftest.py уже есть фикстура test_db
+async def test_with_db(test_db):
+    async with test_db() as session:
+        # ...
+```
+
+---
+
+## 📚 Ресурсы
+
+- [pytest docs](https://docs.pytest.org/)
 - [pytest-asyncio](https://pytest-asyncio.readthedocs.io/)
 - [pytest-cov](https://pytest-cov.readthedocs.io/)
 - [unittest.mock](https://docs.python.org/3/library/unittest.mock.html)
 
 ---
 
-## ❓ FAQ
-
-**Q: Тесты падают с ошибкой "No module named 'app'"**  
-A: Убедись что запускаешь pytest из корня проекта
-
-**Q: Как пропустить медленные тесты?**  
-A: Используй маркеры:
-```python
-@pytest.mark.slow
-def test_slow_operation():
-    pass
-```
-Запуск: `pytest -m "not slow"`
-
-**Q: Как тестировать с реальной БД?**  
-A: Создай отдельную фикстуру с тестовой БД в `conftest.py`
-
----
-
-**Последнее обновление**: 2024-12-04
+**Версия:** 4.0.0  
+**Тестов:** 33

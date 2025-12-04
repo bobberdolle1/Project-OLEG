@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "oleg-bot"
-version = "1.0.0"
-description = "Телеграм-бот Олег с ИИ, модерацией и игровыми механиками"
+version = "4.0.0"
+description = "Цифровой гигачад — Telegram-бот с ИИ, модерацией и игровыми механиками"
 authors = ["Your Name <you@example.com>"]
 license = "MIT"
 readme = "README.md"
@@ -11,7 +11,7 @@ packages = [
 repository = "https://github.com/your-repo/oleg-bot"
 keywords = ["telegram", "bot", "aiogram", "ollama", "ai"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Natural Language :: Russian",

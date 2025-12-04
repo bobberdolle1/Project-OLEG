@@ -1,25 +1,67 @@
-# 🔧 Установка и настройка
+# 🔧 Установка — Олег 4.0
 
-## Предварительные требования
+> Подробное руководство по установке и настройке
 
-- Python 3.10+ (рекомендуется 3.12)
-- Git
-- Docker и Docker Compose (опционально)
-- Ollama с установленными моделями (для локального запуска)
+---
 
-## Шаг 1: Клонирование репозитория
+## 📋 Требования
+
+| Компонент | Версия | Обязательно |
+|-----------|--------|-------------|
+| Python | 3.10 - 3.13 | ✅ |
+| Docker | 20.10+ | Рекомендуется |
+| Ollama | Latest | ✅ |
+| Redis | 7.x | Для продакшена |
+| PostgreSQL | 15+ | Для продакшена |
+
+---
+
+## 🐳 Вариант 1: Docker (рекомендуется)
+
+### 1. Клонирование
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/your-repo/oleg-bot
 cd oleg-bot
 ```
 
-## Шаг 2: Установка зависимостей
-
-### Вариант A: Использование pip
+### 2. Конфигурация
 
 ```bash
-# Создать виртуальное окружение
+cp .env.docker .env
+nano .env
+```
+
+**Минимум:**
+```bash
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+OWNER_ID=123456789
+```
+
+### 3. Запуск
+
+```bash
+# Development
+docker-compose up -d
+
+# Production (с PostgreSQL + мониторинг)
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+### 4. Проверка
+
+```bash
+docker-compose logs -f oleg-bot
+```
+
+---
+
+## 🐍 Вариант 2: Python
+
+### 1. Виртуальное окружение
+
+```bash
+# Создать
 python -m venv venv
 
 # Активировать (Windows)
@@ -27,250 +69,285 @@ venv\Scripts\activate
 
 # Активировать (Linux/Mac)
 source venv/bin/activate
+```
 
-# Установить зависимости
+### 2. Зависимости
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Вариант B: Использование Poetry
+### 3. Конфигурация
 
 ```bash
-# Установить Poetry
-curl -sSL https://install.python-poetry.org | python3 -
-
-# Установить зависимости
-poetry install
-
-# Активировать окружение
-poetry shell
-```
-
-## Шаг 3: Настройка конфигурации
-
-```bash
-# Скопировать пример конфигурации
 cp .env.example .env
-
-# Отредактировать .env
-nano .env  # или любой другой редактор
+nano .env
 ```
 
-### Минимальная конфигурация .env:
-
-```env
-# Обязательные параметры
-TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
-OWNER_ID=123456789
-
-# Ollama (если запускаете локально)
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
-OLLAMA_VISION_MODEL=qwen3-vl:4b
-OLLAMA_MEMORY_MODEL=glm-4.6:cloud
-
-# База данных (SQLite по умолчанию)
-DATABASE_URL=sqlite+aiosqlite:///./data/oleg.db
-
-# Логирование
-LOG_LEVEL=INFO
-LOG_FILE=logs/oleg.log
-```
-
-## Шаг 4: Установка Ollama моделей
+### 4. Ollama модели
 
 ```bash
-# Установить Ollama (если еще не установлен)
-# https://ollama.ai/download
-
-# Скачать модели
 ollama pull deepseek-v3.1:671b-cloud
 ollama pull qwen3-vl:4b
 ollama pull glm-4.6:cloud
-
-# Проверить установку
-ollama list
 ```
 
-## Шаг 5: Инициализация базы данных
+### 5. Запуск
 
 ```bash
-# Создать директории
-mkdir -p data logs
-
-# Инициализировать БД
-python -c "import asyncio; from app.database.session import init_db; asyncio.run(init_db())"
-
-# Или использовать Makefile
-make db-init
-```
-
-## Шаг 6: Запуск бота
-
-### Локальный запуск
-
-```bash
-# Запустить бота
 python -m app.main
-
-# Или использовать Makefile
-make run
 ```
 
-### Docker запуск
+---
+
+## ⚙️ Конфигурация
+
+### Development (.env)
 
 ```bash
-# Development (SQLite)
-docker-compose up -d
+# Telegram
+TELEGRAM_BOT_TOKEN=your_token
+OWNER_ID=your_id
 
-# Production (PostgreSQL + Redis + Monitoring)
-docker-compose -f docker-compose.prod.yml up -d
+# Ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
 
-# Просмотр логов
-docker-compose logs -f oleg-bot
+# Database (SQLite)
+DATABASE_URL=sqlite+aiosqlite:///./data/oleg.db
+
+# Redis (отключен)
+REDIS_ENABLED=false
+
+# Metrics (отключены)
+METRICS_ENABLED=false
+
+# Logging
+LOG_LEVEL=DEBUG
 ```
 
-## Шаг 7: Проверка работы
-
-1. Откройте Telegram
-2. Найдите вашего бота
-3. Отправьте команду `/start`
-4. Отправьте команду `/help`
-
-Если бот отвечает - установка прошла успешно! 🎉
-
-## Дополнительная настройка
-
-### Pre-commit hooks (для разработки)
+### Production (.env)
 
 ```bash
-# Установить pre-commit
-pip install pre-commit
+# Telegram
+TELEGRAM_BOT_TOKEN=your_production_token
+OWNER_ID=your_id
 
-# Установить hooks
-pre-commit install
+# Ollama
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
 
-# Запустить вручную
-pre-commit run --all-files
+# Database (PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://oleg:password@postgres:5432/oleg_db
+
+# Redis (включен)
+REDIS_ENABLED=true
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# Metrics (включены)
+METRICS_ENABLED=true
+METRICS_PORT=9090
+
+# Logging
+LOG_LEVEL=INFO
 ```
 
-### Миграции базы данных
+---
+
+## 🗄️ База данных
+
+### SQLite (development)
+
+```bash
+# Автоматически создается при запуске
+mkdir -p data
+python -m app.main
+```
+
+### PostgreSQL (production)
+
+```bash
+# 1. Раскомментируй в docker-compose.yml
+# 2. Обнови DATABASE_URL в .env
+# 3. Запусти миграции
+alembic upgrade head
+```
+
+### Миграции
 
 ```bash
 # Создать миграцию
-alembic revision --autogenerate -m "Initial migration"
+alembic revision --autogenerate -m "Add feature"
 
-# Применить миграции
+# Применить
 alembic upgrade head
 
-# Откатить миграцию
+# Откатить
 alembic downgrade -1
 ```
 
-### Тестирование
+---
+
+## 📊 Мониторинг
+
+### Метрики
 
 ```bash
-# Запустить все тесты
+# Включи в .env
+METRICS_ENABLED=true
+METRICS_PORT=9090
+
+# Проверь
+curl http://localhost:9090/metrics
+curl http://localhost:9090/health
+```
+
+### Grafana
+
+```bash
+# Раскомментируй в docker-compose.yml
+# grafana:
+#   image: grafana/grafana:latest
+#   ports:
+#     - "3000:3000"
+
+# Открой http://localhost:3000
+# Login: admin / admin
+```
+
+---
+
+## 🧪 Тестирование
+
+```bash
+# Все тесты
 pytest
 
 # С покрытием
 pytest --cov=app --cov-report=html
 
-# Только unit тесты
+# Только unit
 pytest tests/unit/
-
-# Только integration тесты
-pytest tests/integration/
 ```
-
-## Troubleshooting
-
-### Ошибка: "No module named 'aiogram'"
-
-```bash
-# Убедитесь, что зависимости установлены
-pip install -r requirements.txt
-```
-
-### Ошибка: "TELEGRAM_BOT_TOKEN must be set"
-
-```bash
-# Проверьте .env файл
-cat .env | grep TELEGRAM_BOT_TOKEN
-
-# Убедитесь, что токен не равен "YOUR_BOT_TOKEN_HERE"
-```
-
-### Ошибка: "Ollama connection failed"
-
-```bash
-# Проверьте, что Ollama запущена
-curl http://localhost:11434/api/tags
-
-# Если не запущена, запустите
-ollama serve
-```
-
-### Ошибка: "Database locked"
-
-```bash
-# Остановите все процессы бота
-pkill -f "python -m app.main"
-
-# Удалите lock файл
-rm data/oleg.db-journal
-
-# Перезапустите бота
-```
-
-### Docker: "Cannot connect to Docker daemon"
-
-```bash
-# Запустите Docker Desktop (Windows/Mac)
-# Или запустите Docker service (Linux)
-sudo systemctl start docker
-```
-
-## Полезные команды
-
-```bash
-# Показать все доступные команды
-make help
-
-# Проверить проект
-python check_project.py
-
-# Форматировать код
-make format
-
-# Проверить код
-make lint
-
-# Запустить все проверки
-make check
-
-# Очистить кэш
-make clean
-
-# Обновить зависимости
-make update-deps
-```
-
-## Следующие шаги
-
-1. Прочитайте [QUICKSTART.md](QUICKSTART.md) для быстрого старта
-2. Изучите [README.md](README.md) для полной документации
-3. Посмотрите [IMPROVEMENTS.md](IMPROVEMENTS.md) для деталей улучшений
-4. Проверьте [CHANGELOG.md](CHANGELOG.md) для истории изменений
-
-## Поддержка
-
-Если у вас возникли проблемы:
-
-1. Проверьте логи: `tail -f logs/oleg.log`
-2. Проверьте конфигурацию: `python check_project.py`
-3. Проверьте документацию выше
-4. Создайте issue в репозитории
 
 ---
 
-**Удачи с ботом Олег! 🤖**
+## 🔧 Разработка
+
+### Pre-commit hooks
+
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+### Форматирование
+
+```bash
+black app/
+isort app/
+```
+
+### Линтинг
+
+```bash
+flake8 app/
+mypy app/
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### "No module named 'aiogram'"
+
+```bash
+pip install -r requirements.txt
+```
+
+### "TELEGRAM_BOT_TOKEN must be set"
+
+```bash
+# Проверь .env
+cat .env | grep TELEGRAM_BOT_TOKEN
+```
+
+### "Ollama connection failed"
+
+```bash
+# Проверь Ollama
+curl http://localhost:11434/api/tags
+
+# Запусти если не работает
+ollama serve
+```
+
+### "Database locked"
+
+```bash
+# Останови бота
+pkill -f "python -m app.main"
+
+# Удали lock
+rm data/oleg.db-journal
+```
+
+### Docker: "Cannot connect"
+
+```bash
+# Linux
+sudo systemctl start docker
+
+# Windows/Mac
+# Запусти Docker Desktop
+```
+
+---
+
+## 📁 Структура проекта
+
+```
+oleg-bot/
+├── app/
+│   ├── handlers/          # Команды
+│   ├── services/          # Бизнес-логика
+│   │   ├── redis_client.py
+│   │   ├── metrics.py
+│   │   └── ollama_client.py
+│   ├── middleware/        # Rate limit, spam
+│   ├── database/          # Модели
+│   └── main.py
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── monitoring/
+│   ├── prometheus.yml
+│   └── grafana/
+├── migrations/            # Alembic
+├── docker-compose.yml
+├── requirements.txt
+└── .env.example
+```
+
+---
+
+## 📚 Следующие шаги
+
+1. [QUICKSTART.md](QUICKSTART.md) — Быстрый старт
+2. [WHATS_NEW_V4.md](WHATS_NEW_V4.md) — Что нового в 4.0
+3. [TESTING.md](TESTING.md) — Тестирование
+4. [CHANGELOG.md](CHANGELOG.md) — История изменений
+
+---
+
+## 💬 Поддержка
+
+1. Проверь логи: `docker-compose logs -f`
+2. Проверь `.env`
+3. Создай issue в репозитории
+
+---
+
+**Удачи с Олегом! 🤖**

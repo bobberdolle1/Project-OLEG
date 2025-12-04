@@ -55,4 +55,13 @@ class MessageLoggerMiddleware(BaseMiddleware):
                     await session.commit()
                 except Exception:
                     await session.rollback()
+
+            # Track message metrics
+            try:
+                from app.services.metrics import track_message_processed
+                chat_type = event.chat.type if event.chat else "unknown"
+                await track_message_processed(chat_type)
+            except Exception:
+                pass  # Don't fail on metrics error
+
         return await handler(event, data)

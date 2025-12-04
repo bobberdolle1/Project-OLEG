@@ -71,6 +71,13 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     await downloader.start_workers()
     logger.info("Воркеры загрузки контента запущены")
 
+    # Start metrics server
+    if settings.metrics_enabled:
+        logger.info("Запуск сервера метрик...")
+        from app.services.metrics_server import metrics_server
+        await metrics_server.start()
+        logger.info(f"Сервер метрик запущен на порту {settings.metrics_port}")
+
 
 def build_dp() -> Dispatcher:
     """Построить диспетчер с обработчиками."""
@@ -148,6 +155,13 @@ async def main():
         await downloader.stop_workers()
         logger.info("Воркеры загрузки контента остановлены")
         
+        # Stop metrics server
+        if settings.metrics_enabled:
+            logger.info("Остановка сервера метрик...")
+            from app.services.metrics_server import metrics_server
+            await metrics_server.stop()
+            logger.info("Сервер метрик остановлен")
+
         # Close Redis connection
         if settings.redis_enabled:
             logger.info("Закрытие соединения с Redis...")

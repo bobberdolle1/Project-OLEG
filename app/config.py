@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     rate_limit_requests: int = Field(default=10, ge=1, description="Max requests per window")
     rate_limit_window: int = Field(default=60, ge=1, description="Rate limit window in seconds")
 
+    # Metrics
+    metrics_enabled: bool = Field(default=False, description="Enable Prometheus metrics endpoint")
+    metrics_port: int = Field(default=9090, ge=1, le=65535, description="Metrics server port")
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

@@ -129,7 +129,7 @@ class SpamFilterMiddleware(BaseMiddleware):
             if config.mode == "dictatorship":
                 # Full restrictions in dictatorship mode
                 from aiogram.types import ChatPermissions
-                until_date = datetime.utcnow() + timedelta(hours=1)
+                until_date = utc_now() + timedelta(hours=1)
                 await event.bot.restrict_chat_member(
                     chat_id=chat_id,
                     user_id=user_id,
@@ -139,7 +139,8 @@ class SpamFilterMiddleware(BaseMiddleware):
             elif config.mode == "normal":
                 # Normal restrictions
                 from aiogram.types import ChatPermissions
-                until_date = datetime.utcnow() + timedelta(minutes=5)
+from app.utils import utc_now
+                until_date = utc_now() + timedelta(minutes=5)
                 await event.bot.restrict_chat_member(
                     chat_id=chat_id,
                     user_id=user_id,

@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db
-from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses
+from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
 from app.handlers.private_admin import router as private_admin_router
 from app.handlers.chat_join import router as chat_join_router
 from app.services.content_downloader import router as content_downloader_router
@@ -31,6 +31,17 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     logger.info("Инициализация базы данных...")
     await init_db()
     logger.info("База данных инициализирована")
+    
+    # Initialize Redis
+    if settings.redis_enabled:
+        logger.info("Подключение к Redis...")
+        from app.services.redis_client import redis_client
+        await redis_client.connect()
+        
+        # Configure rate limiter to use Redis
+        from app.middleware.rate_limit import rate_limiter
+        rate_limiter.set_redis_client(redis_client)
+        logger.info("Redis подключен и настроен для rate limiting")
 
     logger.info("Настройка планировщика задач...")
     await setup_scheduler(bot)
@@ -70,9 +81,14 @@ def build_dp() -> Dispatcher:
     dp.message.middleware(SpamFilterMiddleware())
     dp.message.middleware(SpamControlMiddleware())  # Middleware для защиты от "дрючки"
     dp.message.middleware(ToxicityAnalysisMiddleware())
+    
+    # Rate limiting (should be one of the first middlewares)
+    from app.middleware.rate_limit import RateLimitMiddleware
+    dp.message.outer_middleware(RateLimitMiddleware())
 
     # Routers
     dp.include_routers(
+        help.router,  # Help должен быть первым для приоритета
         games.router,
         moderation.router,
         antiraid.router,
@@ -131,6 +147,13 @@ async def main():
         from app.services.content_downloader import downloader
         await downloader.stop_workers()
         logger.info("Воркеры загрузки контента остановлены")
+        
+        # Close Redis connection
+        if settings.redis_enabled:
+            logger.info("Закрытие соединения с Redis...")
+            from app.services.redis_client import redis_client
+            await redis_client.close()
+            logger.info("Redis соединение закрыто")
 
         await bot.session.close()
         logger.info("Сессия бота закрыта")

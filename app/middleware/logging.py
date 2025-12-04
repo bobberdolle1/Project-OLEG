@@ -8,6 +8,7 @@ from datetime import datetime
 from app.database.session import get_session
 from app.database.models import MessageLog, User
 from sqlalchemy import select, update
+from app.utils import utc_now
 
 
 LINK_RE = re.compile(r"https?:\/\/\S+", re.IGNORECASE)
@@ -47,7 +48,7 @@ class MessageLoggerMiddleware(BaseMiddleware):
                     text=text,
                     has_link=bool(links),
                     links="\n".join(links) if links else None,
-                    created_at=datetime.utcnow(),
+                    created_at=utc_now(),
                 )
                 session.add(ml)
                 try:

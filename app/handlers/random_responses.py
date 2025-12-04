@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.database.session import get_session
 from app.database.models import Chat, User
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class RandomResponseManager:
         Returns:
             True, если можно отправить случайное сообщение
         """
-        current_time = datetime.utcnow()
+        current_time = utc_now()
         
         # Проверяем, включены ли случайные сообщения для этого чата
         if chat_id not in self.chats_with_random_enabled:
@@ -147,7 +148,7 @@ class RandomResponseManager:
         Args:
             chat_id: ID чата
         """
-        self.last_message_times[chat_id] = datetime.utcnow()
+        self.last_message_times[chat_id] = utc_now()
 
 
 # Создаем глобальный экземпляр менеджера

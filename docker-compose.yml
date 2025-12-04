@@ -22,6 +22,7 @@ services:
       - oleg-network
     depends_on:
       - chromadb
+      - redis
     healthcheck:
       test: ["CMD", "python", "-c", "import logging; print('alive')"]
       interval: 30s
@@ -91,7 +92,30 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  # Опциональный: PostgreSQL для масштабирования (закомментирован по умолчанию)
+  # Redis для кэширования и rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: oleg-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - oleg-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # PostgreSQL для продакшена (закомментирован по умолчанию)
   # postgres:
   #   image: postgres:15-alpine
   #   container_name: oleg-postgres
@@ -102,6 +126,8 @@ services:
   #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
   #   volumes:
   #     - postgres-data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
   #   networks:
   #     - oleg-network
   #   healthcheck:
@@ -109,6 +135,11 @@ services:
   #     interval: 10s
   #     timeout: 5s
   #     retries: 5
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "5m"
+  #       max-file: "2"
 
 volumes:
   oleg-data:
@@ -118,6 +149,8 @@ volumes:
   chroma-data:
     driver: local
   clickhouse-data:
+    driver: local
+  redis-data:
     driver: local
   # postgres-data:
   #   driver: local

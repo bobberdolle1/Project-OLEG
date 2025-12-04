@@ -10,6 +10,7 @@ from sqlalchemy import select, delete
 
 from app.database.session import get_session
 from app.database.models import User, Warning
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ async def cmd_ban(msg: Message):
 
     until_date = None
     if duration is not None:
-        until_date = datetime.utcnow() + duration
+        until_date = utc_now() + duration
 
     try:
         await msg.bot.ban_chat_member(
@@ -163,7 +164,7 @@ async def cmd_mute(msg: Message):
     if len(parts) >= 4:
         reason = " ".join(parts[3:])
 
-    until_date = datetime.utcnow() + (duration or timedelta(hours=1))
+    until_date = utc_now() + (duration or timedelta(hours=1))
 
     try:
         perms = ChatPermissions(
@@ -285,7 +286,7 @@ async def cmd_warn(msg: Message):
             await msg.bot.ban_chat_member(
                 chat_id=msg.chat.id,
                 user_id=target_user.id,
-                until_date=datetime.utcnow() + timedelta(days=1)
+                until_date=utc_now() + timedelta(days=1)
             )
             await msg.answer(f"Пользователь @{target_user.username or target_user.id} забанен на 24 часа за 3 предупреждения.")
 

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from app.database.session import get_session
 from app.database.models import GlobalStats
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ async def cmd_stats(msg: Message):
     """
     async_session = get_session()
     async with async_session() as session:
-        today = datetime.utcnow().date()
+        today = utc_now().date()
         yesterday = today - timedelta(days=1)
 
         today_stats_res = await session.execute(

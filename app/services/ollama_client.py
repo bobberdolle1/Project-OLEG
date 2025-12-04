@@ -108,7 +108,10 @@ async def _ollama_chat(
     Raises:
         httpx.HTTPError: При критической ошибке Ollama
     """
+    import time
+    start_time = time.time()
     model_to_use = model or settings.ollama_model
+    success = False
     
     if not settings.ollama_cache_enabled or not use_cache:
         logger.debug("Ollama cache disabled or bypassed for this request.")
@@ -150,6 +153,16 @@ async def _ollama_chat(
                         ollama_cache[cache_key] = content
                         logger.debug(f"Cache stored for Ollama request (key: {cache_key[:20]}...)")
                 
+                success = True
+                duration = time.time() - start_time
+                
+                # Track metrics
+                try:
+                    from app.services.metrics import track_ollama_request
+                    await track_ollama_request(model_to_use, duration, success)
+                except Exception:
+                    pass  # Don't fail on metrics error
+                
                 return content.strip()
         except httpx.TimeoutException as e:
             logger.warning(
@@ -180,6 +193,13 @@ async def _ollama_chat(
         except Exception as e:
             logger.error(f"Ollama unexpected error: {e}")
             if attempt == retry:
+                # Track failed request
+                duration = time.time() - start_time
+                try:
+                    from app.services.metrics import track_ollama_request
+                    await track_ollama_request(model_to_use, duration, False)
+                except Exception:
+                    pass
                 raise
 
     return ""  # Fallback (не должно достичь этой строки)
@@ -251,12 +271,18 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     try:
         # Используем основную модель для текстовых ответов
         return await _ollama_chat(messages, model=settings.ollama_base_model)
+    except httpx.TimeoutException:
+        logger.error("Ollama timeout - server not responding")
+        return "Сервер ИИ тупит. Попробуй позже, чемпион."
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Ollama HTTP error: {e.response.status_code}")
+        return "Сервер ИИ сломался. Админы уже в курсе (наверное)."
+    except httpx.RequestError as e:
+        logger.error(f"Ollama connection error: {e}")
+        return "Не могу достучаться до сервера ИИ. Проверь, запущен ли Ollama."
     except Exception as e:
-        logger.error(f"Failed to generate reply: {e}")
-        return (
-            "Чё-то сломалось на сервере ИИ. "
-            "Окончательно сломалось, да."
-        )
+        logger.error(f"Unexpected error in generate_text_reply: {e}")
+        return "Что-то пошло не так. Попробуй ещё раз или обратись к админу."
 
 
 async def analyze_image_content(image_data: bytes, query: str = "Опиши, что ты видишь на изображении") -> str:
@@ -281,12 +307,18 @@ async def analyze_image_content(image_data: bytes, query: str = "Опиши, ч�
 
         # Используем визуальную модель для анализа изображения
         return await _ollama_chat(messages, model=settings.ollama_vision_model)
+    except httpx.TimeoutException:
+        logger.error("Vision model timeout")
+        return "Сервер ИИ тупит с анализом картинки. Попробуй позже."
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Vision model HTTP error: {e.response.status_code}")
+        return "Визуальная модель недоступна. Админы уже в курсе."
+    except httpx.RequestError:
+        logger.error("Vision model connection error")
+        return "Не могу подключиться к визуальной модели. Проверь Ollama."
     except Exception as e:
-        logger.error(f"Failed to analyze image: {e}")
-        return (
-            "Не могу разобрать, что за херня на этой картинке. "
-            "Сервер ИИ сломался окончательно."
-        )
+        logger.error(f"Unexpected error in analyze_image_content: {e}")
+        return "Что-то пошло не так при анализе картинки."
 
 
 async def search_memory_db(query: str) -> str:
@@ -343,6 +375,7 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
 
         # Попробуем распарсить JSON
         import json
+from app.utils import utc_now
         facts = json.loads(response)
 
         # Добавим метаданные к фактам
@@ -480,7 +513,7 @@ async def gather_comprehensive_chat_stats(chat_id: int, hours: int = 24):
         top_flooder_info — (имя пользователя, количество сообщений)
     """
     async_session = get_session()
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = utc_now() - timedelta(hours=hours)
     topics: dict[str, int] = {}
     links: list[str] = []
     user_messages_count: dict[str, int] = {}  # Счетчик сообщений по пользователям
@@ -599,7 +632,7 @@ async def analyze_chat_toxicity(chat_id: int, hours: int = 24) -> tuple[float, s
         Кортеж (уровень токсичности в %, вердикт от ИИ)
     """
     async_session = get_session()
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = utc_now() - timedelta(hours=hours)
 
     async with async_session() as session:
         res = await session.execute(
@@ -657,7 +690,7 @@ async def summarize_chat(chat_id: int) -> str:
     # Анализируем токсичность
     toxicity_percentage, toxicity_verdict = await analyze_chat_toxicity(chat_id, 24)
 
-    today = _format_date_ru(datetime.utcnow())
+    today = _format_date_ru(utc_now())
 
     lines = [f"📆 Что обсуждалось вчера [{today}]"]
 
@@ -702,7 +735,7 @@ async def recent_active_usernames(
         Список уникальных никнеймов в случайном порядке
     """
     async_session = get_session()
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = utc_now() - timedelta(hours=hours)
     async with async_session() as session:
         res = await session.execute(
             select(MessageLog.username).where(

@@ -6,6 +6,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import ChatPermissions
+from app.utils import utc_now
 
 # Simple in-memory join tracking per chat
 join_events: Dict[int, Deque[datetime]] = {}
@@ -39,7 +40,7 @@ def approve_keyboard(user_id: int) -> InlineKeyboardMarkup:
 
 @router.message(F.new_chat_members)
 async def on_new_members(msg: Message):
-    now = datetime.utcnow()
+    now = utc_now()
     chat_id = msg.chat.id
 
     # track

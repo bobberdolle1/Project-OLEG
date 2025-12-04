@@ -1,71 +1,112 @@
+"""Application configuration with validation."""
+
 import os
-from dataclasses import dataclass
-from dotenv import load_dotenv
+from typing import Optional
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
 
+class Settings(BaseSettings):
+    """Application settings with validation."""
 
-@dataclass
-class Settings:
-    """Конфигурация приложения из переменных окружения."""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
 
     # Telegram
-    bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    owner_id: int | None = (
-        int(os.getenv("OWNER_ID")) if os.getenv("OWNER_ID") else None
-    )
+    telegram_bot_token: str = Field(..., min_length=10, description="Telegram bot token from BotFather")
+    owner_id: Optional[int] = Field(None, description="Bot owner's Telegram ID")
 
     # Ollama
-    ollama_base_url: str = os.getenv(
-        "OLLAMA_BASE_URL", "http://localhost:11434"
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Ollama API base URL"
     )
-    # Модель для основных задач (чтение/генерация текста)
-    ollama_base_model: str = os.getenv(
-        "OLLAMA_BASE_MODEL", "deepseek-v3.1:671b-cloud"
+    ollama_base_model: str = Field(
+        default="deepseek-v3.1:671b-cloud",
+        description="Main model for text generation"
     )
-
-    # Модель для визуального анализа (обработка изображений)
-    ollama_vision_model: str = os.getenv(
-        "OLLAMA_VISION_MODEL", "qwen3-vl:4b"
+    ollama_vision_model: str = Field(
+        default="qwen3-vl:4b",
+        description="Model for image analysis"
     )
-
-    # Модель для работы с памятью и поиском (RAG)
-    ollama_memory_model: str = os.getenv(
-        "OLLAMA_MEMORY_MODEL", "glm-4.6:cloud"
+    ollama_memory_model: str = Field(
+        default="glm-4.6:cloud",
+        description="Model for RAG and memory search"
     )
+    ollama_timeout: int = Field(default=90, ge=10, le=300, description="Ollama request timeout in seconds")
+    ollama_cache_enabled: bool = Field(default=True, description="Enable response caching")
+    ollama_cache_ttl: int = Field(default=3600, ge=60, description="Cache TTL in seconds")
+    ollama_cache_max_size: int = Field(default=128, ge=10, description="Max cache size")
+    
+    # Toxicity analysis
+    toxicity_analysis_enabled: bool = Field(default=True, description="Enable toxicity analysis")
+    toxicity_threshold: int = Field(default=75, ge=0, le=100, description="Toxicity threshold (0-100)")
 
-    # Модель по умолчанию (для обратной совместимости)
-    @property
-    def ollama_model(self) -> str:
-        return self.ollama_base_model
-    ollama_timeout: int = int(
-        os.getenv("OLLAMA_TIMEOUT", "90")
-    )
-    ollama_cache_enabled: bool = os.getenv("OLLAMA_CACHE_ENABLED", "true").lower() == "true"
-    ollama_cache_ttl: int = int(os.getenv("OLLAMA_CACHE_TTL", "3600")) # seconds
-    ollama_cache_max_size: int = int(os.getenv("OLLAMA_CACHE_MAX_SIZE", "128"))
-    toxicity_analysis_enabled: bool = os.getenv("TOXICITY_ANALYSIS_ENABLED", "true").lower() == "true"
-    toxicity_threshold: int = int(os.getenv("TOXICITY_THRESHOLD", "75"))
+    # ChromaDB (RAG)
+    chromadb_persist_dir: str = Field(default="./data/chroma", description="ChromaDB persistence directory")
+    chromadb_collection_name: str = Field(default="oleg_kb", description="ChromaDB collection name")
 
-    # ChromaDB (для RAG - "Мозг Олега")
-    chromadb_persist_dir: str = os.getenv("CHROMADB_PERSIST_DIR", "./data/chroma")  # Директория сохранения ChromaDB
-    chromadb_collection_name: str = os.getenv("CHROMADB_COLLECTION_NAME", "oleg_kb")  # Название коллекции для знаний
-
-    # Векторное хранилище
-    embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")  # Модель для эмбеддингов
-    similarity_threshold: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.7"))  # Порог схожести для RAG
+    # Vector store
+    embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model name")
+    similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Similarity threshold for RAG")
 
     # Database
-    database_url: str = os.getenv(
-        "DATABASE_URL", "sqlite+aiosqlite:///./data/oleg.db"
+    database_url: str = Field(
+        default="sqlite+aiosqlite:///./data/oleg.db",
+        description="Database connection URL (supports PostgreSQL: postgresql+asyncpg://user:pass@host/db)"
     )
+    
+    # Redis
+    redis_enabled: bool = Field(default=False, description="Enable Redis for caching and rate limiting")
+    redis_host: str = Field(default="localhost", description="Redis host")
+    redis_port: int = Field(default=6379, ge=1, le=65535, description="Redis port")
+    redis_db: int = Field(default=0, ge=0, description="Redis database number")
+    redis_password: Optional[str] = Field(default=None, description="Redis password")
 
     # Timezone
-    timezone: str = os.getenv("TIMEZONE", "Europe/Moscow")
+    timezone: str = Field(default="Europe/Moscow", description="Bot timezone")
 
     # Logging
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    log_file: str = os.getenv("LOG_FILE", "logs/oleg.log")
+    log_level: str = Field(default="INFO", description="Logging level")
+    log_file: str = Field(default="logs/oleg.log", description="Log file path")
+
+    # Rate limiting
+    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
+    rate_limit_requests: int = Field(default=10, ge=1, description="Max requests per window")
+    rate_limit_window: int = Field(default=60, ge=1, description="Rate limit window in seconds")
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level."""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}")
+        return v_upper
+
+    @field_validator("telegram_bot_token")
+    @classmethod
+    def validate_bot_token(cls, v: str) -> str:
+        """Validate bot token format."""
+        if not v or v == "YOUR_BOT_TOKEN_HERE":
+            raise ValueError("telegram_bot_token must be set to a valid token")
+        return v
+
+    @property
+    def bot_token(self) -> str:
+        """Alias for backward compatibility."""
+        return self.telegram_bot_token
+
+    @property
+    def ollama_model(self) -> str:
+        """Alias for backward compatibility."""
+        return self.ollama_base_model
 
 
+# Global settings instance
 settings = Settings()

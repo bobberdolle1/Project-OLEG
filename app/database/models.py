@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint, func, Float, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .session import Base
+from app.utils import utc_now
 
 
 class User(Base):
@@ -13,7 +14,7 @@ class User(Base):
     username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     first_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     status: Mapped[str] = mapped_column(String(16), default='active', index=True)  # active, left
     strikes: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -39,7 +40,7 @@ class MessageLog(Base):
     text: Mapped[Optional[str]] = mapped_column(Text)
     has_link: Mapped[bool] = mapped_column(Boolean, default=False)
     links: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # '\n' separated
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
 
 
 class GameStat(Base):
@@ -78,7 +79,7 @@ class UserAchievement(Base):
     __tablename__ = "user_achievements"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     achievement_id: Mapped[int] = mapped_column(ForeignKey("achievements.id"), primary_key=True)
-    unlocked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    unlocked_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     user: Mapped["User"] = relationship(back_populates="user_achievements")
     achievement: Mapped["Achievement"] = relationship(back_populates="users")
@@ -92,7 +93,7 @@ class TradeOffer(Base):
     item_quantity: Mapped[int] = mapped_column(Integer)
     price: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(64), default="active")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     seller: Mapped["User"] = relationship(foreign_keys=[seller_user_id])
 
@@ -107,7 +108,7 @@ class Auction(Base):
     ends_at: Mapped[datetime] = mapped_column(DateTime)
     status: Mapped[str] = mapped_column(String(64), default="active")
     current_highest_bid_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bids.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     seller: Mapped["User"] = relationship(foreign_keys=[seller_user_id])
     bids: Mapped[list["Bid"]] = relationship(back_populates="auction")
@@ -120,7 +121,7 @@ class Bid(Base):
     auction_id: Mapped[int] = mapped_column(ForeignKey("auctions.id"))
     bidder_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     amount: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     auction: Mapped["Auction"] = relationship(back_populates="bids")
     bidder: Mapped["User"] = relationship(foreign_keys=[bidder_user_id])
@@ -144,7 +145,7 @@ class UserQuest(Base):
     __tablename__ = "user_quests"
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     quest_id: Mapped[int] = mapped_column(ForeignKey("quests.id"), primary_key=True)
-    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -157,7 +158,7 @@ class Guild(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     owner: Mapped["User"] = relationship(foreign_keys=[owner_user_id])
     members: Mapped[list["GuildMember"]] = relationship(back_populates="guild")
@@ -167,7 +168,7 @@ class GuildMember(Base):
     __tablename__ = "guild_members"
     guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id"), primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     role: Mapped[str] = mapped_column(String(64), default="member")
 
     guild: Mapped["Guild"] = relationship(back_populates="members")
@@ -183,7 +184,7 @@ class TeamWar(Base):
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(64), default="declared")
     winner_guild_id: Mapped[Optional[int]] = mapped_column(ForeignKey("guilds.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     declarer_guild: Mapped["Guild"] = relationship(foreign_keys=[declarer_guild_id])
     defender_guild: Mapped["Guild"] = relationship(foreign_keys=[defender_guild_id])
@@ -199,7 +200,7 @@ class TeamWarParticipant(Base):
     score: Mapped[int] = mapped_column(Integer, default=0)
     kills: Mapped[int] = mapped_column(Integer, default=0)
     deaths: Mapped[int] = mapped_column(Integer, default=0)
-    joined_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     team_war: Mapped["TeamWar"] = relationship(back_populates="participants")
     user: Mapped["User"] = relationship() # One-way relationship
@@ -211,7 +212,7 @@ class DuoTeam(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user1_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     user2_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     user1: Mapped["User"] = relationship(foreign_keys=[user1_id])
     user2: Mapped["User"] = relationship(foreign_keys=[user2_id])
@@ -258,7 +259,7 @@ class UserQuestionHistory(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
-    asked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    asked_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     user: Mapped["User"] = relationship(back_populates="question_history")
 
@@ -270,7 +271,7 @@ class SpamPattern(Base):
     is_regex: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 class Warning(Base):
     __tablename__ = "warnings"
@@ -278,7 +279,7 @@ class Warning(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     moderator_id: Mapped[int] = mapped_column(BigInteger)
     reason: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     user: Mapped["User"] = relationship(back_populates="warnings")
 
@@ -303,7 +304,7 @@ class ToxicityLog(Base):
     score: Mapped[float] = mapped_column(Float)
     category: Mapped[Optional[str]] = mapped_column(String(128))
     action_taken: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class Quote(Base):
@@ -320,7 +321,7 @@ class Quote(Base):
     sticker_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # ID файла стикера в Telegram
     telegram_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID чата в Telegram
     telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID сообщения в Telegram
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
 
     user: Mapped["User"] = relationship(back_populates="quotes")
 
@@ -335,7 +336,7 @@ class ModerationConfig(Base):
     spam_link_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     swear_filter: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_warn_threshold: Mapped[int] = mapped_column(Integer, default=3)  # Порог для авто-варнов
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class Chat(Base):
@@ -363,7 +364,7 @@ class Admin(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     role: Mapped[str] = mapped_column(String(20), default="moderator")  # 'owner', 'moderator'
     added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Кто добавил
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Связь с пользователем
     user: Mapped["User"] = relationship(back_populates="admin_roles")
@@ -377,7 +378,7 @@ class Blacklist(Base):
     chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Если NULL, то глобальный бан
     reason: Mapped[str] = mapped_column(Text)
     added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     user: Mapped["User"] = relationship(back_populates="blacklist_entries")
 
@@ -387,7 +388,7 @@ class PrivateChat(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     message_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON для хранения контекста
-    last_interaction: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_interaction: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
     toxicity_level: Mapped[float] = mapped_column(Float, default=0.0)  # Уровень токсичности пользователя
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)  # Заблокирован ли пользователь
 

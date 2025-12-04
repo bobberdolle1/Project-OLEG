@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload
 from app.database.session import get_session
 from app.database.models import User, Wallet, GameStat, Auction, Bid
 from app.handlers.games import ensure_user # Reusing ensure_user from games handler
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ async def cmd_create_auction(msg: Message):
     if quantity <= 0 or start_price <= 0 or duration_hours <= 0:
         return await msg.reply("Все значения должны быть положительными числами.")
 
-    ends_at = datetime.utcnow() + timedelta(hours=duration_hours)
+    ends_at = utc_now() + timedelta(hours=duration_hours)
 
     async with async_session() as session:
         # Check if seller has the item
@@ -84,7 +85,7 @@ async def cmd_list_auctions(msg: Message):
     async with async_session() as session:
         active_auctions_res = await session.execute(
             select(Auction)
-            .filter(Auction.status == "active", Auction.ends_at > datetime.utcnow())
+            .filter(Auction.status == "active", Auction.ends_at > utc_now())
             .options(joinedload(Auction.seller), joinedload(Auction.current_highest_bid).joinedload(Bid.bidder))
             .limit(10)
         )
@@ -146,7 +147,7 @@ async def cmd_bid(msg: Message):
         if auction.seller_user_id == bidder_user.id:
             return await msg.reply("Нельзя делать ставки на свой собственный аукцион.")
         
-        if auction.ends_at < datetime.utcnow():
+        if auction.ends_at < utc_now():
             return await msg.reply("Аукцион уже завершен.")
 
         current_highest_bid_amount = auction.current_highest_bid.amount if auction.current_highest_bid else auction.start_price

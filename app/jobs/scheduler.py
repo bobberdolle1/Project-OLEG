@@ -13,6 +13,7 @@ from app.config import settings
 from app.services.ollama_client import summarize_chat, generate_creative
 from app.database.session import get_session
 from app.database.models import User, Wallet, GameStat, Auction, Bid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ async def job_close_auctions(bot: Bot):
         expired_auctions_res = await session.execute(
             select(Auction)
             .filter(
-                Auction.ends_at <= datetime.utcnow(),
+                Auction.ends_at <= utc_now(),
                 Auction.status == "active"
             )
             .options(
@@ -159,7 +160,7 @@ async def job_assign_daily_quests(bot: Bot):
                 user_quest = UserQuest(
                     user_id=user.id,
                     quest_id=quest.id,
-                    assigned_at=datetime.utcnow(),
+                    assigned_at=utc_now(),
                     progress=0,
                     completed_at=None
                 )
@@ -180,7 +181,7 @@ async def job_update_team_wars(bot: Bot):
             .filter(
                 TeamWar.start_time == None, # Not yet started
                 TeamWar.status == "declared",
-                TeamWar.created_at <= datetime.utcnow() - timedelta(minutes=5) # Allow some time for acceptance
+                TeamWar.created_at <= utc_now() - timedelta(minutes=5) # Allow some time for acceptance
             )
             .options(joinedload(TeamWar.declarer_guild), joinedload(TeamWar.defender_guild))
         )
@@ -235,7 +236,7 @@ async def job_update_team_wars(bot: Bot):
         active_wars_res = await session.execute(
             select(TeamWar)
             .filter(
-                TeamWar.end_time <= datetime.utcnow(),
+                TeamWar.end_time <= utc_now(),
                 TeamWar.status == "active"
             )
             .options(joinedload(TeamWar.declarer_guild), joinedload(TeamWar.defender_guild))
@@ -287,7 +288,7 @@ async def job_aggregate_daily_stats(bot: Bot):
     """
     async_session = get_session()
     async with async_session() as session:
-        today = datetime.utcnow().date()
+        today = utc_now().date()
         yesterday = today - timedelta(days=1)
 
         # Get total stats from GameStat for today

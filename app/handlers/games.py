@@ -13,6 +13,7 @@ from app.database.models import User, GameStat, Wallet
 from app.services.achievements import check_and_award_achievements
 from app.services.quests import check_and_update_quests
 from app.services.profile import get_full_user_profile
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ async def cmd_grow(msg: Message):
             )
         )
         gs = res.scalars().first()
-        now = datetime.utcnow()
+        now = utc_now()
         if gs.next_grow_at and gs.next_grow_at > now:
             delta = gs.next_grow_at - now
             hours, remainder = divmod(

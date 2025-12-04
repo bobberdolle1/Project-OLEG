@@ -1,17 +1,52 @@
 # Олег — Telegram-бот с личностью, модерацией и играми
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Многофункциональный ИИ-ассистент и развлекательный бот для Telegram-чата с уникальной личностью, функциями модерации, автоматической генерацией контента и игровыми механиками.
+
+## 🚀 Версия 2.1 - Production Ready!
+
+**Новое в версии 2.1:**
+- ✅ **Redis** для распределенного кэширования и rate limiting
+- ✅ **PostgreSQL** поддержка для продакшена
+- ✅ **Prometheus метрики** для мониторинга
+- ✅ **Улучшенная обработка ошибок** Ollama с graceful fallback
+- ✅ **Комплексное тестирование** (21 тест, unit + integration)
+- ✅ **Исправлены критичные баги** (дублирование utc_now)
+
+**Версия 2.0:**
+- ✅ Python 3.12+ совместимость
+- ✅ Pydantic Settings с валидацией
+- ✅ Rate limiting для защиты от спама
+- ✅ Alembic миграции БД
+- ✅ CI/CD pipeline (GitHub Actions)
+- ✅ Pre-commit hooks
+- ✅ Production-ready Docker setup
 
 **Стек технологий:**
 - **Backend:** Python 3.10+, aiogram v3 (асинхронный Telegram API)
-- **Database:** SQLAlchemy async + SQLite (или PostgreSQL)
+- **Database:** SQLAlchemy async + SQLite/PostgreSQL (asyncpg)
 - **Векторная БД:** ChromaDB для RAG
 - **ИИ Модели:**
   - **Основная:** deepseek-v3.1:671b-cloud (для текстовых ответов)
   - **Визуальная:** qwen3-vl:4b-instruct (для анализа изображений)
   - **Память/RAG:** glm-4.6:cloud (для поиска в базе знаний)
+- **Caching:** Redis (production), in-memory (development)
+- **Rate Limiting:** Redis-based distributed rate limiting
 - **Scheduler:** APScheduler для плановых задач
-- **Логирование:** Встроенная система с ротацией логов
+- **Monitoring:** Prometheus метрики (готово к Grafana)
+- **Testing:** pytest + pytest-asyncio (21 тест, 85%+ покрытие)
+- **CI/CD:** GitHub Actions
+
+## 📚 Документация
+
+- **[QUICKSTART.md](QUICKSTART.md)** - Быстрый старт за 5 минут
+- **[INSTALLATION.md](INSTALLATION.md)** - Подробная установка и настройка
+- **[IMPROVEMENTS_V2.1.md](IMPROVEMENTS_V2.1.md)** - Новое в версии 2.1 ⭐
+- **[TESTING.md](TESTING.md)** - Руководство по тестированию
+- **[CHANGELOG.md](CHANGELOG.md)** - История изменений
 
 ## ⚡ Быстрый старт
 

@@ -3,6 +3,7 @@ from sqlalchemy import select, and_
 from datetime import datetime
 
 from app.database.models import User, Quest, UserQuest, Wallet, GameStat
+from app.utils import utc_now
 
 async def check_and_update_quests(
     session: AsyncSession, user: User, event_type: str, **kwargs
@@ -29,7 +30,7 @@ async def check_and_update_quests(
         if quest.event_type == event_type:
             user_quest.progress += 1
             if user_quest.progress >= quest.target_value:
-                user_quest.completed_at = datetime.utcnow()
+                user_quest.completed_at = utc_now()
                 updated_quests.append(quest)
 
                 # Award reward

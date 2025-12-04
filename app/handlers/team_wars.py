@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 from app.database.session import get_session
 from app.database.models import User, Guild, GuildMember, TeamWar, TeamWarParticipant
 from app.handlers.games import ensure_user # Reusing ensure_user from games handler
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ async def cmd_war_declare(msg: Message):
         if existing_war_res.scalars().first():
             return await msg.reply("Между вашими гильдиями уже идет война или объявлена новая.")
 
-        end_time = datetime.utcnow() + timedelta(hours=duration_hours)
+        end_time = utc_now() + timedelta(hours=duration_hours)
 
         new_war = TeamWar(
             declarer_guild_id=declarer_guild.id,
@@ -156,7 +157,7 @@ async def cmd_war_accept(msg: Message):
             return await msg.reply("Объявленная война от этой гильдии не найдена.")
 
         war.status = "active"
-        war.start_time = datetime.utcnow()
+        war.start_time = utc_now()
         await session.commit()
         await msg.reply(f"Вы приняли войну от гильдии '{declarer_guild.name}'. Война началась!")
         # Notify declarer guild leader

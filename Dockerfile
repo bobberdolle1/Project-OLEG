@@ -3,41 +3,54 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Установка Poetry
-RUN pip install --upgrade pip && pip install --no-cache-dir poetry==1.7.1
+# Установка системных зависимостей для сборки
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
-# Копирование зависимостей
-COPY pyproject.toml poetry.lock* ./
-
-# Создание виртуального окружения и установка зависимостей
-RUN python -m venv /opt/venv && \
-    . /opt/venv/bin/activate && \
-    poetry install --no-root --only main
+# Установка зависимостей Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --user -r requirements.txt
 
 # Финальный образ
 FROM python:3.12-slim
 
+LABEL maintainer="Oleg Bot Team"
+LABEL description="Telegram bot with AI, moderation and game mechanics"
+
 WORKDIR /app
 
-# Создание пользователя без привилегий
-RUN useradd -m -u 1000 oleg
+# Установка runtime зависимостей
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Копирование виртуального окружения из builder
-COPY --from=builder --chown=oleg:oleg /opt/venv /opt/venv
+# Создание пользователя без привилегий
+RUN useradd -m -u 1000 oleg && \
+    mkdir -p /app/data /app/logs /app/data/chroma && \
+    chown -R oleg:oleg /app
+
+# Копирование установленных пакетов из builder
+COPY --from=builder --chown=oleg:oleg /root/.local /home/oleg/.local
 
 # Копирование кода приложения
-COPY --chown=oleg:oleg . .
-
-# Создание директории для логов
-RUN mkdir -p logs && chown oleg:oleg logs
+COPY --chown=oleg:oleg app ./app
+COPY --chown=oleg:oleg alembic.ini migrations ./
 
 # Переключение на непривилегированного пользователя
 USER oleg
 
-# Активация виртуального окружения
-ENV PATH="/opt/venv/bin:$PATH" \
+# Настройка PATH для пользовательских пакетов
+ENV PATH="/home/oleg/.local/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
 
 # Запуск приложения
 CMD ["python", "-m", "app.main"]

@@ -6,12 +6,14 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 from datetime import datetime
+from sqlalchemy import select
 
 from app.database.session import get_session
 from app.database.models import User, UserQuestionHistory
 from app.handlers.games import ensure_user # For getting user object
-from app.services.ollama_client import generate_text_reply as generate_reply
+from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context
 from app.services.recommendations import generate_recommendation
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +226,7 @@ async def general_qna(msg: Message):
                 user_id=user.id,
                 question=text,
                 answer=reply,
-                asked_at=datetime.utcnow()
+                asked_at=utc_now()
             )
             session.add(history_entry)
             await session.commit()

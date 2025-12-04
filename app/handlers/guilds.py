@@ -9,6 +9,7 @@ from datetime import datetime
 from app.database.session import get_session
 from app.database.models import User, Guild, GuildMember
 from app.handlers.games import ensure_user # Reusing ensure_user from games handler
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def cmd_create_guild(msg: Message):
         new_guild = Guild(
             name=guild_name,
             owner_user_id=user.id,
-            created_at=datetime.utcnow()
+            created_at=utc_now()
         )
         session.add(new_guild)
         await session.flush() # To get guild_id
@@ -54,7 +55,7 @@ async def cmd_create_guild(msg: Message):
         new_guild_member = GuildMember(
             guild_id=new_guild.id,
             user_id=user.id,
-            joined_at=datetime.utcnow(),
+            joined_at=utc_now(),
             role="leader"
         )
         session.add(new_guild_member)
@@ -95,7 +96,7 @@ async def cmd_join_guild(msg: Message):
         new_guild_member = GuildMember(
             guild_id=guild.id,
             user_id=user.id,
-            joined_at=datetime.utcnow(),
+            joined_at=utc_now(),
             role="member"
         )
         session.add(new_guild_member)

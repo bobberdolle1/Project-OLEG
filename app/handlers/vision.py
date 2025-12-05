@@ -68,6 +68,8 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
     try:
         # Кодируем изображение в base64 для передачи в API
         image_base64 = base64.b64encode(image_data).decode('utf-8')
+        
+        logger.info(f"Image size: {len(image_data)} bytes, base64 length: {len(image_base64)}")
 
         # Системный промпт для анализа изображений в стиле Олега
         system_prompt = """ТЫ — ОЛЕГ, технический эксперт с острым глазом и ещё более острым языком.
@@ -140,6 +142,9 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
             }
         }
 
+        logger.info(f"Vision request to model: {settings.ollama_vision_model}")
+        logger.debug(f"Vision payload (without image): model={payload['model']}, prompt_len={len(prompt)}")
+        
         async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
             response = await client.post(
                 f"{settings.ollama_base_url}/api/chat",
@@ -148,7 +153,20 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
             response.raise_for_status()
 
             data = response.json()
+            logger.info(f"Vision API response status: {response.status_code}")
+            logger.info(f"Vision API response keys: {data.keys()}")
+            logger.info(f"Vision API message: {data.get('message', {})}")
+            
             result = data.get("message", {}).get("content", "").strip()
+            
+            if not result:
+                logger.error(f"Vision model returned EMPTY response! Full data: {data}")
+                # Попробуем альтернативный формат для cloud-моделей
+                # Некоторые модели возвращают ответ в другом поле
+                alt_content = data.get("response", "")
+                if alt_content:
+                    logger.info(f"Found response in 'response' field: {alt_content[:100]}")
+                    result = alt_content.strip()
             
             # Проверяем на зацикливание и очищаем если нужно
             is_looped, cleaned_result = _detect_loop_in_text(result)
@@ -275,6 +293,11 @@ async def handle_image_message(msg: Message):
                 await processing_msg.delete()
             except:
                 pass  # Игнорируем ошибку при удалении
+
+        # Проверяем на пустой результат
+        if not analysis_result or not analysis_result.strip():
+            await msg.reply("Хм, модель молчит. Попробуй другую картинку или спроси текстом.")
+            return
 
         # Обрезаем результат если слишком длинный (лимит Telegram - 4096 символов)
         max_length = 4000  # Оставляем запас

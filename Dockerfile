@@ -31,8 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Создание пользователя без привилегий
 RUN useradd -m -u 1000 oleg && \
-    mkdir -p /app/data /app/logs /app/data/chroma && \
-    chown -R oleg:oleg /app
+    mkdir -p /app/data /app/logs /app/data/chroma /home/oleg/.cache/whisper && \
+    chown -R oleg:oleg /app /home/oleg/.cache
 
 # Копирование установленных пакетов из builder
 COPY --from=builder --chown=oleg:oleg /root/.local /home/oleg/.local

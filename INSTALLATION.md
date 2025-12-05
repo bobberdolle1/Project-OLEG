@@ -1,4 +1,4 @@
-# 🔧 Установка — Олег 4.0
+# 🔧 Установка — Олег 4.5
 
 > Подробное руководство по установке и настройке
 
@@ -11,8 +11,8 @@
 | Python | 3.10 - 3.13 | ✅ |
 | Docker | 20.10+ | Рекомендуется |
 | Ollama | Latest | ✅ |
+| ffmpeg | Latest | Для голосовых |
 | Redis | 7.x | Для продакшена |
-| PostgreSQL | 15+ | Для продакшена |
 
 ---
 
@@ -36,6 +36,7 @@ nano .env
 ```bash
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 OWNER_ID=123456789
+OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
 ### 3. Запуск
@@ -44,7 +45,7 @@ OWNER_ID=123456789
 # Development
 docker-compose up -d
 
-# Production (с PostgreSQL + мониторинг)
+# Production
 docker-compose -f docker-compose.prod.yml up -d
 ```
 
@@ -61,13 +62,12 @@ docker-compose logs -f oleg-bot
 ### 1. Виртуальное окружение
 
 ```bash
-# Создать
 python -m venv venv
 
-# Активировать (Windows)
+# Windows
 venv\Scripts\activate
 
-# Активировать (Linux/Mac)
+# Linux/Mac
 source venv/bin/activate
 ```
 
@@ -77,11 +77,17 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Конфигурация
+### 3. ffmpeg (для голосовых)
 
 ```bash
-cp .env.example .env
-nano .env
+# Windows
+choco install ffmpeg
+
+# Ubuntu/Debian
+apt install ffmpeg
+
+# Mac
+brew install ffmpeg
 ```
 
 ### 4. Ollama модели
@@ -102,56 +108,51 @@ python -m app.main
 
 ## ⚙️ Конфигурация
 
-### Development (.env)
+### Основные параметры
 
 ```bash
 # Telegram
 TELEGRAM_BOT_TOKEN=your_token
 OWNER_ID=your_id
 
-# Ollama
+# Ollama — три модели
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
+OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud    # Текст
+OLLAMA_VISION_MODEL=qwen3-vl:235b-cloud       # Изображения
+OLLAMA_MEMORY_MODEL=glm-4.6:cloud             # RAG
+OLLAMA_TIMEOUT=90
 
-# Database (SQLite)
+# Голосовые
+VOICE_RECOGNITION_ENABLED=true
+WHISPER_MODEL=base  # tiny/base/small/medium/large
+
+# Веб-поиск
+OLLAMA_WEB_SEARCH_ENABLED=true
+
+# Database
 DATABASE_URL=sqlite+aiosqlite:///./data/oleg.db
 
-# Redis (отключен)
-REDIS_ENABLED=false
-
-# Metrics (отключены)
-METRICS_ENABLED=false
-
-# Logging
-LOG_LEVEL=DEBUG
-```
-
-### Production (.env)
-
-```bash
-# Telegram
-TELEGRAM_BOT_TOKEN=your_production_token
-OWNER_ID=your_id
-
-# Ollama
-OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
-
-# Database (PostgreSQL)
-DATABASE_URL=postgresql+asyncpg://oleg:password@postgres:5432/oleg_db
-
-# Redis (включен)
+# Redis
 REDIS_ENABLED=true
 REDIS_HOST=redis
-REDIS_PORT=6379
 
-# Metrics (включены)
+# Metrics
 METRICS_ENABLED=true
 METRICS_PORT=9090
 
 # Logging
 LOG_LEVEL=INFO
 ```
+
+### Whisper модели
+
+| Модель | Размер | Скорость | Качество |
+|--------|--------|----------|----------|
+| tiny | 39 MB | Быстро | Базовое |
+| base | 74 MB | Быстро | Хорошее |
+| small | 244 MB | Средне | Отличное |
+| medium | 769 MB | Медленно | Превосходное |
+| large | 1550 MB | Очень медленно | Максимальное |
 
 ---
 
@@ -160,31 +161,18 @@ LOG_LEVEL=INFO
 ### SQLite (development)
 
 ```bash
-# Автоматически создается при запуске
 mkdir -p data
-python -m app.main
+python -m app.main  # Создаётся автоматически
 ```
 
 ### PostgreSQL (production)
 
 ```bash
-# 1. Раскомментируй в docker-compose.yml
-# 2. Обнови DATABASE_URL в .env
-# 3. Запусти миграции
+# 1. Обнови DATABASE_URL
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost/oleg
+
+# 2. Запусти миграции
 alembic upgrade head
-```
-
-### Миграции
-
-```bash
-# Создать миграцию
-alembic revision --autogenerate -m "Add feature"
-
-# Применить
-alembic upgrade head
-
-# Откатить
-alembic downgrade -1
 ```
 
 ---
@@ -194,11 +182,9 @@ alembic downgrade -1
 ### Метрики
 
 ```bash
-# Включи в .env
 METRICS_ENABLED=true
 METRICS_PORT=9090
 
-# Проверь
 curl http://localhost:9090/metrics
 curl http://localhost:9090/health
 ```
@@ -206,12 +192,6 @@ curl http://localhost:9090/health
 ### Grafana
 
 ```bash
-# Раскомментируй в docker-compose.yml
-# grafana:
-#   image: grafana/grafana:latest
-#   ports:
-#     - "3000:3000"
-
 # Открой http://localhost:3000
 # Login: admin / admin
 ```
@@ -221,40 +201,9 @@ curl http://localhost:9090/health
 ## 🧪 Тестирование
 
 ```bash
-# Все тесты
-pytest
-
-# С покрытием
-pytest --cov=app --cov-report=html
-
-# Только unit
-pytest tests/unit/
-```
-
----
-
-## 🔧 Разработка
-
-### Pre-commit hooks
-
-```bash
-pip install pre-commit
-pre-commit install
-pre-commit run --all-files
-```
-
-### Форматирование
-
-```bash
-black app/
-isort app/
-```
-
-### Линтинг
-
-```bash
-flake8 app/
-mypy app/
+pytest                    # Все тесты
+pytest tests/unit/        # Unit тесты
+pytest --cov=app          # С покрытием
 ```
 
 ---
@@ -262,46 +211,41 @@ mypy app/
 ## 🐛 Troubleshooting
 
 ### "No module named 'aiogram'"
-
 ```bash
 pip install -r requirements.txt
 ```
 
 ### "TELEGRAM_BOT_TOKEN must be set"
-
 ```bash
-# Проверь .env
 cat .env | grep TELEGRAM_BOT_TOKEN
 ```
 
 ### "Ollama connection failed"
-
 ```bash
-# Проверь Ollama
 curl http://localhost:11434/api/tags
-
-# Запусти если не работает
 ollama serve
 ```
 
-### "Database locked"
-
+### "ffmpeg not found"
 ```bash
-# Останови бота
-pkill -f "python -m app.main"
-
-# Удали lock
-rm data/oleg.db-journal
+# Установи ffmpeg
+choco install ffmpeg  # Windows
+apt install ffmpeg    # Linux
+brew install ffmpeg   # Mac
 ```
 
-### Docker: "Cannot connect"
-
+### "Vision returns empty"
+Cloud-модели могут не поддерживать изображения. Попробуй локальную:
 ```bash
-# Linux
-sudo systemctl start docker
+ollama pull llava:7b
+# И в .env: OLLAMA_VISION_MODEL=llava:7b
+```
 
-# Windows/Mac
-# Запусти Docker Desktop
+### Docker: "Cannot connect to host.docker.internal"
+```bash
+# Linux: добавь в docker-compose.yml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
 ```
 
 ---
@@ -311,24 +255,24 @@ sudo systemctl start docker
 ```
 oleg-bot/
 ├── app/
-│   ├── handlers/          # Команды
+│   ├── handlers/          # Обработчики команд
+│   │   ├── qna.py         # Q&A
+│   │   ├── vision.py      # Изображения
+│   │   ├── voice.py       # Голосовые
+│   │   └── games.py       # Игры
 │   ├── services/          # Бизнес-логика
+│   │   ├── ollama_client.py
+│   │   ├── voice_recognition.py
 │   │   ├── redis_client.py
-│   │   ├── metrics.py
-│   │   └── ollama_client.py
+│   │   └── metrics.py
 │   ├── middleware/        # Rate limit, spam
-│   ├── database/          # Модели
+│   ├── database/          # Модели SQLAlchemy
 │   └── main.py
 ├── tests/
-│   ├── unit/
-│   └── integration/
 ├── monitoring/
-│   ├── prometheus.yml
-│   └── grafana/
-├── migrations/            # Alembic
+├── migrations/
 ├── docker-compose.yml
-├── requirements.txt
-└── .env.example
+└── requirements.txt
 ```
 
 ---
@@ -336,17 +280,8 @@ oleg-bot/
 ## 📚 Следующие шаги
 
 1. [QUICKSTART.md](QUICKSTART.md) — Быстрый старт
-2. [WHATS_NEW_V4.md](WHATS_NEW_V4.md) — Что нового в 4.0
-3. [TESTING.md](TESTING.md) — Тестирование
-4. [CHANGELOG.md](CHANGELOG.md) — История изменений
-
----
-
-## 💬 Поддержка
-
-1. Проверь логи: `docker-compose logs -f`
-2. Проверь `.env`
-3. Создай issue в репозитории
+2. [TESTING.md](TESTING.md) — Тестирование
+3. [CHANGELOG.md](CHANGELOG.md) — История изменений
 
 ---
 

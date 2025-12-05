@@ -1,4 +1,4 @@
-# ⚡ Быстрый старт — Олег 4.0
+# ⚡ Быстрый старт — Олег 4.5
 
 > Запусти бота за 2 минуты
 
@@ -31,11 +31,16 @@ docker-compose logs -f oleg-bot
 # 1. Установи зависимости
 pip install -r requirements.txt
 
-# 2. Настрой
+# 2. Установи ffmpeg (для голосовых)
+# Windows: choco install ffmpeg
+# Linux: apt install ffmpeg
+# Mac: brew install ffmpeg
+
+# 3. Настрой
 cp .env.example .env
 nano .env
 
-# 3. Запусти
+# 4. Запусти
 python -m app.main
 ```
 
@@ -47,6 +52,10 @@ python -m app.main
 # .env
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...  # От @BotFather
 OWNER_ID=123456789                     # Твой Telegram ID
+
+# Ollama (должен быть запущен)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
 ```
 
 ---
@@ -58,6 +67,11 @@ OWNER_ID=123456789                     # Твой Telegram ID
 /start
 /help
 ```
+
+Проверь мультимодальность:
+- 🖼️ Отправь картинку — бот проанализирует
+- 🎤 Отправь голосовое — бот распознает речь
+- 📹 Отправь кружочек — бот транскрибирует
 
 ---
 
@@ -83,21 +97,11 @@ docker-compose logs -f oleg-bot
 # Перезапуск
 docker-compose restart oleg-bot
 
+# Пересборка после изменений
+docker-compose up -d --build oleg-bot
+
 # Остановка
 docker-compose down
-
-# Обновление
-git pull && docker-compose up -d --build
-```
-
----
-
-## 🧪 Тесты
-
-```bash
-pytest                    # Все тесты
-pytest tests/unit/        # Только unit
-pytest --cov=app          # С покрытием
 ```
 
 ---
@@ -112,13 +116,18 @@ docker-compose logs oleg-bot
 ### Ollama не отвечает
 ```bash
 curl http://localhost:11434/api/tags
-ollama pull deepseek-v3.1:671b-cloud
+ollama serve  # Если не запущен
 ```
 
-### Ошибки БД
+### Голосовые не работают
 ```bash
-docker-compose down -v
-docker-compose up -d
+ffmpeg -version  # Должен быть установлен
+```
+
+### Vision возвращает пустой ответ
+Проверь что модель поддерживает изображения:
+```bash
+ollama run qwen3-vl:235b-cloud
 ```
 
 ---
@@ -128,27 +137,9 @@ docker-compose up -d
 | Документ | Описание |
 |----------|----------|
 | [README.md](README.md) | Полная документация |
-| [WHATS_NEW_V4.md](WHATS_NEW_V4.md) | Что нового в 4.0 |
+| [INSTALLATION.md](INSTALLATION.md) | Подробная установка |
 | [TESTING.md](TESTING.md) | Руководство по тестам |
 | [CHANGELOG.md](CHANGELOG.md) | История изменений |
-
----
-
-## 🏗️ Структура проекта
-
-```
-oleg-bot/
-├── app/
-│   ├── handlers/      # Команды бота
-│   ├── services/      # Бизнес-логика
-│   ├── middleware/    # Rate limit, spam filter
-│   ├── database/      # Модели SQLAlchemy
-│   └── main.py        # Точка входа
-├── tests/             # Тесты
-├── monitoring/        # Prometheus, Grafana
-├── docker-compose.yml # Docker конфиг
-└── .env.example       # Пример конфигурации
-```
 
 ---
 

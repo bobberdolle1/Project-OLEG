@@ -145,7 +145,12 @@ async def main():
 
     logger.info("Бот начинает polling...")
     try:
-        await dp.start_polling(bot)
+        # Удаляем webhook и очищаем все накопившиеся обновления перед запуском
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook удален, pending updates очищены")
+        
+        # skip_updates=True - игнорируем старые сообщения при запуске
+        await dp.start_polling(bot, skip_updates=True)
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
     finally:

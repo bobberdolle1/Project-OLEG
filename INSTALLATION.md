@@ -1,4 +1,4 @@
-# 🔧 Установка — Олег 4.5
+# 🔧 Установка — Олег 5.0
 
 > Подробное руководство по установке и настройке
 
@@ -8,7 +8,7 @@
 
 | Компонент | Версия | Обязательно |
 |-----------|--------|-------------|
-| Python | 3.10 - 3.13 | ✅ |
+| Python | 3.10 - 3.14 | ✅ |
 | Docker | 20.10+ | Рекомендуется |
 | Ollama | Latest | ✅ |
 | ffmpeg | Latest | Для голосовых |
@@ -98,7 +98,13 @@ ollama pull qwen3-vl:235b-cloud
 ollama pull glm-4.6:cloud
 ```
 
-### 5. Запуск
+### 5. Миграции базы данных
+
+```bash
+alembic upgrade head
+```
+
+### 6. Запуск
 
 ```bash
 python -m app.main
@@ -125,9 +131,6 @@ OLLAMA_TIMEOUT=90
 # Голосовые
 VOICE_RECOGNITION_ENABLED=true
 WHISPER_MODEL=base  # tiny/base/small/medium/large
-
-# Веб-поиск
-OLLAMA_WEB_SEARCH_ENABLED=true
 
 # Database
 DATABASE_URL=sqlite+aiosqlite:///./data/oleg.db
@@ -175,6 +178,11 @@ DATABASE_URL=postgresql+asyncpg://user:pass@localhost/oleg
 alembic upgrade head
 ```
 
+### Новые модели в v5.0
+
+- **GameChallenge** — вызовы на PvP игры
+- **UserBalance** — баланс пользователей для игр
+
 ---
 
 ## 📊 Мониторинг
@@ -201,9 +209,17 @@ curl http://localhost:9090/health
 ## 🧪 Тестирование
 
 ```bash
-pytest                    # Все тесты
-pytest tests/unit/        # Unit тесты
-pytest --cov=app          # С покрытием
+# Все тесты
+pytest
+
+# Property-based тесты (46 тестов)
+pytest tests/property/ -v
+
+# Unit тесты
+pytest tests/unit/ -v
+
+# С покрытием
+pytest --cov=app
 ```
 
 ---
@@ -248,6 +264,9 @@ extra_hosts:
   - "host.docker.internal:host-gateway"
 ```
 
+### "Think tags in response"
+Проверь что ThinkTagFilter интегрирован в ollama_client.py
+
 ---
 
 ## 📁 Структура проекта
@@ -259,16 +278,27 @@ oleg-bot/
 │   │   ├── qna.py         # Q&A
 │   │   ├── vision.py      # Изображения
 │   │   ├── voice.py       # Голосовые
-│   │   └── games.py       # Игры
+│   │   ├── games.py       # Игры
+│   │   ├── challenges.py  # PvP вызовы
+│   │   ├── admin_dashboard.py  # Админка
+│   │   ├── health.py      # /ping
+│   │   └── topic_listener.py   # Cross-topic
 │   ├── services/          # Бизнес-логика
 │   │   ├── ollama_client.py
+│   │   ├── think_filter.py     # Think tags
+│   │   ├── vision_pipeline.py  # 2-step vision
+│   │   ├── auto_reply.py       # Авто-ответы
+│   │   ├── game_engine.py      # Игровой движок
 │   │   ├── voice_recognition.py
 │   │   ├── redis_client.py
-│   │   └── metrics.py
+│   │   └── vector_db.py        # RAG
 │   ├── middleware/        # Rate limit, spam
 │   ├── database/          # Модели SQLAlchemy
 │   └── main.py
 ├── tests/
+│   ├── property/          # Property-based тесты
+│   ├── unit/              # Unit тесты
+│   └── integration/       # Integration тесты
 ├── monitoring/
 ├── migrations/
 ├── docker-compose.yml

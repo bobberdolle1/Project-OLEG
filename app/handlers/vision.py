@@ -136,6 +136,9 @@ async def handle_image_message(msg: Message):
         Дай краткое описание этого изображения. Если видишь ошибки, код или схему - объясни в стиле Олега, коротко и по делу.
         """
 
+    from aiogram.exceptions import TelegramBadRequest
+
+    processing_msg = None
     try:
         # Отправляем индикатор процесса
         processing_msg = await msg.reply("👀 Разглядываю...")
@@ -144,10 +147,11 @@ async def handle_image_message(msg: Message):
         analysis_result = await analyze_image_with_vlm(image_bytes, vision_prompt)
 
         # Удаляем сообщение о процессе
-        try:
-            await processing_msg.delete()
-        except:
-            pass  # Игнорируем ошибку при удалении
+        if processing_msg:
+            try:
+                await processing_msg.delete()
+            except:
+                pass  # Игнорируем ошибку при удалении
 
         # Обрезаем результат если слишком длинный (лимит Telegram - 4096 символов)
         max_length = 4000  # Оставляем запас
@@ -157,9 +161,18 @@ async def handle_image_message(msg: Message):
         # Отправляем результат
         await msg.reply(analysis_result)
 
+    except TelegramBadRequest as e:
+        # Игнорируем ошибки типа "thread not found" - топик был удалён
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Не удалось ответить - топик/сообщение удалено: {e}")
+        else:
+            logger.error(f"Telegram ошибка при обработке изображения: {e}")
     except Exception as e:
         logger.error(f"Ошибка при обработке изображения: {e}")
-        await msg.reply("Глаза мои разлюбили. Не могу разглядеть, что там на скрине.")
+        try:
+            await msg.reply("Глаза мои разлюбили. Не могу разглядеть, что там на скрине.")
+        except:
+            pass  # Если не можем ответить - просто игнорируем
 
 
 # Команда для проверки работы модуля зрения

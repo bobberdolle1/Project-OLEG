@@ -94,7 +94,7 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
 3. НЕ повторяй одни и те же фразы — это бесит
 4. Если видишь техническую проблему — сразу говори как исправить
 5. Если не можешь определить что на картинке — честно скажи "хз что это"
-6. Отвечай коротко: 2-4 предложения максимум, если это не сложная техническая проблема
+6. Для технических проблем давай развёрнутый ответ с решением, для мемов — коротко
 
 СТИЛЬ ОТВЕТОВ:
 • Говори как технарь, а не как робот
@@ -132,11 +132,12 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
                 }
             ],
             "stream": False,
+            "think": False,  # Отключаем thinking mode для Qwen3 и подобных моделей
             "options": {
-                "temperature": 0.1,  # Минимальная креативность
-                "num_ctx": 2048,
-                "num_predict": 256,  # Короткие ответы
-                "repeat_penalty": 2.0,  # Жёсткий штраф за повторения
+                "temperature": 0.4,  # Немного креативности для живых ответов
+                "num_ctx": 4096,
+                "num_predict": 512,  # Достаточно для развёрнутых ответов
+                "repeat_penalty": 1.3,  # Умеренный штраф за повторения
                 "top_p": 0.9,
                 "top_k": 40
             }
@@ -157,16 +158,31 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
             logger.info(f"Vision API response keys: {data.keys()}")
             logger.info(f"Vision API message: {data.get('message', {})}")
             
-            result = data.get("message", {}).get("content", "").strip()
+            message = data.get("message", {})
+            result = message.get("content", "").strip()
             
             if not result:
-                logger.error(f"Vision model returned EMPTY response! Full data: {data}")
-                # Попробуем альтернативный формат для cloud-моделей
-                # Некоторые модели возвращают ответ в другом поле
-                alt_content = data.get("response", "")
-                if alt_content:
-                    logger.info(f"Found response in 'response' field: {alt_content[:100]}")
-                    result = alt_content.strip()
+                logger.warning(f"Vision model returned EMPTY content, checking alternatives...")
+                
+                # Fallback 1: thinking поле (для reasoning моделей типа Qwen3)
+                thinking = message.get("thinking", "")
+                if thinking:
+                    logger.info(f"Using 'thinking' field as fallback (len={len(thinking)})")
+                    # Берём последнюю часть thinking как ответ (обычно там вывод)
+                    result = thinking.strip()
+                    # Если thinking слишком длинный, берём последние 500 символов
+                    if len(result) > 500:
+                        result = "..." + result[-500:]
+                
+                # Fallback 2: response поле (для некоторых cloud-моделей)
+                if not result:
+                    alt_content = data.get("response", "")
+                    if alt_content:
+                        logger.info(f"Found response in 'response' field: {alt_content[:100]}")
+                        result = alt_content.strip()
+                
+                if not result:
+                    logger.error(f"Vision model returned EMPTY response! Full data: {data}")
             
             # Проверяем на зацикливание и очищаем если нужно
             is_looped, cleaned_result = _detect_loop_in_text(result)

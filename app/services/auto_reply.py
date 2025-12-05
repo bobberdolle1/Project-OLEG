@@ -38,17 +38,17 @@ class AutoReplySystem:
     - 5.5: Skip auto-reply evaluation when disabled
     """
     
-    # Probability bounds (Requirements 5.1)
-    MIN_PROBABILITY: float = 0.01  # 1% minimum
-    MAX_PROBABILITY: float = 0.15  # 15% maximum cap
+    # Probability bounds - увеличены для активного участия в чате
+    MIN_PROBABILITY: float = 0.10  # 10% minimum
+    MAX_PROBABILITY: float = 0.40  # 40% maximum cap
     
-    # Base probability range
-    BASE_PROBABILITY_MIN: float = 0.01  # 1%
-    BASE_PROBABILITY_MAX: float = 0.05  # 5%
+    # Base probability range - бот как настоящий участник чата
+    BASE_PROBABILITY_MIN: float = 0.15  # 15%
+    BASE_PROBABILITY_MAX: float = 0.25  # 25%
     
     # Boosts (Requirements 5.2)
-    CAPS_BOOST: float = 0.05  # +5% for CAPS LOCK
-    TRIGGER_BOOST: float = 0.02  # +2% per trigger word
+    CAPS_BOOST: float = 0.10  # +10% for CAPS LOCK
+    TRIGGER_BOOST: float = 0.05  # +5% per trigger word
     
     # Default trigger words (can be extended from memory/config)
     DEFAULT_TRIGGERS: List[str] = [

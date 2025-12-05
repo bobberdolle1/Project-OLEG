@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     ollama_cache_enabled: bool = Field(default=True, description="Enable response caching")
     ollama_cache_ttl: int = Field(default=3600, ge=60, description="Cache TTL in seconds")
     ollama_cache_max_size: int = Field(default=128, ge=10, description="Max cache size")
+    ollama_web_search_enabled: bool = Field(default=True, description="Enable web search tool for LLM")
     
     # Toxicity analysis
     toxicity_analysis_enabled: bool = Field(default=True, description="Enable toxicity analysis")

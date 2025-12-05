@@ -7,12 +7,23 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
+
+# Настройка pip для работы с SSL
+ENV PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
 
 # Установка зависимостей Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    --trusted-host pypi.org \
+    --trusted-host pypi.python.org \
+    --trusted-host files.pythonhosted.org && \
+    pip install --no-cache-dir --user -r requirements.txt \
+    --trusted-host pypi.org \
+    --trusted-host pypi.python.org \
+    --trusted-host files.pythonhosted.org
 
 # Финальный образ
 FROM python:3.12-slim

@@ -149,6 +149,11 @@ async def handle_image_message(msg: Message):
         except:
             pass  # Игнорируем ошибку при удалении
 
+        # Обрезаем результат если слишком длинный (лимит Telegram - 4096 символов)
+        max_length = 4000  # Оставляем запас
+        if len(analysis_result) > max_length:
+            analysis_result = analysis_result[:max_length] + "...\n\n[обрезано, слишком много текста]"
+
         # Отправляем результат
         await msg.reply(analysis_result)
 

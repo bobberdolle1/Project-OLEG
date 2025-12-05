@@ -22,8 +22,7 @@ from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
 from app.middleware.blacklist_filter import BlacklistMiddleware
 from app.jobs.scheduler import setup_scheduler
 
-# Инициализировать логирование
-setup_logging()
+# Логгер будет инициализирован в main()
 logger = logging.getLogger(__name__)
 
 
@@ -175,4 +174,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Инициализировать логирование только при прямом запуске
+    setup_logging()
     asyncio.run(main())

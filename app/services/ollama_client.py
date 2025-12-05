@@ -348,6 +348,42 @@ async def search_memory_db(query: str) -> str:
         )
 
 
+def _extract_json_from_response(response: str) -> str:
+    """
+    Извлекает JSON из ответа LLM, убирая markdown-обёртки и лишний текст.
+    
+    Args:
+        response: Сырой ответ от LLM
+        
+    Returns:
+        Очищенная JSON-строка
+    """
+    if not response:
+        return "[]"
+    
+    text = response.strip()
+    
+    # Убираем markdown code blocks
+    if "```json" in text:
+        start = text.find("```json") + 7
+        end = text.find("```", start)
+        if end > start:
+            text = text[start:end].strip()
+    elif "```" in text:
+        start = text.find("```") + 3
+        end = text.find("```", start)
+        if end > start:
+            text = text[start:end].strip()
+    
+    # Ищем JSON массив в тексте
+    bracket_start = text.find("[")
+    bracket_end = text.rfind("]")
+    if bracket_start != -1 and bracket_end > bracket_start:
+        text = text[bracket_start:bracket_end + 1]
+    
+    return text if text else "[]"
+
+
 async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = None) -> List[Dict]:
     """
     Извлекает факты из сообщения с помощью LLM.
@@ -360,23 +396,38 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
     Returns:
         Список словарей с извлеченными фактами
     """
+    # Пропускаем слишком короткие сообщения
+    if not text or len(text.strip()) < 10:
+        return []
+    
     extraction_prompt = f"""
     Проанализируй следующее сообщение и извлеки из него важные факты о людях, правилах чата, предпочтениях и т.д.
-    Формат ответа: JSON массив объектов вида {{fact: "...", category: "...", importance: number}}
+    Формат ответа: JSON массив объектов вида {{"fact": "...", "category": "...", "importance": number}}
     Где importance от 1 до 10 (10 - максимально важный факт)
+    
+    ВАЖНО: Отвечай ТОЛЬКО валидным JSON массивом, без пояснений. Если фактов нет - верни пустой массив []
 
     Сообщение: {text}
     """
 
     try:
         response = await _ollama_chat([
-            {"role": "system", "content": "Ты помощник по извлечению фактов из сообщений. Отвечай в формате JSON."},
+            {"role": "system", "content": "Ты помощник по извлечению фактов из сообщений. Отвечай ТОЛЬКО валидным JSON массивом, без markdown и пояснений."},
             {"role": "user", "content": extraction_prompt}
         ], temperature=0.1, use_cache=False)
 
-        # Попробуем распарсить JSON
-        import json
-        facts = json.loads(response)
+        # Извлекаем и парсим JSON
+        json_str = _extract_json_from_response(response)
+        
+        if not json_str or json_str == "[]":
+            return []
+        
+        facts = json.loads(json_str)
+        
+        # Проверяем что это список
+        if not isinstance(facts, list):
+            logger.warning(f"LLM вернул не массив: {type(facts)}")
+            return []
 
         # Добавим метаданные к фактам
         processed_facts = []
@@ -398,6 +449,9 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
                 })
 
         return processed_facts
+    except json.JSONDecodeError as e:
+        logger.warning(f"Не удалось распарсить JSON от LLM: {e}")
+        return []
     except Exception as e:
         logger.error(f"Ошибка при извлечении фактов: {e}")
         return []

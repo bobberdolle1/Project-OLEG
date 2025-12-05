@@ -5,15 +5,29 @@ import logging.handlers
 import pathlib
 from app.config import settings
 
+# Флаг для предотвращения повторной инициализации
+_logging_initialized = False
+
 
 def setup_logging() -> None:
     """Инициализировать систему логирования."""
+    global _logging_initialized
+    
+    # Проверяем флаг инициализации
+    if _logging_initialized:
+        return
+    _logging_initialized = True
+    
+    # Основной логгер
+    logger = logging.getLogger()
+    
+    # Удаляем все существующие хендлеры для чистого старта
+    logger.handlers.clear()
+    
     # Создать директорию для логов
     log_dir = pathlib.Path(settings.log_file).parent
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Основной логгер
-    logger = logging.getLogger()
     logger.setLevel(getattr(logging, settings.log_level))
 
     # Формат логов

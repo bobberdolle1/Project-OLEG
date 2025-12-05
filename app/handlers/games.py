@@ -151,8 +151,13 @@ async def cmd_grow(msg: Message):
         )
         gs = res.scalars().first()
         now = utc_now()
-        if gs.next_grow_at and gs.next_grow_at > now:
-            delta = gs.next_grow_at - now
+        # Ensure both datetimes are comparable (handle naive vs aware)
+        next_grow = gs.next_grow_at
+        if next_grow and next_grow.tzinfo is None:
+            from datetime import timezone
+            next_grow = next_grow.replace(tzinfo=timezone.utc)
+        if next_grow and next_grow > now:
+            delta = next_grow - now
             hours, remainder = divmod(
                 int(delta.total_seconds()), 3600
             )

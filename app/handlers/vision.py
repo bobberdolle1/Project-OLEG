@@ -17,6 +17,43 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+def _detect_loop_in_text(text: str, min_pattern_len: int = 20, max_repeats: int = 3) -> tuple[bool, str]:
+    """
+    Детектирует зацикливание в тексте (повторяющиеся паттерны).
+    
+    Args:
+        text: Текст для проверки
+        min_pattern_len: Минимальная длина паттерна для поиска
+        max_repeats: Максимальное количество повторений до обрезки
+        
+    Returns:
+        (is_looped, cleaned_text) - флаг зацикливания и очищенный текст
+    """
+    if len(text) < min_pattern_len * 2:
+        return False, text
+    
+    # Ищем повторяющиеся паттерны разной длины
+    for pattern_len in range(min_pattern_len, min(200, len(text) // 3)):
+        for start in range(len(text) - pattern_len * 2):
+            pattern = text[start:start + pattern_len]
+            
+            # Считаем сколько раз паттерн повторяется подряд
+            count = 1
+            pos = start + pattern_len
+            while pos + pattern_len <= len(text) and text[pos:pos + pattern_len] == pattern:
+                count += 1
+                pos += pattern_len
+            
+            # Если нашли зацикливание
+            if count >= max_repeats:
+                # Обрезаем до первого повторения + немного контекста
+                cleaned = text[:start + pattern_len]
+                logger.warning(f"Обнаружено зацикливание: паттерн '{pattern[:50]}...' повторяется {count} раз")
+                return True, cleaned
+    
+    return False, text
+
+
 async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
     """
     Анализирует изображение с помощью мультимодальной модели Ollama.
@@ -32,10 +69,24 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
         # Кодируем изображение в base64 для передачи в API
         image_base64 = base64.b64encode(image_data).decode('utf-8')
 
+        # Системный промпт для предотвращения галлюцинаций
+        system_prompt = """Ты — помощник для анализа изображений. 
+СТРОГИЕ ПРАВИЛА:
+- Описывай ТОЛЬКО то, что реально видишь
+- НЕ выдумывай диалоги, персонажей, истории
+- НЕ повторяй фразы
+- Отвечай кратко и по существу
+- Если не уверен — скажи "не могу определить"
+"""
+
         # Подготавливаем данные для запроса к Ollama
         payload = {
             "model": settings.ollama_vision_model,  # Используем модель из конфига
             "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
                 {
                     "role": "user",
                     "content": prompt,
@@ -44,11 +95,12 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
             ],
             "stream": False,
             "options": {
-                "temperature": 0.3,
-                "num_ctx": 4096,
-                "num_predict": 1024,
-                "repeat_penalty": 1.2,
-                "stop": ["Ты — в чате", "Ты —"]
+                "temperature": 0.1,  # Минимальная креативность
+                "num_ctx": 2048,
+                "num_predict": 256,  # Короткие ответы
+                "repeat_penalty": 2.0,  # Жёсткий штраф за повторения
+                "top_p": 0.9,
+                "top_k": 40
             }
         }
 
@@ -60,7 +112,15 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
             response.raise_for_status()
 
             data = response.json()
-            return data.get("message", {}).get("content", "").strip()
+            result = data.get("message", {}).get("content", "").strip()
+            
+            # Проверяем на зацикливание и очищаем если нужно
+            is_looped, cleaned_result = _detect_loop_in_text(result)
+            if is_looped:
+                cleaned_result += "\n\n[Олег завис, но я его перезагрузил]"
+                return cleaned_result
+            
+            return result
 
     except httpx.ConnectError:
         logger.error("Не могу подключиться к Ollama серверу")
@@ -126,18 +186,30 @@ async def handle_image_message(msg: Message):
 
     # Если есть текст, используем его как запрос для анализа изображения
     if text and text.strip():
-        # Подготавливаем промпт для анализа изображения
-        vision_prompt = f"""
-        Проанализируй это изображение и ответь на следующий вопрос:
-        {text}
+        # Подготавливаем промпт для анализа изображения с вопросом
+        vision_prompt = f"""Ты — технический эксперт. Проанализируй изображение и ответь на вопрос пользователя.
 
-        Будь кратким и точным в своем ответе. Используй манеру Олега - грубоватую, но по делу.
-        """
+ВОПРОС: {text}
+
+ПРАВИЛА:
+1. Отвечай ТОЛЬКО на основе того, что реально видишь на изображении
+2. Если это скриншот с ошибкой — укажи ошибку и как её исправить
+3. Если это код — проанализируй его
+4. Если это просто картинка (мем, фото, игра) — кратко опиши что видишь
+5. НЕ выдумывай персонажей и диалоги
+6. Ответ максимум 3-4 предложения
+7. Говори по делу, без воды"""
     else:
         # Если текста нет, просто описываем изображение
-        vision_prompt = """
-        Дай краткое описание этого изображения. Если видишь ошибки, код или схему - объясни в стиле Олега, коротко и по делу.
-        """
+        vision_prompt = """Ты — технический эксперт. Опиши что видишь на изображении.
+
+ПРАВИЛА:
+1. Если это скриншот с ошибкой или кодом — укажи что за ошибка/код и как исправить
+2. Если это обычная картинка (мем, фото, игра, арт) — просто скажи "Это [что это]. Вопросов по картинке нет?"
+3. НЕ выдумывай истории, персонажей и диалоги
+4. НЕ повторяй одно и то же
+5. Ответ максимум 2-3 предложения
+6. Если не понимаешь что на картинке — так и скажи"""
 
     from aiogram.exceptions import TelegramBadRequest
 

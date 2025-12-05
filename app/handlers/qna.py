@@ -194,6 +194,36 @@ async def potentially_roast_toxic_user(msg: Message):
             logger.warning(f"Ошибка при 'наезде' на токсичного пользователя: {e}")
 
 
+def _is_games_help_request(text: str) -> bool:
+    """Проверяет, спрашивает ли пользователь про игры."""
+    text_lower = text.lower()
+    game_keywords = [
+        "помоги с игр", "как играть", "что за игр", "какие игр",
+        "как работает grow", "как работает pvp", "как работает casino",
+        "что такое grow", "что такое pvp", "что такое casino",
+        "как выращивать", "как дуэль", "как казино", "как слоты",
+        "объясни игр", "расскажи про игр", "помощь по игр",
+        "не понимаю игр", "как начать играть", "с чего начать",
+        "/grow", "/pvp", "/casino", "/top", "/profile"
+    ]
+    return any(kw in text_lower for kw in game_keywords)
+
+
+GAMES_AI_CONTEXT = """
+Ты помогаешь новичку разобраться в мини-играх бота. Вот команды:
+
+/games — полная справка по играм
+/grow — увеличить размер (кулдаун 12-24ч, +1-20 см)
+/top — топ-10 по размеру
+/top_rep — топ-10 по репутации  
+/profile — твой профиль и статистика
+/pvp @ник — дуэль (победитель забирает 10-30% размера)
+/casino [ставка] — слоты (3 одинаковых = x5, 2 = x2)
+
+Новичкам: начни с /grow, потом /profile. Монеты копи, в казино не сливай всё.
+"""
+
+
 @router.message(F.text)
 async def general_qna(msg: Message):
     """
@@ -215,6 +245,9 @@ async def general_qna(msg: Message):
             f"{text[:50]}..."
         )
 
+        # Проверяем, спрашивает ли про игры — даём контекст ИИ
+        games_context = GAMES_AI_CONTEXT if _is_games_help_request(text) else None
+
         # Получаем уровень токсичности в чате
         chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
 
@@ -225,7 +258,7 @@ async def general_qna(msg: Message):
             reply = await generate_reply(
                 user_text=text,
                 username=msg.from_user.username,
-                chat_context=None
+                chat_context=games_context
             )
         else:
             # Для групповых чатов используем функцию с контекстом из памяти
@@ -233,7 +266,7 @@ async def general_qna(msg: Message):
                 user_text=text,
                 username=msg.from_user.username,
                 chat_id=msg.chat.id,
-                chat_context=None
+                chat_context=games_context
             )
 
         await msg.reply(reply, disable_web_page_preview=True)

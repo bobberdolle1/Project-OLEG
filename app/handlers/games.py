@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from aiogram import Router
 from aiogram.types import Message
 from aiogram import F
+from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
@@ -18,6 +19,54 @@ from app.utils import utc_now
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Справка по играм
+GAMES_HELP = """
+🎮 <b>Мини-игры Олега — Полный гайд</b>
+
+<b>📏 /grow — Выращивание</b>
+Увеличь свой "размер" на 1-20 см.
+• Кулдаун: 12-24 часа (рандом)
+• Чем больше размер — тем выше ранг
+• Пример: <code>/grow</code>
+
+<b>🏆 /top — Топ игроков</b>
+Показывает топ-10 по размеру.
+• Пример: <code>/top</code>
+
+<b>⭐ /top_rep — Топ по репутации</b>
+Топ-10 по репутации (растёт от побед).
+• Пример: <code>/top_rep</code>
+
+<b>👤 /profile — Твой профиль</b>
+Вся статистика: размер, ранг, монеты, победы.
+• Пример: <code>/profile</code>
+
+<b>⚔️ /pvp — Дуэль</b>
+Сразись с другим игроком!
+• Победитель забирает 10-30% размера проигравшего
+• Победа: +5 репутации, поражение: -2
+• Примеры:
+  <code>/pvp @username</code> — по нику
+  Или ответь на сообщение соперника и напиши <code>/pvp</code>
+
+<b>🎰 /casino — Слоты</b>
+Крути барабаны, выигрывай монеты!
+• Ставка: 1-1000 монет (по умолчанию 10)
+• 3 одинаковых = x5 (джекпот!)
+• 2 одинаковых = x2
+• Примеры:
+  <code>/casino</code> — ставка 10
+  <code>/casino 100</code> — ставка 100
+
+<b>💡 Советы новичкам:</b>
+1. Начни с /grow — получи первые сантиметры
+2. Копи монеты, не сливай всё в казино
+3. PvP выгоднее против тех, кто больше тебя
+4. Выполняй квесты (/quests) для бонусов
+
+<i>Вопросы? Напиши "помоги с играми" — я объясню!</i>
+"""
 
 # Константы для баланса игр
 GROW_MIN = 1
@@ -134,6 +183,13 @@ async def ensure_user(tg_user) -> User:
         return user
 
 
+@router.message(Command("games"))
+async def cmd_games(msg: Message):
+    """Команда /games — справка по всем мини-играм."""
+    await msg.reply(GAMES_HELP, parse_mode="HTML")
+    logger.info(f"Games help requested by @{msg.from_user.username or msg.from_user.id}")
+
+
 @router.message(F.text.startswith("/grow"))
 async def cmd_grow(msg: Message):
     """
@@ -200,7 +256,9 @@ async def cmd_grow(msg: Message):
             f"Текущий: {gs.size_cm} см\n"
             f"Ранг: {size_rank}\n"
             f"Место: #{rank}/{len(all_stats)}\n"
-            f"Кулдаун: {cooldown_hours}ч"
+            f"Кулдаун: {cooldown_hours}ч\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📋 /top · /pvp · /casino · /profile"
         )
         logger.info(
             f"Grow: @{msg.from_user.username} "
@@ -221,7 +279,11 @@ async def cmd_top(msg: Message):
             name = s.username or str(s.tg_user_id)
             size_rank = get_rank_by_size(s.size_cm)
             lines.append(f"{i}. {name}: {s.size_cm} см ({size_rank})")
-        await msg.reply("🏆 Топ-10:\n" + "\n".join(lines))
+        await msg.reply(
+            "🏆 Топ-10:\n" + "\n".join(lines) +
+            "\n━━━━━━━━━━━━━━━\n"
+            "📋 /grow · /pvp · /casino · /profile"
+        )
 
 
 @router.message(F.text.startswith("/top_rep"))
@@ -236,7 +298,11 @@ async def cmd_top_rep(msg: Message):
         for i, s in enumerate(top10, start=1):
             name = s.username or str(s.tg_user_id)
             lines.append(f"{i}. {name}: {s.reputation} репутации")
-        await msg.reply("Топ-10 по репутации:\n" + "\n".join(lines))
+        await msg.reply(
+            "⭐ Топ-10 по репутации:\n" + "\n".join(lines) +
+            "\n━━━━━━━━━━━━━━━\n"
+            "📋 /grow · /pvp · /casino · /profile"
+        )
 
 
 @router.message(F.text.startswith("/profile"))
@@ -287,6 +353,7 @@ async def cmd_profile(msg: Message):
                 status = "Выполнено" if uq.completed_at else f"Прогресс: {uq.progress}/{uq.quest.target_value}"
                 profile_text += f"  - {uq.quest.name} ({status})\n"
 
+        profile_text += "\n━━━━━━━━━━━━━━━\n📋 /grow · /pvp · /casino · /top"
         await msg.reply(profile_text)
 
 
@@ -360,7 +427,10 @@ async def cmd_pvp(msg: Message):
 
         
         await msg.reply(
-            f"Дуэль: {winner_name} vs {loser_name}. Победил {winner_name} и забрал {steal_amt} см ({steal_pct}%)."
+            f"⚔️ Дуэль: {winner_name} vs {loser_name}\n"
+            f"🏆 Победил {winner_name} и забрал {steal_amt} см ({steal_pct}%)\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📋 /grow · /top · /casino · /profile"
         )
 
 
@@ -411,13 +481,32 @@ async def cmd_casino(msg: Message):
         gs_res = await session.execute(select(GameStat).where(GameStat.user_id == user.id))
         gs = gs_res.scalars().first()
 
+        board = " ".join(reel)
         if mult == 5:
             gs.casino_jackpots += 1
-            text = f"{board} — Джекпот! Выигрыш {win}. Баланс: {w.balance}"
+            text = (
+                f"🎰 {board}\n"
+                f"🎉 Джекпот! Выигрыш: {win} монет\n"
+                f"💰 Баланс: {w.balance}\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"📋 /grow · /pvp · /top · /profile"
+            )
         elif mult == 2:
-            text = f"{board} — Норм, удвоил. Выигрыш {win}. Баланс: {w.balance}"
+            text = (
+                f"🎰 {board}\n"
+                f"✨ Норм, удвоил! Выигрыш: {win} монет\n"
+                f"💰 Баланс: {w.balance}\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"📋 /grow · /pvp · /top · /profile"
+            )
         else:
-            text = f"{board} — Мимо, дружище. Баланс: {w.balance}"
+            text = (
+                f"🎰 {board}\n"
+                f"😢 Мимо, дружище\n"
+                f"💰 Баланс: {w.balance}\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"📋 /grow · /pvp · /top · /profile"
+            )
         
         await session.commit()
 

@@ -16,6 +16,43 @@ from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
+
+def detect_loop_in_text(text: str, min_pattern_len: int = 20, max_repeats: int = 3) -> tuple[bool, str]:
+    """
+    Детектирует зацикливание в тексте (повторяющиеся паттерны).
+    
+    Args:
+        text: Текст для проверки
+        min_pattern_len: Минимальная длина паттерна для поиска
+        max_repeats: Максимальное количество повторений до обрезки
+        
+    Returns:
+        (is_looped, cleaned_text) - флаг зацикливания и очищенный текст
+    """
+    if not text or len(text) < min_pattern_len * 2:
+        return False, text
+    
+    # Ищем повторяющиеся паттерны разной длины
+    for pattern_len in range(min_pattern_len, min(200, len(text) // 3)):
+        for start in range(len(text) - pattern_len * 2):
+            pattern = text[start:start + pattern_len]
+            
+            # Считаем сколько раз паттерн повторяется подряд
+            count = 1
+            pos = start + pattern_len
+            while pos + pattern_len <= len(text) and text[pos:pos + pattern_len] == pattern:
+                count += 1
+                pos += pattern_len
+            
+            # Если нашли зацикливание
+            if count >= max_repeats:
+                # Обрезаем до первого повторения
+                cleaned = text[:start + pattern_len]
+                logger.warning(f"Обнаружено зацикливание: паттерн '{pattern[:50]}...' повторяется {count} раз")
+                return True, cleaned
+    
+    return False, text
+
 # Cache for Ollama responses
 ollama_cache: cachetools.TTLCache | None = None
 ollama_cache_lock = asyncio.Lock()
@@ -148,6 +185,11 @@ async def _ollama_chat(
                 data = r.json()
                 msg = data.get("message", {})
                 content = msg.get("content") or ""
+                
+                # Проверяем на зацикливание и очищаем если нужно
+                is_looped, content = detect_loop_in_text(content)
+                if is_looped:
+                    content += "\n\n[Олег завис, перезагрузился]"
                 
                 if settings.ollama_cache_enabled and use_cache:
                     async with ollama_cache_lock:

@@ -440,8 +440,11 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
                     'category': fact_item.get('category', 'general')
                 }
 
+                # Добавляем user_info как плоские поля (ChromaDB не поддерживает вложенные dict)
                 if user_info:
-                    metadata['user_info'] = user_info
+                    for key, value in user_info.items():
+                        if isinstance(value, (str, int, float, bool)):
+                            metadata[f'user_{key}'] = value
 
                 processed_facts.append({
                     'text': fact_item['fact'],

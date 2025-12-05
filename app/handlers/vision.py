@@ -45,7 +45,10 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
             "stream": False,
             "options": {
                 "temperature": 0.3,
-                "num_ctx": 4096
+                "num_ctx": 4096,
+                "num_predict": 1024,
+                "repeat_penalty": 1.2,
+                "stop": ["Ты — в чате", "Ты —"]
             }
         }
 

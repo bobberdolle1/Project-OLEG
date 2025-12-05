@@ -231,7 +231,7 @@ OWNER_ID=your_telegram_id
 # Ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
-OLLAMA_VISION_MODEL=qwen3-vl:4b
+OLLAMA_VISION_MODEL=qwen3-vl:235b-cloud
 OLLAMA_MEMORY_MODEL=glm-4.6:cloud
 
 # Database

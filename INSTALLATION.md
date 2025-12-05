@@ -88,7 +88,7 @@ nano .env
 
 ```bash
 ollama pull deepseek-v3.1:671b-cloud
-ollama pull qwen3-vl:4b
+ollama pull qwen3-vl:235b-cloud
 ollama pull glm-4.6:cloud
 ```
 

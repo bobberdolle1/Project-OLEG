@@ -9,9 +9,13 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
+from app.handlers.health import router as health_router
 from app.handlers.private_admin import router as private_admin_router
+from app.handlers.admin_dashboard import router as admin_dashboard_router
 from app.handlers.chat_join import router as chat_join_router
 from app.handlers.voice import router as voice_router
+from app.handlers.topic_listener import router as topic_listener_router
+from app.handlers.challenges import router as challenges_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -105,7 +109,9 @@ def build_dp() -> Dispatcher:
 
     # Routers
     dp.include_routers(
-        help.router,  # Help должен быть первым для приоритета
+        health_router,  # Health check должен быть первым для быстрого ответа
+        help.router,  # Help должен быть вторым для приоритета
+        challenges_router,  # PvP challenges with consent (Requirements 8.x)
         games.router,
         moderation.router,
         antiraid.router,
@@ -125,7 +131,9 @@ def build_dp() -> Dispatcher:
         reactions_router,  # Роутер для обработки реакций
         content_downloader_router,  # Роутер для скачивания контента
         private_admin_router,  # Роутер для админ-панели в ЛС
+        admin_dashboard_router,  # Роутер для расширенной админ-панели владельца (Requirements 7.x)
         chat_join_router,  # Роутер для обработки событий добавления в чат
+        topic_listener_router,  # Роутер для глобального слушателя топиков (RAG) - должен быть последним
     )
     return dp
 

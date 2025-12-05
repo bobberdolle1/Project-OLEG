@@ -3,9 +3,17 @@
 import pytest
 import asyncio
 from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-from app.database.session import Base
+try:
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from app.database.session import Base
+    SQLALCHEMY_AVAILABLE = True
+except ImportError:
+    SQLALCHEMY_AVAILABLE = False
+    Base = None
+    create_async_engine = None
+    async_sessionmaker = None
+    AsyncSession = None
 
 
 @pytest.fixture(scope="session")
@@ -17,8 +25,12 @@ def event_loop():
 
 
 @pytest.fixture
-async def test_db() -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+async def test_db() -> AsyncGenerator:
     """Create test database."""
+    if not SQLALCHEMY_AVAILABLE:
+        pytest.skip("SQLAlchemy not available")
+        return
+    
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         echo=False

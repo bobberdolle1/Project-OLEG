@@ -14,6 +14,7 @@ from app.database.models import User, GameStat, Wallet
 from app.services.achievements import check_and_award_achievements
 from app.services.quests import check_and_update_quests
 from app.services.profile import get_full_user_profile
+from app.services.game_engine import game_engine
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -521,3 +522,150 @@ async def cmd_casino(msg: Message):
 
         
         await msg.reply(text)
+
+
+@router.message(Command("roulette"))
+async def cmd_roulette(msg: Message):
+    """
+    Команда /roulette — Русская рулетка.
+    
+    Игрок крутит барабан с 1 пулей в 6 камерах.
+    - Выстрел (1/6): теряет очки
+    - Выживание (5/6): получает очки
+    
+    Requirements: 9.1, 9.2, 9.3, 9.4
+    """
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    
+    # Ensure user exists in DB
+    await ensure_user(msg.from_user)
+    
+    # Play roulette using the game engine
+    result = game_engine.play_roulette(user_id, chat_id)
+    
+    # Log the result
+    logger.info(
+        f"Roulette: @{msg.from_user.username or user_id} - "
+        f"{'SHOT' if result.shot else 'SURVIVED'}, "
+        f"change: {result.points_change}, balance: {result.new_balance}"
+    )
+    
+    # Send the dramatic Oleg-style message
+    await msg.reply(
+        f"🔫 <b>Русская рулетка</b>\n\n"
+        f"{result.message}\n\n"
+        f"💰 Баланс: {result.new_balance} очков\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📋 /grow · /pvp · /casino · /profile",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("coinflip"))
+async def cmd_coinflip(msg: Message):
+    """
+    Команда /coinflip — Подбрасывание монетки.
+    
+    Использование: /coinflip <ставка> <heads|tails>
+    Примеры:
+      /coinflip 50 heads
+      /coinflip 100 tails
+    
+    - 50/50 вероятность
+    - Выигрыш: удвоение ставки
+    - Проигрыш: потеря ставки
+    
+    Requirements: 10.1, 10.2, 10.3, 10.4, 10.5
+    """
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    
+    # Ensure user exists in DB
+    await ensure_user(msg.from_user)
+    
+    # Parse command arguments
+    parts = (msg.text or "").split()
+    
+    # Default values
+    bet_amount = 10
+    choice = None
+    
+    # Parse bet amount and choice
+    if len(parts) >= 2:
+        try:
+            bet_amount = int(parts[1])
+        except ValueError:
+            # Maybe they put choice first?
+            choice = parts[1].lower()
+    
+    if len(parts) >= 3:
+        choice = parts[2].lower()
+    elif len(parts) == 2 and choice is None:
+        # Only bet amount provided, no choice
+        return await msg.reply(
+            "🪙 <b>Монетка</b>\n\n"
+            "Использование: <code>/coinflip &lt;ставка&gt; &lt;heads|tails&gt;</code>\n"
+            "Пример: <code>/coinflip 50 heads</code>\n\n"
+            "Выбери сторону: heads (орёл) или tails (решка)",
+            parse_mode="HTML"
+        )
+    
+    # Validate choice
+    if choice not in ("heads", "tails"):
+        return await msg.reply(
+            "🪙 <b>Монетка</b>\n\n"
+            "Использование: <code>/coinflip &lt;ставка&gt; &lt;heads|tails&gt;</code>\n"
+            "Пример: <code>/coinflip 50 heads</code>\n\n"
+            "Выбери сторону: heads (орёл) или tails (решка)",
+            parse_mode="HTML"
+        )
+    
+    # Validate bet amount
+    if bet_amount <= 0:
+        return await msg.reply(
+            "🪙 Ставка должна быть положительной, гений.",
+            parse_mode="HTML"
+        )
+    
+    # Play coin flip using the game engine
+    result = game_engine.flip_coin(user_id, chat_id, bet_amount, choice)
+    
+    # Log the result
+    logger.info(
+        f"CoinFlip: @{msg.from_user.username or user_id} - "
+        f"choice={result.choice}, result={result.result}, won={result.won}, "
+        f"bet={result.bet_amount}, change={result.balance_change}, balance={result.new_balance}"
+    )
+    
+    # Handle errors
+    if not result.success:
+        await msg.reply(
+            f"🪙 <b>Монетка</b>\n\n"
+            f"{result.message}",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Format choice display
+    choice_display = "орёл" if result.choice == "heads" else "решка"
+    result_display = "орёл" if result.result == "heads" else "решка"
+    
+    # Send the result message
+    if result.won:
+        emoji = "🎉"
+        outcome = f"Выпало: {result_display.upper()}! Ты угадал!"
+    else:
+        emoji = "😢"
+        outcome = f"Выпало: {result_display.upper()}! Мимо..."
+    
+    await msg.reply(
+        f"🪙 <b>Монетка</b>\n\n"
+        f"Твой выбор: {choice_display}\n"
+        f"{emoji} {outcome}\n\n"
+        f"{result.message}\n\n"
+        f"💰 Баланс: {result.new_balance} очков\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📋 /grow · /pvp · /casino · /roulette",
+        parse_mode="HTML"
+    )

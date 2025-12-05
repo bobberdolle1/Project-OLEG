@@ -410,3 +410,29 @@ class PendingVerification(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)  # Когда истекает время на верификацию
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_kicked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GameChallenge(Base):
+    """Вызов на PvP игру (Requirements 8.1, 8.2, 8.3, 8.4)."""
+    __tablename__ = "game_challenges"
+    
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # UUID
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    challenger_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    target_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    game_type: Mapped[str] = mapped_column(String(32))  # pvp, roulette, coinflip
+    bet_amount: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending, accepted, expired, cancelled
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)  # Timeout handling
+
+
+class UserBalance(Base):
+    """Баланс пользователя для игр (Requirements 10.1, 10.5)."""
+    __tablename__ = "user_balances"
+    
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    balance: Mapped[int] = mapped_column(Integer, default=100)  # Стартовый баланс
+    total_won: Mapped[int] = mapped_column(Integer, default=0)
+    total_lost: Mapped[int] = mapped_column(Integer, default=0)

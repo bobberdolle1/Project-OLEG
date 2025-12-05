@@ -25,6 +25,7 @@ router = Router()
 class TopicSelection(StatesGroup):
     waiting_for_summary_topic = State()
     waiting_for_creative_topic = State()
+    waiting_for_active_topic = State()
 
 
 async def get_user_admin_chats(bot: Bot, user_id: int) -> List[Chat]:
@@ -189,10 +190,15 @@ async def chat_settings_menu(callback: CallbackQuery):
         await callback.answer()
         return
 
+    # Форматируем шанс автоответа
+    auto_reply_pct = int((chat.auto_reply_chance or 0) * 100)
+    
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text=f"🛡 Режим Модерации: {chat.moderation_mode}", callback_data=f"change_moderation_{chat_id}")
     keyboard.button(text=f"📢 Куда слать Отчеты? (Выбрано: #{chat.summary_topic_id or 'General'})", callback_data=f"change_summary_topic_{chat_id}")
     keyboard.button(text=f"🤡 Куда слать Мемы? (Выбрано: #{chat.creative_topic_id or 'General'})", callback_data=f"change_creative_topic_{chat_id}")
+    keyboard.button(text=f"💬 Активный топик: #{chat.active_topic_id or 'Везде'}", callback_data=f"change_active_topic_{chat_id}")
+    keyboard.button(text=f"🎲 Шанс автоответа: {auto_reply_pct}%", callback_data=f"change_auto_reply_{chat_id}")
     keyboard.button(text="🔙 Назад", callback_data="my_chats")
     keyboard.adjust(1)
 
@@ -265,3 +271,86 @@ async def set_creative_topic(msg: Message, state: FSMContext):
 
     await state.clear()
     await msg.answer(f"Топик для мемов в чате '{chat.title}' установлен.")
+
+
+@router.callback_query(F.data.startswith("change_active_topic_"))
+async def change_active_topic(callback: CallbackQuery, state: FSMContext):
+    """Asks the user to forward a message to set the active topic."""
+    chat_id = int(callback.data.split("_")[3])
+    await state.set_state(TopicSelection.waiting_for_active_topic)
+    await state.update_data(chat_id=chat_id)
+    await callback.message.edit_text(
+        "Перешлите любое сообщение из топика, где бот должен быть активен.\n\n"
+        "Для выбора всего чата (бот активен везде), напишите 'везде' или '0'."
+    )
+    await callback.answer()
+
+
+@router.message(TopicSelection.waiting_for_active_topic)
+async def set_active_topic(msg: Message, state: FSMContext):
+    """Sets the active topic based on the forwarded message."""
+    data = await state.get_data()
+    chat_id = data['chat_id']
+    
+    # Проверяем специальные команды
+    if msg.text and msg.text.lower() in ['везде', '0', 'all']:
+        topic_id = None
+    elif msg.forward_from_chat and msg.forward_from_chat.id == chat_id:
+        topic_id = msg.forward_from_message_id if msg.is_topic_message else None
+    else:
+        await msg.reply("Пожалуйста, перешлите сообщение из правильного чата или напишите 'везде'.")
+        return
+    
+    async with get_session()() as session:
+        chat = await session.get(Chat, chat_id)
+        chat.active_topic_id = topic_id
+        await session.commit()
+        chat_title = chat.title
+
+    await state.clear()
+    if topic_id:
+        await msg.answer(f"Активный топик в чате '{chat_title}' установлен на #{topic_id}.")
+    else:
+        await msg.answer(f"Бот теперь активен везде в чате '{chat_title}'.")
+
+
+@router.callback_query(F.data.startswith("change_auto_reply_"))
+async def change_auto_reply(callback: CallbackQuery):
+    """Shows options for auto-reply chance."""
+    chat_id = int(callback.data.split("_")[3])
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="0% (выкл)", callback_data=f"set_auto_reply_{chat_id}_0")
+    keyboard.button(text="5%", callback_data=f"set_auto_reply_{chat_id}_5")
+    keyboard.button(text="10%", callback_data=f"set_auto_reply_{chat_id}_10")
+    keyboard.button(text="20%", callback_data=f"set_auto_reply_{chat_id}_20")
+    keyboard.button(text="30%", callback_data=f"set_auto_reply_{chat_id}_30")
+    keyboard.button(text="50%", callback_data=f"set_auto_reply_{chat_id}_50")
+    keyboard.button(text="🔙 Назад", callback_data=f"chat_settings_{chat_id}")
+    keyboard.adjust(3)
+    
+    await callback.message.edit_text(
+        "Выберите шанс автоматического ответа на сообщения в активном топике:",
+        reply_markup=keyboard.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("set_auto_reply_"))
+async def set_auto_reply(callback: CallbackQuery):
+    """Sets the auto-reply chance."""
+    parts = callback.data.split("_")
+    chat_id = int(parts[3])
+    chance_pct = int(parts[4])
+    
+    async with get_session()() as session:
+        chat = await session.get(Chat, chat_id)
+        chat.auto_reply_chance = chance_pct / 100.0
+        await session.commit()
+        chat_title = chat.title
+    
+    await callback.message.edit_text(
+        f"Шанс автоответа в чате '{chat_title}' установлен на {chance_pct}%.\n\n"
+        f"Бот будет отвечать на ~{chance_pct}% сообщений в активном топике."
+    )
+    await callback.answer()

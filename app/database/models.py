@@ -348,6 +348,8 @@ class Chat(Base):
 
     summary_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     creative_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    active_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Топик где бот активен
+    auto_reply_chance: Mapped[float] = mapped_column(Float, default=0.0)  # Шанс автоответа (0.0-1.0)
     
     moderation_mode: Mapped[str] = mapped_column(String(20), default="normal")
 

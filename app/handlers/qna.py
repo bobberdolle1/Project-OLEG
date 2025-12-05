@@ -2,6 +2,7 @@
 
 import logging
 import random
+import re
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -28,7 +29,12 @@ async def cmd_start(msg: Message):
     await msg.reply("Я Олег. Чё надо? Пиши по делу.")
 
 
-def _should_reply(msg: Message) -> bool:
+import random as _random
+from sqlalchemy import select as _select
+from app.database.models import Chat as _Chat
+
+
+async def _should_reply(msg: Message) -> bool:
     """
     Проверить, должен ли бот ответить на сообщение.
 
@@ -36,6 +42,7 @@ def _should_reply(msg: Message) -> bool:
     - Это личное сообщение (private chat)
     - Это ответ на сообщение бота (reply)
     - Бот упомянут в сообщении (@botname)
+    - Сообщение в активном топике чата (с учётом auto_reply_chance)
 
     Args:
         msg: Сообщение Telegram
@@ -60,6 +67,40 @@ def _should_reply(msg: Message) -> bool:
         bot_username = msg.bot._me.username
         if bot_username and ("@" + bot_username) in msg.text:
             return True
+
+    # Проверка: упоминание "олег" в тексте (без @)
+    if msg.text:
+        text_lower = msg.text.lower()
+        # Проверяем слово "олег" как отдельное слово или в начале/конце
+        oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге"]
+        for trigger in oleg_triggers:
+            # Проверяем что это отдельное слово, а не часть другого
+            if re.search(rf'\b{trigger}\b', text_lower):
+                return True
+
+    # Проверка: сообщение в активном топике чата?
+    try:
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(_select(_Chat).filter_by(id=msg.chat.id))
+            chat = result.scalars().first()
+            
+            if chat:
+                # Проверяем активный топик
+                msg_topic_id = getattr(msg, 'message_thread_id', None)
+                
+                # Если есть активный топик и сообщение в нём
+                if chat.active_topic_id is not None and msg_topic_id == chat.active_topic_id:
+                    # Используем шанс автоответа
+                    if chat.auto_reply_chance > 0 and _random.random() < chat.auto_reply_chance:
+                        return True
+                
+                # Если активный топик не задан (None) - бот активен везде в чате
+                if chat.active_topic_id is None and chat.auto_reply_chance > 0:
+                    if _random.random() < chat.auto_reply_chance:
+                        return True
+    except Exception as e:
+        logger.debug(f"Ошибка при проверке активного топика: {e}")
 
     return False
 
@@ -161,7 +202,7 @@ async def general_qna(msg: Message):
     Отвечает на вопросы пользователей, если бот упомянут
     или это ответ на сообщение бота.
     """
-    if not _should_reply(msg):
+    if not await _should_reply(msg):
         return
 
     text = msg.text or ""

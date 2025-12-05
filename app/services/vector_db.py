@@ -1,11 +1,16 @@
 """Модуль для работы с векторной базой данных (RAG)."""
 
 import logging
+import warnings
 import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Optional, Tuple
 import json
 from datetime import datetime
+
+# Подавляем ошибки телеметрии chromadb
+warnings.filterwarnings("ignore", message=".*telemetry.*")
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 

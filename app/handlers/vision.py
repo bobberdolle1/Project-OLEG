@@ -141,7 +141,7 @@ async def handle_image_message(msg: Message):
         processing_msg = await msg.reply("👀 Разглядываю...")
 
         # Анализируем изображение
-        analysis_result = await analyze_image_content(image_bytes, vision_prompt)
+        analysis_result = await analyze_image_with_vlm(image_bytes, vision_prompt)
 
         # Удаляем сообщение о процессе
         try:

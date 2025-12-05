@@ -12,6 +12,7 @@ from app.config import settings
 from app.database.session import get_session
 from app.database.models import MessageLog
 from app.services.vector_db import vector_db
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 

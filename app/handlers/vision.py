@@ -34,7 +34,7 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
 
         # Подготавливаем данные для запроса к Ollama
         payload = {
-            "model": "qwen2-vl:2b-instruct-q5_1",  # Используем легковесную мультимодальную модель
+            "model": settings.ollama_vision_model,  # Используем модель из конфига
             "messages": [
                 {
                     "role": "user",

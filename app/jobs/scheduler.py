@@ -5,6 +5,7 @@ import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from aiogram import Bot
 from sqlalchemy import select, and_, delete, or_, func
 from sqlalchemy.orm import joinedload
@@ -12,12 +13,87 @@ from sqlalchemy.orm import joinedload
 from app.config import settings
 from app.services.ollama_client import summarize_chat, generate_creative
 from app.database.session import get_session
-from app.database.models import User, Wallet, GameStat, Auction, Bid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat
+from app.database.models import User, Wallet, GameStat, Auction, Bid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat, PendingVerification
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+
+
+async def job_check_pending_verifications(bot: Bot):
+    """
+    Проверяет истекшие верификации и кикает пользователей, которые не нажали кнопку.
+    Запускается каждую минуту.
+    """
+    async_session = get_session()
+    now = utc_now()
+    
+    async with async_session() as session:
+        # Находим все истекшие и необработанные верификации
+        result = await session.execute(
+            select(PendingVerification).filter(
+                PendingVerification.expires_at <= now,
+                PendingVerification.is_verified == False,
+                PendingVerification.is_kicked == False
+            )
+        )
+        expired_verifications = result.scalars().all()
+        
+        for verification in expired_verifications:
+            try:
+                # Проверяем, не стал ли пользователь админом
+                try:
+                    member = await bot.get_chat_member(verification.chat_id, verification.user_id)
+                    if member.status in ['administrator', 'creator']:
+                        # Админов не кикаем, просто отмечаем как верифицированных
+                        verification.is_verified = True
+                        logger.info(f"Пользователь {verification.user_id} — админ, пропускаем кик")
+                        continue
+                except Exception:
+                    pass
+                
+                # Кикаем пользователя
+                await bot.ban_chat_member(
+                    chat_id=verification.chat_id,
+                    user_id=verification.user_id,
+                    until_date=now + timedelta(seconds=60)  # Бан на 60 сек = кик с возможностью вернуться
+                )
+                
+                verification.is_kicked = True
+                
+                # Удаляем приветственное сообщение
+                if verification.welcome_message_id:
+                    try:
+                        await bot.delete_message(verification.chat_id, verification.welcome_message_id)
+                    except Exception:
+                        pass
+                
+                # Отправляем уведомление
+                try:
+                    username = verification.username or str(verification.user_id)
+                    await bot.send_message(
+                        verification.chat_id,
+                        f"👢 {username} был кикнут за неактивность (не подтвердил, что не бот)."
+                    )
+                except Exception:
+                    pass
+                
+                logger.info(f"Кикнут пользователь {verification.user_id} из чата {verification.chat_id} (не прошел верификацию)")
+                
+            except Exception as e:
+                logger.error(f"Ошибка при кике пользователя {verification.user_id}: {e}")
+                # Отмечаем как обработанный чтобы не пытаться снова
+                verification.is_kicked = True
+        
+        await session.commit()
+        
+        # Удаляем старые записи (старше 1 дня)
+        old_date = now - timedelta(days=1)
+        await session.execute(
+            delete(PendingVerification).where(PendingVerification.created_at < old_date)
+        )
+        await session.commit()
 
 
 async def job_daily_summary(bot: Bot):
@@ -381,4 +457,7 @@ async def setup_scheduler(bot: Bot):
     _scheduler.add_job(job_update_team_wars, CronTrigger(minute="*/1"), args=[bot], id="update_team_wars")
     _scheduler.add_job(job_aggregate_daily_stats, CronTrigger(hour=23, minute=59), args=[bot], id="aggregate_daily_stats")
     _scheduler.add_job(job_sync_chat_members, CronTrigger(hour=3, minute=0), args=[bot], id="sync_chat_members")
+    # Welcome 2.0: проверка истекших верификаций каждую минуту
+    _scheduler.add_job(job_check_pending_verifications, IntervalTrigger(minutes=1), args=[bot], id="check_pending_verifications")
     _scheduler.start()
+    logger.info("Планировщик запущен с job_check_pending_verifications")

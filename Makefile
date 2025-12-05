@@ -46,14 +46,34 @@ run: ## Run the bot
 docker-build: ## Build Docker image
 	docker build -t oleg-bot:latest .
 
+docker-rebuild: ## Rebuild Docker image without cache
+	docker-compose build --no-cache
+
 docker-up: ## Start Docker containers
 	docker-compose up -d
 
 docker-down: ## Stop Docker containers
 	docker-compose down
 
+docker-restart: ## Restart bot container
+	docker-compose restart oleg-bot
+
+docker-update: ## Full update: rebuild and restart
+	docker-compose down
+	docker-compose build --no-cache
+	docker-compose up -d
+
 docker-logs: ## Show Docker logs
 	docker-compose logs -f oleg-bot
+
+docker-logs-all: ## Show all containers logs
+	docker-compose logs -f
+
+docker-shell: ## Open shell in bot container
+	docker-compose exec oleg-bot /bin/bash
+
+docker-status: ## Show containers status
+	docker-compose ps
 
 migrate-create: ## Create new migration (usage: make migrate-create MSG="description")
 	alembic revision --autogenerate -m "$(MSG)"

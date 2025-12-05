@@ -11,6 +11,7 @@ from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
 from app.handlers.private_admin import router as private_admin_router
 from app.handlers.chat_join import router as chat_join_router
+from app.handlers.voice import router as voice_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -71,6 +72,15 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     await downloader.start_workers()
     logger.info("Воркеры загрузки контента запущены")
 
+    # Инициализация Whisper для распознавания голосовых
+    if settings.voice_recognition_enabled:
+        logger.info("Инициализация Whisper для распознавания голосовых...")
+        from app.services.voice_recognition import init_whisper
+        if await init_whisper():
+            logger.info("Whisper инициализирован")
+        else:
+            logger.warning("Whisper не удалось инициализировать, распознавание голосовых недоступно")
+
     # Start metrics server
     if settings.metrics_enabled:
         logger.info("Запуск сервера метрик...")
@@ -99,6 +109,7 @@ def build_dp() -> Dispatcher:
         games.router,
         moderation.router,
         antiraid.router,
+        voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
         qna.router,
         achievements.router,
         trading.router,

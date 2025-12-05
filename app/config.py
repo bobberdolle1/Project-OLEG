@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     metrics_enabled: bool = Field(default=False, description="Enable Prometheus metrics endpoint")
     metrics_port: int = Field(default=9090, ge=1, le=65535, description="Metrics server port")
 
+    # Media features
+    voice_recognition_enabled: bool = Field(default=True, description="Enable voice message recognition (STT)")
+    whisper_model: str = Field(default="base", description="Whisper model size: tiny, base, small, medium, large")
+    content_download_enabled: bool = Field(default=True, description="Enable auto-download of media from links")
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

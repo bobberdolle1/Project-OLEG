@@ -13,6 +13,7 @@ python-dateutil==2.9.0.post0
 uvloop==0.21.0; sys_platform != 'win32'
 Pillow==10.4.0
 yt-dlp==2023.10.13
+openai-whisper==20231117
 chromadb==0.6.0
 ollama==0.3.3
 cachetools==5.5.0

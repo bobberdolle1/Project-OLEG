@@ -23,8 +23,10 @@ LABEL description="Telegram bot with AI, moderation and game mechanics"
 WORKDIR /app
 
 # Установка runtime зависимостей
+# ffmpeg - для Whisper (распознавание голоса) и yt-dlp (конвертация медиа)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Создание пользователя без привилегий

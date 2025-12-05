@@ -27,8 +27,13 @@ LINK_PATTERNS = {
         r'(?:https?:\/\/)?(?:www\.)?tiktok\.com\/@[\w.]+\/video\/(\d+)',
         r'(?:https?:\/\/)?vm\.tiktok\.com\/[a-zA-Z0-9]+\/?',
     ],
-    'vkontakte': [
-        r'(?:https?:\/\/)?(?:www\.)?vk\.com\/video([a-zA-Z0-9_]+)',
+    'vkontakte_video': [
+        r'(?:https?:\/\/)?(?:www\.)?vk\.com\/video([a-zA-Z0-9_-]+)',
+        r'(?:https?:\/\/)?(?:www\.)?vk\.com\/clip([a-zA-Z0-9_-]+)',
+    ],
+    'vkontakte_music': [
+        r'(?:https?:\/\/)?(?:www\.)?vk\.com\/audio([a-zA-Z0-9_-]+)',
+        r'(?:https?:\/\/)?(?:www\.)?vk\.com\/music\/album\/([a-zA-Z0-9_-]+)',
     ],
     'soundcloud': [
         r'(?:https?:\/\/)?(?:www\.)?soundcloud\.com\/[\w\/-]+',
@@ -40,7 +45,10 @@ LINK_PATTERNS = {
     'spotify': [
         r'(?:https?:\/\/)?open\.spotify\.com\/track\/[a-zA-Z0-9]+',
         r'(?:https?:\/\/)?open\.spotify\.com\/playlist\/[a-zA-Z0-9]+',
-    ]
+    ],
+    'instagram': [
+        r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:p|reel)\/([a-zA-Z0-9_-]+)',
+    ],
 }
 
 # Ограничение размера файла для Telegram (50 МБ для видео, 50 МБ для аудио)
@@ -119,19 +127,24 @@ class ContentDownloader:
         
     def detect_content_type(self, url: str) -> Optional[str]:
         """
-        Определяет тип контента по URL.
+        Определяет источник контента по URL.
         
         Args:
             url: URL для анализа
             
         Returns:
-            Тип контента или None
+            Название источника или None
         """
-        for content_type, patterns in LINK_PATTERNS.items():
+        for source_name, patterns in LINK_PATTERNS.items():
             for pattern in patterns:
                 if re.search(pattern, url, re.IGNORECASE):
-                    return content_type
+                    return source_name
         return None
+    
+    def is_audio_source(self, source: str) -> bool:
+        """Проверяет, является ли источник аудио-контентом."""
+        audio_sources = ['soundcloud', 'yandex_music', 'spotify', 'vkontakte_music']
+        return source in audio_sources
     
     async def download_content(self, url: str, target_chat_id: int, message: Message) -> bool:
         """
@@ -160,23 +173,28 @@ class ContentDownloader:
     
     async def _download_and_send(self, url: str, target_chat_id: int, message: Message) -> bool:
         """Внутренняя функция для скачивания и отправки контента."""
-        content_type = self.detect_content_type(url)
-        if not content_type:
+        source = self.detect_content_type(url)
+        if not source:
             return False
+        
+        is_audio = self.is_audio_source(source)
 
         try:
             # Временный файл для скачивания
-            with tempfile.NamedTemporaryFile(delete=False, suffix=self._get_file_extension(content_type)) as tmp_file:
+            ext = '.mp3' if is_audio else '.mp4'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_file:
                 file_path = tmp_file.name
 
             # Настройки для yt-dlp
             ydl_opts = {
-                'outtmpl': file_path,
+                'outtmpl': file_path.rsplit('.', 1)[0] + '.%(ext)s',  # Позволяем yt-dlp выбрать расширение
                 'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
             }
 
             # Добавляем настройки в зависимости от типа контента
-            if content_type == 'audio':
+            if is_audio:
                 ydl_opts.update({
                     'format': 'bestaudio/best',
                     'postprocessors': [{
@@ -184,10 +202,6 @@ class ContentDownloader:
                         'preferredcodec': 'mp3',
                         'preferredquality': '192',
                     }],
-                    'postprocessor_args': {
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }
                 })
             else:
                 ydl_opts.update({
@@ -198,37 +212,36 @@ class ContentDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
 
-                # Обновляем путь к файлу, если yt-dlp изменил его (например, при экстракции аудио)
-                if content_type == 'audio':
-                    file_path = file_path.replace('.tmp', '.mp3')  # yt-dlp обычно меняет расширение
-
-                if not os.path.exists(file_path):
-                    # Ищем файл с тем же именем, но другим расширением
-                    base_path = file_path.rsplit('.', 1)[0]
-                    for ext in ['.mp3', '.mp4', '.webm', '.m4a']:
-                        if os.path.exists(base_path + ext):
-                            file_path = base_path + ext
-                            break
-
-                if not os.path.exists(file_path):
-                    # Если нужный файл не найден, выходим
-                    logger.error(f"Файл не найден после скачивания: {file_path}")
+                # Ищем скачанный файл
+                base_path = file_path.rsplit('.', 1)[0]
+                actual_file = None
+                for ext in ['.mp3', '.mp4', '.webm', '.m4a', '.ogg', '.opus']:
+                    candidate = base_path + ext
+                    if os.path.exists(candidate):
+                        actual_file = candidate
+                        break
+                
+                if not actual_file:
+                    logger.error(f"Файл не найден после скачивания: {base_path}.*")
+                    await message.reply("Не удалось скачать контент. Попробуй позже.")
                     return False
-
+                
+                file_path = actual_file
                 file_size = os.path.getsize(file_path)
 
                 # Проверяем размер файла
                 if file_size > TELEGRAM_FILE_SIZE_LIMIT:
-                    os.unlink(file_path)  # Удаляем файл
+                    os.unlink(file_path)
+                    content_name = "Аудио" if is_audio else "Видео"
                     await message.reply(
-                        f"Видео слишком жирное ({file_size / (1024*1024):.1f} МБ). "
+                        f"{content_name} слишком жирное ({file_size / (1024*1024):.1f} МБ). "
                         f"Максимум для Telegram: {TELEGRAM_FILE_SIZE_LIMIT / (1024*1024):.1f} МБ. "
                         f"Скачивай сам, ленивая жопа."
                     )
                     return False
 
                 # Отправляем контент в зависимости от типа
-                if content_type == 'audio':
+                if is_audio:
                     await self._send_audio(message.bot, target_chat_id, file_path, info)
                 else:
                     await self._send_video(message.bot, target_chat_id, file_path, info)
@@ -247,7 +260,21 @@ class ContentDownloader:
                     os.unlink(file_path)
             except:
                 pass
-            raise e
+            
+            # Отправляем сообщение об ошибке в стиле Олега
+            error_messages = [
+                "Что-то сломалось при скачивании. Попробуй позже, чемпион.",
+                "Не смог скачать. Либо ссылка кривая, либо сервис лёг.",
+                "Ошибка загрузки. Видимо, интернет решил отдохнуть.",
+                "Не вышло скачать. Попробуй другую ссылку или подожди.",
+            ]
+            import random
+            try:
+                await message.reply(random.choice(error_messages))
+            except:
+                pass
+            
+            logger.error(f"Ошибка при скачивании {url}: {e}")
     
     def _get_file_extension(self, content_type: str) -> str:
         """Возвращает расширение файла для типа контента."""
@@ -308,6 +335,12 @@ async def handle_links(msg: Message):
     """
     Обрабатывает сообщения с ссылками и добавляет задачи в очередь.
     """
+    from app.config import settings
+    
+    # Проверяем, включена ли функция
+    if not settings.content_download_enabled:
+        return
+    
     text = msg.text or msg.caption or ""
     if not text:
         return

@@ -1,19 +1,23 @@
 """Обработчик событий добавления бота в чат (Plug & Play)."""
 
 import logging
+import random
+from datetime import timedelta
 from aiogram import Router, F
 from aiogram.types import Message, ChatMemberUpdated, CallbackQuery
 from aiogram.filters import ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from sqlalchemy import select
-import re
 
 from app.database.session import get_session
-from app.database.models import Chat, User
-from app.services.ollama_client import _ollama_chat
+from app.database.models import Chat, User, PendingVerification
+from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Время на верификацию (в минутах)
+VERIFICATION_TIMEOUT_MINUTES = 5
 
 # Обновляем модель ChatConfig, чтобы она использовалась в новых чатах
 async def create_chat(chat_id: int, chat_title: str, chat_type: str, owner_user_id: int, is_forum: bool):
@@ -65,6 +69,61 @@ async def send_welcome_message(bot, chat_id: int, chat_title: str):
     except Exception as e:
         logger.error(f"Ошибка при отправке приветствия в чат {chat_id}: {e}")
 
+
+async def create_pending_verification(user_id: int, chat_id: int, username: str, message_id: int = None):
+    """
+    Создает запись о pending верификации пользователя.
+    """
+    async_session = get_session()
+    async with async_session() as session:
+        # Удаляем старые записи для этого пользователя в этом чате
+        old_records = await session.execute(
+            select(PendingVerification).filter_by(user_id=user_id, chat_id=chat_id)
+        )
+        for record in old_records.scalars().all():
+            await session.delete(record)
+        
+        # Создаем новую запись
+        verification = PendingVerification(
+            user_id=user_id,
+            chat_id=chat_id,
+            username=username,
+            welcome_message_id=message_id,
+            expires_at=utc_now() + timedelta(minutes=VERIFICATION_TIMEOUT_MINUTES),
+            is_verified=False,
+            is_kicked=False
+        )
+        session.add(verification)
+        await session.commit()
+        logger.info(f"Создана pending верификация для user {user_id} в чате {chat_id}")
+
+
+async def mark_user_verified(user_id: int, chat_id: int) -> bool:
+    """
+    Отмечает пользователя как верифицированного.
+    
+    Returns:
+        True если запись найдена и обновлена
+    """
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(
+            select(PendingVerification).filter_by(
+                user_id=user_id, 
+                chat_id=chat_id,
+                is_verified=False,
+                is_kicked=False
+            )
+        )
+        verification = result.scalars().first()
+        
+        if verification:
+            verification.is_verified = True
+            await session.commit()
+            logger.info(f"Пользователь {user_id} верифицирован в чате {chat_id}")
+            return True
+        return False
+
 @router.my_chat_member(ChatMemberUpdatedFilter(JOIN_TRANSITION))
 async def bot_added_to_chat(event: ChatMemberUpdated):
     """
@@ -106,21 +165,18 @@ async def bot_removed_from_chat(event: ChatMemberUpdated):
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-import asyncio
-import json
 
 
 @router.message(F.new_chat_members)
 async def new_chat_member_welcome(msg: Message):
     """
     Обработчик события добавления новых участников в чат.
+    Создает pending верификацию, которая проверяется scheduler'ом.
     """
-    # Удаляем системное сообщение о присоединении (если возможно и это не закрепленное сообщение)
+    # Удаляем системное сообщение о присоединении (если возможно)
     try:
-        if not msg.pinned_message:  # Проверяем, что это не закрепленное сообщение
-            await msg.delete()
+        await msg.delete()
     except Exception:
-        # Не всегда возможно удалить системное сообщение
         pass
 
     # Приветствуем каждого нового участника
@@ -130,60 +186,42 @@ async def new_chat_member_welcome(msg: Message):
             if new_member.is_bot:
                 continue
 
-            # Получаем контекст чата для персонализации приветствия
-            async_session = get_session()
-            async with async_session() as session:
-                from app.database.models import Chat
-                chat_config_res = await session.execute(
-                    select(Chat).filter_by(id=msg.chat.id)
-                )
-                chat_config = chat_config_res.scalars().first()
-
-                # Генерируем универсальное приветствие с учетом типа чата
-                context_info = f"чат '{msg.chat.title}'" if msg.chat.title else "этот чат"
-                base_welcome = f"О, новое лицо! Привет, {new_member.full_name}, зашел в {context_info}."
-
-            # Добавляем стиль Олега к приветствию
-            oleg_style_welcome = f"{base_welcome} Не тролли почем зря, а то получишь от Олега."
+            # Генерируем приветствие
+            context_info = f"чат '{msg.chat.title}'" if msg.chat.title else "этот чат"
+            
+            welcome_variants = [
+                f"👋 Новое лицо! {new_member.full_name}, добро пожаловать в {context_info}.",
+                f"🚪 {new_member.full_name} зашел в {context_info}. Не тролли почем зря.",
+                f"👀 О, {new_member.full_name}! Добро пожаловать. Олег следит за тобой.",
+            ]
+            welcome_text = random.choice(welcome_variants)
+            welcome_text += f"\n\n⏱ Нажми кнопку ниже в течение {VERIFICATION_TIMEOUT_MINUTES} минут, иначе будешь кикнут."
 
             # Создаем inline-кнопку
             keyboard = InlineKeyboardBuilder()
             keyboard.button(
-                text="✅ Я не бот / Прочитал правила",
+                text="✅ Я не бот",
                 callback_data=f"verify_user_{new_member.id}_{msg.chat.id}"
             )
             keyboard.adjust(1)
 
             # Отправляем приветствие с кнопкой
-            welcome_msg = await msg.answer(oleg_style_welcome, reply_markup=keyboard.as_markup())
+            welcome_msg = await msg.answer(welcome_text, reply_markup=keyboard.as_markup())
 
-            # Устанавливаем таймер на 5 минут для проверки, нажал ли пользователь кнопку
-            await asyncio.sleep(5 * 60)  # 5 минут = 300 секунд
+            # Создаем запись в БД для отслеживания (scheduler проверит и кикнет если надо)
+            await create_pending_verification(
+                user_id=new_member.id,
+                chat_id=msg.chat.id,
+                username=new_member.username or new_member.full_name,
+                message_id=welcome_msg.message_id
+            )
 
-            # Проверяем, нужно ли кикнуть пользователя
-            # В реальной реализации нужно отслеживать нажатие кнопки и хранить состояния
-            # Пока что просто проверим, существует ли сообщение и выполним кик
-            try:
-                # В реальной системе состояние пользователя должно храниться в БД
-                # Проверим, является ли пользователь админом, чтобы не кикать
-                member = await msg.bot.get_chat_member(msg.chat.id, new_member.id)
-                if member.status not in ["administrator", "creator"]:
-                    # Кикуем пользователя, если он не нажал кнопку за 5 минут
-                    await msg.bot.kick_chat_member(
-                        msg.chat.id,
-                        new_member.id,
-                        until_date=None  # Постоянный бан, но можно разбанить
-                    )
-                    # Отправляем сообщение о кике
-                    await msg.answer(f"Пользователь @{new_member.username or new_member.full_name} был кикнут за неактивность (не подтвердил, что не бот).")
-            except Exception as e:
-                logger.info(f"Не удалось кикнуть пользователя {new_member.id}: {e}")
+            logger.info(f"Новый участник {new_member.id} в чате {msg.chat.id}, ожидает верификации")
 
         except Exception as e:
             logger.error(f"Ошибка при приветствии участника {new_member.id}: {e}")
 
 
-# Обработчик нажатия на кнопку подтверждения
 @router.callback_query(F.data.startswith("verify_user_"))
 async def handle_verification_button(callback: CallbackQuery):
     """Обработка нажатия кнопки подтверждения 'Я не бот'."""
@@ -201,13 +239,19 @@ async def handle_verification_button(callback: CallbackQuery):
         return
 
     try:
-        # Обновляем статус пользователя в БД (в реальной реализации)
-        # Пока что просто отправляем сообщение
-        await callback.message.edit_text(
-            f"✅ @{callback.from_user.username or callback.from_user.full_name} подтвердил, что он не бот!\n"
-            f"Добро пожаловать в чат!"
-        )
-        await callback.answer("Спасибо за подтверждение! Теперь ты можешь свободно общаться в чате.")
+        # Отмечаем пользователя как верифицированного в БД
+        verified = await mark_user_verified(user_id, chat_id)
+        
+        if verified:
+            await callback.message.edit_text(
+                f"✅ {callback.from_user.full_name} подтвердил, что он не бот!\n"
+                f"Добро пожаловать в чат!"
+            )
+            await callback.answer("Верификация пройдена! Добро пожаловать.")
+        else:
+            # Запись не найдена — возможно уже верифицирован или кикнут
+            await callback.answer("Верификация уже была обработана.", show_alert=True)
+            
     except Exception as e:
         logger.error(f"Ошибка при обработке подтверждения пользователя {user_id}: {e}")
         await callback.answer("Произошла ошибка при подтверждении.", show_alert=True)

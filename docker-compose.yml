@@ -11,6 +11,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_FILE=/app/logs/oleg.log
+      # Media features (можно переопределить в .env)
+      - VOICE_RECOGNITION_ENABLED=${VOICE_RECOGNITION_ENABLED:-true}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - CONTENT_DOWNLOAD_ENABLED=${CONTENT_DOWNLOAD_ENABLED:-true}
     ports:
       # Metrics endpoint for Prometheus
       - "9090:9090"
@@ -21,6 +25,8 @@ services:
       - oleg-logs:/app/logs
       # Данные векторной базы
       - chroma-data:/app/chroma_data
+      # Кэш моделей Whisper (чтобы не скачивать при каждом перезапуске)
+      - whisper-cache:/home/oleg/.cache
     networks:
       - oleg-network
     depends_on:
@@ -31,7 +37,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 60s  # Увеличено для загрузки модели Whisper
     logging:
       driver: "json-file"
       options:
@@ -195,6 +201,8 @@ volumes:
   clickhouse-data:
     driver: local
   redis-data:
+    driver: local
+  whisper-cache:
     driver: local
   # postgres-data:
   #   driver: local

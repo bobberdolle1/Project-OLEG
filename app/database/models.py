@@ -393,3 +393,18 @@ class PrivateChat(Base):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)  # Заблокирован ли пользователь
 
     user: Mapped["User"] = relationship(back_populates="private_chat", foreign_keys=[user_id])
+
+
+class PendingVerification(Base):
+    """Ожидающие верификации новых пользователей (Welcome 2.0)."""
+    __tablename__ = "pending_verifications"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    welcome_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID сообщения с кнопкой
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)  # Когда истекает время на верификацию
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_kicked: Mapped[bool] = mapped_column(Boolean, default=False)

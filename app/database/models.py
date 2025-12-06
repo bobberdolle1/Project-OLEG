@@ -597,3 +597,94 @@ class DailiesConfig(Base):
     summary_time_hour: Mapped[int] = mapped_column(Integer, default=9)    # 09:00 Moscow
     quote_time_hour: Mapped[int] = mapped_column(Integer, default=21)     # 21:00 Moscow
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+# ============================================================================
+# SHIELD & ECONOMY v6.5 - New Models
+# ============================================================================
+
+
+class UserEnergy(Base):
+    """
+    Personal energy system for LLM request limiting (Requirements 1.1, 1.2, 1.3, 1.4).
+    
+    Each user has an energy counter (0-3) that decrements on rapid requests.
+    When energy reaches 0, user enters cooldown period.
+    Energy resets after 60 seconds of inactivity.
+    """
+    __tablename__ = "user_energy"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    energy: Mapped[int] = mapped_column(Integer, default=3)  # 0-3, starts at 3
+    last_request: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    cooldown_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_energy'),
+    )
+
+
+class ChatRateLimitConfig(Base):
+    """
+    Global chat rate limit configuration (Requirements 2.1, 2.3).
+    
+    Configures the maximum LLM requests per minute for each chat.
+    Default limit is 20 requests per minute.
+    """
+    __tablename__ = "chat_rate_limit_config"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    llm_requests_per_minute: Mapped[int] = mapped_column(Integer, default=20)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class ProtectionProfileConfig(Base):
+    """
+    Protection profile configuration per chat (Requirements 10.1, 10.2, 10.3, 10.4).
+    
+    Stores the selected protection profile and custom settings.
+    Profiles: standard, strict, bunker, custom
+    """
+    __tablename__ = "protection_profile_config"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    profile: Mapped[str] = mapped_column(String(20), default="standard")  # standard, strict, bunker, custom
+    
+    # Custom settings (used when profile="custom" or to override defaults)
+    anti_spam_links: Mapped[bool] = mapped_column(Boolean, default=True)
+    captcha_type: Mapped[str] = mapped_column(String(10), default="button")  # button, hard
+    profanity_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    neural_ad_filter: Mapped[bool] = mapped_column(Boolean, default=False)
+    block_forwards: Mapped[bool] = mapped_column(Boolean, default=False)
+    sticker_limit: Mapped[int] = mapped_column(Integer, default=0)  # 0 = unlimited
+    mute_newcomers: Mapped[bool] = mapped_column(Boolean, default=False)
+    block_media_non_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    aggressive_profanity: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class SilentBan(Base):
+    """
+    Silent ban tracking for suspicious users (Requirements 9.4, 9.5).
+    
+    Users under silent ban have their messages deleted without notification.
+    They can be unbanned by passing a captcha challenge.
+    """
+    __tablename__ = "silent_bans"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    captcha_answer: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # Expected answer for unban
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_silent_ban'),
+    )

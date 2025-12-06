@@ -7,6 +7,119 @@
 
 ---
 
+## [6.5.0] - 2025-12-07
+
+### 🛡️ Shield & Economy Update
+
+Обновление, направленное на экономию токенов LLM через систему rate limiting и усиление защиты чатов от рейдов и спама.
+
+### 🚀 Добавлено
+
+#### Система экономии токенов
+- **Personal Energy System** — персональный cooldown для пользователей
+  - `app/services/energy_limiter.py` — EnergyLimiterService
+  - 3 единицы энергии, декремент при быстрых запросах (<10 сек)
+  - Восстановление до 3 после 60 секунд неактивности
+  - Redis для быстрого доступа с DB fallback
+
+- **Global Rate Limiter** — лимит LLM запросов на чат
+  - `app/services/global_rate_limiter.py` — GlobalRateLimiterService
+  - 20 запросов/минуту по умолчанию, настраивается через админку
+  - Ответ "Занят." при превышении лимита
+
+- **Status Notification Manager** — антифлуд статусных сообщений
+  - `app/services/status_manager.py` — StatusManager
+  - ⏳ реакции вместо спама уведомлений во время обработки
+
+#### RAG Temporal Memory
+- **Timestamping** — временные метки для фактов
+  - `app/services/vector_db.py` — расширение VectorDB
+  - ISO 8601 формат для created_at
+  - Приоритет свежих фактов при конфликтах
+  - "СЕГОДНЯ: YYYY-MM-DD HH:MM" в промптах
+
+- **Memory Management** — управление памятью
+  - `delete_all_chat_facts()` — забыть всё
+  - `delete_old_facts()` — забыть старое (>90 дней)
+  - `delete_user_facts()` — забыть юзера
+  - Возврат количества удалённых фактов
+
+#### Citadel 2.0 — Panic Mode
+- **Panic Mode Controller** — автозащита от рейдов
+  - `app/services/panic_mode.py` — PanicModeController
+  - Активация при 10+ вступлениях за 10 секунд
+  - Активация при 20+ сообщениях/сек от разных юзеров
+  - Тишина welcome-сообщений
+  - RO на 30 минут для новичков (<24ч)
+  - Hard Captcha (математические задачи) для разбана
+
+#### Permission Checker
+- **Bot Permission Self-Check** — проверка прав бота
+  - `app/services/permission_checker.py` — PermissionChecker
+  - Проверка через get_chat_member API перед модерацией
+  - Тихий репорт админам при отсутствии прав
+  - Кэширование на 60 секунд
+  - Никаких угроз без полномочий
+
+#### Neural Spam Filter
+- **Spam Classifier** — нейро-детекция спама
+  - `app/services/spam_classifier.py` — SpamClassifier
+  - Категории: selling, crypto, job_offer, collaboration
+  - Комбинация regex + keywords + scoring
+  - Мгновенное удаление + бан
+  - Логирование с hash и confidence
+
+#### User Scanner
+- **New User Scanner** — сканирование новичков
+  - `app/services/user_scanner.py` — UserScanner
+  - Проверка аватара, имени (RTL, иероглифы, спам-слова), Premium
+  - Suspicion score 0.0-1.0
+  - Silent Ban при высоком score
+
+- **Silent Ban System** — тихий бан
+  - Удаление сообщений без уведомления
+  - Captcha для разбана
+  - Хранение в SilentBan модели
+
+#### Protection Profiles
+- **Protection Profile Manager** — профили защиты
+  - `app/services/protection_profiles.py` — ProtectionProfileManager
+  - 🟢 Стандарт: антиспам ссылок, button captcha, мат разрешён
+  - 🟡 Строгий: нейро-фильтр рекламы, блок форвардов, лимит стикеров
+  - 🔴 Бункер: мут новичков, блок медиа, агрессивный фильтр мата
+  - ⚙️ Кастом: индивидуальные настройки
+
+#### Database
+- **Новые модели**
+  - `UserEnergy` — энергия пользователей
+  - `ChatRateLimitConfig` — настройки rate limit
+  - `ProtectionProfileConfig` — профили защиты
+  - `SilentBan` — тихие баны
+
+#### Testing
+- **30 Property-Based Tests** — полное покрытие на Hypothesis
+  - `tests/property/test_energy_limiter_props.py` — Properties 1-4
+  - `tests/property/test_global_rate_limit_props.py` — Properties 5-6
+  - `tests/property/test_status_manager_props.py` — Properties 7-8
+  - `tests/property/test_rag_temporal_props.py` — Properties 9-15
+  - `tests/property/test_panic_mode_props.py` — Properties 16-19
+  - `tests/property/test_permission_checker_props.py` — Properties 20-22
+  - `tests/property/test_spam_classifier_props.py` — Properties 23-24
+  - `tests/property/test_user_scanner_props.py` — Properties 25-27
+  - `tests/property/test_protection_profiles_props.py` — Property 28
+  - `tests/property/test_rag_serialization_props.py` — Properties 29-30
+
+### 📊 Новые метрики
+
+- `bot_energy_consumed_total` — потреблённая энергия
+- `bot_cooldowns_triggered_total` — срабатывания cooldown
+- `bot_global_rate_limits_total` — срабатывания глобального лимита
+- `bot_panic_mode_activations_total` — активации Panic Mode
+- `bot_silent_bans_total` — тихие баны
+- `bot_spam_detected_total` — обнаруженный спам
+
+---
+
 ## [6.0.0] - 2025-12-06
 
 ### 🏰 Fortress Update

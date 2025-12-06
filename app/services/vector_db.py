@@ -7,6 +7,68 @@ from chromadb.config import Settings
 from typing import List, Dict, Optional, Tuple, Any
 import json
 from datetime import datetime
+from dataclasses import dataclass
+
+
+@dataclass
+class RAGFactMetadata:
+    """
+    Metadata schema for RAG facts in ChromaDB.
+    
+    **Feature: shield-economy-v65**
+    **Validates: Requirements 11.1, 11.2, 11.3**
+    
+    This dataclass ensures consistent serialization and deserialization
+    of RAG fact metadata, preserving all fields including Unicode characters.
+    """
+    chat_id: int
+    user_id: int
+    username: str
+    topic_id: int  # -1 if not in topic
+    message_id: int
+    created_at: str  # ISO 8601 format
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Serialize metadata to a dictionary for ChromaDB storage.
+        
+        All fields are preserved exactly as stored, including Unicode
+        characters in username and other string fields.
+        
+        Returns:
+            Dictionary with all metadata fields
+        """
+        return {
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "username": self.username,
+            "topic_id": self.topic_id,
+            "message_id": self.message_id,
+            "created_at": self.created_at,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RAGFactMetadata":
+        """
+        Deserialize metadata from a dictionary.
+        
+        Handles missing fields gracefully with sensible defaults.
+        Preserves Unicode characters exactly as stored.
+        
+        Args:
+            data: Dictionary containing metadata fields
+            
+        Returns:
+            RAGFactMetadata instance with all fields populated
+        """
+        return cls(
+            chat_id=data["chat_id"],
+            user_id=data["user_id"],
+            username=data.get("username", ""),
+            topic_id=data.get("topic_id", -1),
+            message_id=data.get("message_id", 0),
+            created_at=data["created_at"],
+        )
 
 # Подавляем ошибки телеметрии chromadb
 warnings.filterwarnings("ignore", message=".*telemetry.*")
@@ -228,6 +290,252 @@ class VectorDB:
             logger.info(f"Факт {doc_id} удален из коллекции {collection_name}")
         except Exception as e:
             logger.error(f"Ошибка при удалении факта {doc_id}: {e}")
+    
+    # =========================================================================
+    # Temporal Memory Methods (Shield & Economy v6.5)
+    # =========================================================================
+    
+    def add_fact_with_timestamp(
+        self,
+        collection_name: str,
+        fact_text: str,
+        metadata: Dict,
+        created_at: Optional[datetime] = None
+    ) -> str:
+        """
+        Добавляет факт с обязательной временной меткой в ISO 8601.
+        
+        **Feature: shield-economy-v65**
+        **Validates: Requirements 4.1**
+        
+        Args:
+            collection_name: Название коллекции
+            fact_text: Текст факта
+            metadata: Метаданные (chat_id, user_id, etc.)
+            created_at: Время создания (по умолчанию - текущее время)
+            
+        Returns:
+            ID созданного документа
+        """
+        if created_at is None:
+            created_at = datetime.now()
+        
+        # Ensure created_at is in ISO 8601 format
+        metadata["created_at"] = created_at.isoformat()
+        
+        # Generate unique doc_id
+        doc_id = f"fact_{int(datetime.now().timestamp() * 1000000)}"
+        
+        self.add_fact(
+            collection_name=collection_name,
+            fact_text=fact_text,
+            metadata=metadata,
+            doc_id=doc_id
+        )
+        
+        return doc_id
+    
+    def search_facts_with_age(
+        self,
+        collection_name: str,
+        query: str,
+        chat_id: int,
+        n_results: int = 5
+    ) -> List[Dict]:
+        """
+        Ищет факты и добавляет информацию о возрасте каждого факта.
+        
+        **Feature: shield-economy-v65**
+        **Validates: Requirements 4.3, 4.4**
+        
+        Args:
+            collection_name: Название коллекции
+            query: Запрос для поиска
+            chat_id: ID чата для фильтрации
+            n_results: Количество результатов
+            
+        Returns:
+            Список фактов с полем age_days
+        """
+        facts = self.search_facts(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            where={"chat_id": chat_id}
+        )
+        
+        now = datetime.now()
+        
+        for fact in facts:
+            metadata = fact.get('metadata', {})
+            created_at_str = metadata.get('created_at') or metadata.get('timestamp')
+            
+            if created_at_str:
+                try:
+                    created_at = datetime.fromisoformat(created_at_str)
+                    age_days = (now - created_at).days
+                    fact['age_days'] = age_days
+                except (ValueError, TypeError):
+                    fact['age_days'] = -1  # Unknown age
+            else:
+                fact['age_days'] = -1
+        
+        # Sort by recency (newer facts first) for prioritization
+        facts.sort(key=lambda f: f.get('age_days', 999))
+        
+        return facts
+    
+    # =========================================================================
+    # Memory Management Methods (Shield & Economy v6.5)
+    # =========================================================================
+    
+    def delete_all_chat_facts(
+        self,
+        collection_name: str,
+        chat_id: int
+    ) -> int:
+        """
+        Удаляет все факты для указанного чата.
+        
+        **Feature: shield-economy-v65**
+        **Validates: Requirements 5.1, 5.4**
+        
+        Args:
+            collection_name: Название коллекции
+            chat_id: ID чата
+            
+        Returns:
+            Количество удаленных фактов
+        """
+        if not self.client:
+            raise Exception("ChromaDB не инициализирована")
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        try:
+            # Get all facts for this chat
+            results = collection.get(where={"chat_id": chat_id})
+            
+            if not results['ids']:
+                return 0
+            
+            count = len(results['ids'])
+            collection.delete(ids=results['ids'])
+            
+            logger.info(f"Удалено {count} фактов для чата {chat_id}")
+            return count
+            
+        except Exception as e:
+            logger.error(f"Ошибка при удалении фактов чата {chat_id}: {e}")
+            return 0
+    
+    def delete_old_facts(
+        self,
+        collection_name: str,
+        chat_id: int,
+        older_than_days: int = 90
+    ) -> int:
+        """
+        Удаляет факты старше указанного количества дней.
+        
+        **Feature: shield-economy-v65**
+        **Validates: Requirements 5.2, 5.4**
+        
+        Args:
+            collection_name: Название коллекции
+            chat_id: ID чата
+            older_than_days: Удалять факты старше этого количества дней
+            
+        Returns:
+            Количество удаленных фактов
+        """
+        if not self.client:
+            raise Exception("ChromaDB не инициализирована")
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        try:
+            # Get all facts for this chat
+            results = collection.get(where={"chat_id": chat_id})
+            
+            if not results['ids']:
+                return 0
+            
+            now = datetime.now()
+            ids_to_delete = []
+            
+            for i, doc_id in enumerate(results['ids']):
+                metadata = results['metadatas'][i] if results['metadatas'] else {}
+                created_at_str = metadata.get('created_at') or metadata.get('timestamp')
+                
+                if created_at_str:
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str)
+                        age_days = (now - created_at).days
+                        
+                        if age_days >= older_than_days:
+                            ids_to_delete.append(doc_id)
+                    except (ValueError, TypeError):
+                        pass  # Skip facts with invalid timestamps
+            
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                logger.info(f"Удалено {len(ids_to_delete)} старых фактов для чата {chat_id}")
+            
+            return len(ids_to_delete)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при удалении старых фактов чата {chat_id}: {e}")
+            return 0
+    
+    def delete_user_facts(
+        self,
+        collection_name: str,
+        chat_id: int,
+        user_id: int
+    ) -> int:
+        """
+        Удаляет все факты указанного пользователя в чате.
+        
+        **Feature: shield-economy-v65**
+        **Validates: Requirements 5.3, 5.4**
+        
+        Args:
+            collection_name: Название коллекции
+            chat_id: ID чата
+            user_id: ID пользователя
+            
+        Returns:
+            Количество удаленных фактов
+        """
+        if not self.client:
+            raise Exception("ChromaDB не инициализирована")
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        try:
+            # ChromaDB supports $and for multiple conditions
+            results = collection.get(
+                where={
+                    "$and": [
+                        {"chat_id": chat_id},
+                        {"user_id": user_id}
+                    ]
+                }
+            )
+            
+            if not results['ids']:
+                return 0
+            
+            count = len(results['ids'])
+            collection.delete(ids=results['ids'])
+            
+            logger.info(f"Удалено {count} фактов пользователя {user_id} в чате {chat_id}")
+            return count
+            
+        except Exception as e:
+            logger.error(f"Ошибка при удалении фактов пользователя {user_id}: {e}")
+            return 0
 
 
 # Глобальный экземпляр векторной БД

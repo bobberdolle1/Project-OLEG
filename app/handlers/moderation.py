@@ -1,4 +1,8 @@
-"""Обработчик команд модерации для администраторов."""
+"""Обработчик команд модерации для администраторов.
+
+Fortress Update: Integrated with ReputationService for tracking user behavior.
+**Validates: Requirements 4.2, 4.3, 4.4**
+"""
 
 import logging
 import re
@@ -11,6 +15,7 @@ from sqlalchemy import select, delete
 from app.database.session import get_session
 from app.database.models import User, Warning
 from app.utils import utc_now
+from app.services.reputation import reputation_service, ReputationChange
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +137,14 @@ async def cmd_ban(msg: Message):
             f"Ban: user {target_id} "
             f"until {until_date or 'forever'}, reason: {reason}"
         )
+        
+        # Fortress Update: Send ban notification to owner (Requirement 15.2)
+        await _notify_owner_ban(
+            msg=msg,
+            user_id=target_id,
+            username=msg.reply_to_message.from_user.username,
+            reason=reason or "Не указана"
+        )
     except Exception as e:
         logger.error(f"Ban failed: {e}")
         await msg.reply(f"Не смог забанить: {e}")
@@ -187,10 +200,21 @@ async def cmd_mute(msg: Message):
             permissions=perms,
             until_date=until_date,
         )
+        
+        # Fortress Update: Apply reputation penalty for mute (Requirement 4.3)
+        try:
+            rep_status = await reputation_service.apply_mute(target_id, msg.chat.id)
+            rep_info = f" Репутация: {rep_status.score}"
+            if rep_status.is_read_only:
+                rep_info += " (только чтение)"
+        except Exception as rep_error:
+            logger.warning(f"Failed to update reputation on mute: {rep_error}")
+            rep_info = ""
+        
         await msg.reply(
             f"Пользователь замьючен "
             f"до {until_date.strftime('%d.%m %H:%M')}. "
-            f"Причина: {reason or '—'}"
+            f"Причина: {reason or '—'}{rep_info}"
         )
         logger.info(
             f"Mute: user {target_id} "
@@ -279,7 +303,17 @@ async def cmd_warn(msg: Message):
         session.add(warning)
         await session.commit()
         
-        await msg.reply(f"Пользователю @{target_user.username or target_user.id} выдано предупреждение. Всего предупреждений: {user.strikes}. Причина: {reason}")
+        # Fortress Update: Apply reputation penalty for warning (Requirement 4.2)
+        try:
+            rep_status = await reputation_service.apply_warning(target_user.id, msg.chat.id)
+            rep_info = f" Репутация: {rep_status.score}"
+            if rep_status.is_read_only:
+                rep_info += " (только чтение)"
+        except Exception as rep_error:
+            logger.warning(f"Failed to update reputation on warning: {rep_error}")
+            rep_info = ""
+        
+        await msg.reply(f"Пользователю @{target_user.username or target_user.id} выдано предупреждение. Всего предупреждений: {user.strikes}. Причина: {reason}{rep_info}")
         
         # Take action if strikes threshold is met
         if user.strikes >= 3:

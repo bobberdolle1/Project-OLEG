@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     redis_port: int = Field(default=6379, ge=1, le=65535, description="Redis port")
     redis_db: int = Field(default=0, ge=0, description="Redis database number")
     redis_password: Optional[str] = Field(default=None, description="Redis password")
+    
+    # Worker (Arq)
+    worker_enabled: bool = Field(default=False, description="Enable Arq worker for heavy tasks")
+    worker_max_tries: int = Field(default=3, ge=1, le=10, description="Maximum retry attempts for worker tasks")
+    worker_job_timeout: int = Field(default=300, ge=30, le=600, description="Worker job timeout in seconds")
+    worker_queue_warning_threshold: int = Field(default=100, ge=10, description="Queue size warning threshold")
 
     # Timezone
     timezone: str = Field(default="Europe/Moscow", description="Bot timezone")

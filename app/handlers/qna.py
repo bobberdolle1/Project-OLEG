@@ -14,6 +14,8 @@ from app.database.models import User, UserQuestionHistory
 from app.handlers.games import ensure_user # For getting user object
 from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context
 from app.services.recommendations import generate_recommendation
+from app.services.tts import tts_service
+from app.services.golden_fund import golden_fund_service
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -270,6 +272,45 @@ async def general_qna(msg: Message):
         # Получаем уровень токсичности в чате
         chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
 
+        # Fortress Update: Golden Fund integration (Requirement 9.2, 9.3)
+        # 5% chance to respond with a contextually relevant Golden Fund quote
+        # **Validates: Requirements 9.2, 9.3**
+        golden_quote_sent = False
+        if golden_fund_service.should_respond_with_quote():
+            try:
+                golden_quote = await golden_fund_service.search_relevant_quote(
+                    context=text,
+                    chat_id=msg.chat.id
+                )
+                if golden_quote:
+                    # If the quote has a sticker, send it
+                    if golden_quote.sticker_file_id:
+                        try:
+                            await msg.reply_sticker(sticker=golden_quote.sticker_file_id)
+                            golden_quote_sent = True
+                            logger.info(
+                                f"Golden Fund sticker sent for context: {text[:50]}... "
+                                f"(quote_id={golden_quote.id})"
+                            )
+                        except Exception as sticker_err:
+                            logger.warning(f"Failed to send Golden Fund sticker: {sticker_err}")
+                    
+                    # If no sticker or sticker failed, send as text quote
+                    if not golden_quote_sent:
+                        quote_text = f"💬 *{golden_quote.username}*: _{golden_quote.text}_"
+                        await msg.reply(quote_text, parse_mode="Markdown")
+                        golden_quote_sent = True
+                        logger.info(
+                            f"Golden Fund quote sent for context: {text[:50]}... "
+                            f"(quote_id={golden_quote.id})"
+                        )
+            except Exception as gf_err:
+                logger.warning(f"Golden Fund search failed: {gf_err}")
+        
+        # If Golden Fund quote was sent, skip normal response generation
+        if golden_quote_sent:
+            return
+
         # Если в личных сообщениях, учитываем поведение пользователя
         if msg.chat.type == "private":
             # Здесь в реальной реализации нужно анализировать поведение пользователя
@@ -288,7 +329,26 @@ async def general_qna(msg: Message):
                 chat_context=games_context
             )
 
-        await msg.reply(reply, disable_web_page_preview=True)
+        # Check if we should auto-voice this response (0.1% chance)
+        # **Validates: Requirements 5.2**
+        voice_sent = False
+        if tts_service.should_auto_voice():
+            try:
+                result = await tts_service.generate_voice(reply)
+                if result is not None:
+                    await msg.reply_voice(
+                        voice=result.audio_data,
+                        caption="🎤 Олег решил ответить голосом",
+                        duration=int(result.duration_seconds)
+                    )
+                    voice_sent = True
+                    logger.info(f"Auto-voice triggered for response to @{msg.from_user.username or msg.from_user.id}")
+            except Exception as e:
+                logger.warning(f"Auto-voice failed, falling back to text: {e}")
+        
+        # Send text response if voice wasn't sent
+        if not voice_sent:
+            await msg.reply(reply, disable_web_page_preview=True)
 
         # В случае высокой токсичности, бот может "наехать" на самых токсичных пользователей
         if chat_toxicity > 70 and msg.chat.type != "private":

@@ -15,6 +15,8 @@ from app.services.achievements import check_and_award_achievements
 from app.services.quests import check_and_update_quests
 from app.services.profile import get_full_user_profile
 from app.services.game_engine import game_engine
+from app.services.leagues import league_service, League
+from app.services.tournaments import tournament_service, TournamentDiscipline
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -259,6 +261,17 @@ async def cmd_grow(msg: Message):
         for quest in updated_quests:
             await msg.answer(f"✅ Выполнили квест: {quest.name}! Награда: {quest.reward_amount} {quest.reward_type}!")
 
+        # Update tournament score for grow (Requirement 10.1)
+        try:
+            await tournament_service.update_score(
+                user_id=msg.from_user.id,
+                discipline=TournamentDiscipline.GROW,
+                delta=gain,
+                username=msg.from_user.username
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update tournament score: {e}")
+
         # Получить рейтинг
         res2 = await session.execute(
             select(GameStat).order_by(GameStat.size_cm.desc())
@@ -329,6 +342,9 @@ async def cmd_top_rep(msg: Message):
 async def cmd_profile(msg: Message):
     """
     Displays the user's comprehensive profile data.
+    
+    Includes league info (ELO, league tier, progress to next league).
+    **Validates: Requirements 11.7**
     """
     async_session = get_session()
     user = await ensure_user(msg.from_user)
@@ -342,8 +358,24 @@ async def cmd_profile(msg: Message):
 
         # Получить ранг по размеру
         size_rank = get_rank_by_size(game_stat.size_cm)
+        
+        # Get league status (Requirement 11.7)
+        try:
+            league_status = await league_service.get_status(user.tg_user_id, session)
+            progress_bar = "█" * int(league_status.progress_to_next * 10) + "░" * (10 - int(league_status.progress_to_next * 10))
+            league_info = (
+                f"\n🎖️ <b>Лига:</b> {league_status.league.display_name}\n"
+                f"📊 ELO: {league_status.elo}\n"
+                f"📈 Прогресс: [{progress_bar}] {int(league_status.progress_to_next * 100)}%\n"
+            )
+            if league_status.is_top_10:
+                league_info += "⭐ Топ-10 игрок!\n"
+        except Exception as e:
+            logger.warning(f"Failed to get league status: {e}")
+            league_info = ""
+        
         profile_text = (
-            f"📈 Ваш профиль, {user.username or user.first_name}:\n"
+            f"📈 <b>Ваш профиль, {user.username or user.first_name}:</b>\n"
             f"📏 Размер: {game_stat.size_cm} см\n"
             f"🏆 Ранг: {size_rank}\n"
             f"🏅 Репутация: {game_stat.reputation}\n"
@@ -352,6 +384,9 @@ async def cmd_profile(msg: Message):
             f"🌱 Выращиваний: {game_stat.grow_count}\n"
             f"🎰 Джекпотов в казино: {game_stat.casino_jackpots}\n"
         )
+        
+        # Add league info (Requirement 11.7)
+        profile_text += league_info
 
         if guild_memberships:
             guild_name = guild_memberships[0].guild.name
@@ -363,18 +398,18 @@ async def cmd_profile(msg: Message):
             profile_text += f"🤝 Дуэт: @{partner.username or str(partner.tg_user_id)} (Рейтинг: {duo_team.stats.rating})\n"
 
         if user_achievements:
-            profile_text += "\n🏆 Достижения:\n"
+            profile_text += "\n🏆 <b>Достижения:</b>\n"
             for ua in user_achievements:
                 profile_text += f"  - {ua.achievement.name}\n"
         
         if user_quests:
-            profile_text += "\n📜 Активные квесты:\n"
+            profile_text += "\n📜 <b>Активные квесты:</b>\n"
             for uq in user_quests:
                 status = "Выполнено" if uq.completed_at else f"Прогресс: {uq.progress}/{uq.quest.target_value}"
                 profile_text += f"  - {uq.quest.name} ({status})\n"
 
         profile_text += "\n━━━━━━━━━━━━━━━\n📋 /grow · /pvp · /casino · /top"
-        await msg.reply(profile_text)
+        await msg.reply(profile_text, parse_mode="HTML")
 
 
 @router.message(F.text.startswith("/pvp"))
@@ -444,11 +479,44 @@ async def cmd_pvp(msg: Message):
         for quest in updated_quests:
             await msg.answer(f"✅ {winner_user.username or str(winner_user.tg_user_id)} выполнил квест: {quest.name}! Награда: {quest.reward_amount} {quest.reward_type}!")
 
+        # Update tournament score for PvP win (Requirement 10.1)
+        try:
+            await tournament_service.update_score(
+                user_id=winner.tg_user_id,
+                discipline=TournamentDiscipline.PVP,
+                delta=1,  # 1 point per win
+                username=winner_name
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update tournament score: {e}")
 
+        # Update ELO ratings after PvP match (Requirement 11.6)
+        try:
+            winner_status, loser_status = await league_service.update_elo(
+                winner_id=winner.tg_user_id,
+                loser_id=loser.tg_user_id,
+                session=session
+            )
+            
+            # Update GameStat ELO fields for consistency
+            winner.elo_rating = winner_status.elo
+            winner.league = winner_status.league.name.lower()
+            loser.elo_rating = loser_status.elo
+            loser.league = loser_status.league.name.lower()
+            await session.commit()
+            
+            # Format ELO change info
+            elo_info = (
+                f"\n📊 ELO: {winner_name} +{winner_status.elo - (winner_status.elo - 16)} → {winner_status.elo} "
+                f"| {loser_name} {loser_status.elo - (loser_status.elo + 16)} → {loser_status.elo}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update ELO: {e}")
+            elo_info = ""
         
         await msg.reply(
             f"⚔️ Дуэль: {winner_name} vs {loser_name}\n"
-            f"🏆 Победил {winner_name} и забрал {steal_amt} см ({steal_pct}%)\n"
+            f"🏆 Победил {winner_name} и забрал {steal_amt} см ({steal_pct}%){elo_info}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📋 /grow · /top · /casino · /profile"
         )
@@ -569,6 +637,18 @@ async def cmd_roulette(msg: Message):
         f"{'SHOT' if result.shot else 'SURVIVED'}, "
         f"change: {result.points_change}, balance: {result.new_balance}"
     )
+    
+    # Update tournament score for roulette survival (Requirement 10.1)
+    if not result.shot:  # Only count survivals
+        try:
+            await tournament_service.update_score(
+                user_id=user_id,
+                discipline=TournamentDiscipline.ROULETTE,
+                delta=1,  # 1 point per survival
+                username=msg.from_user.username
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update tournament score: {e}")
     
     # Send the dramatic Oleg-style message
     await msg.reply(

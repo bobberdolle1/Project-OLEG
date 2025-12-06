@@ -9,13 +9,17 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
+from app.handlers.gif_patrol import router as gif_patrol_router
+from app.handlers.tournaments import router as tournaments_router
 from app.handlers.health import router as health_router
 from app.handlers.private_admin import router as private_admin_router
 from app.handlers.admin_dashboard import router as admin_dashboard_router
 from app.handlers.chat_join import router as chat_join_router
 from app.handlers.voice import router as voice_router
+from app.handlers.summarizer import router as summarizer_router
 from app.handlers.topic_listener import router as topic_listener_router
 from app.handlers.challenges import router as challenges_router
+from app.handlers.tips import router as tips_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -85,6 +89,19 @@ async def on_startup(bot: Bot, dp: Dispatcher):
         else:
             logger.warning("Whisper не удалось инициализировать, распознавание голосовых недоступно")
 
+    # Initialize Arq worker pool for heavy tasks
+    if settings.worker_enabled and settings.redis_enabled:
+        logger.info("Инициализация Arq worker pool...")
+        try:
+            from app.worker import get_arq_pool
+            pool = await get_arq_pool()
+            if pool:
+                logger.info("Arq worker pool инициализирован")
+            else:
+                logger.warning("Не удалось инициализировать Arq worker pool")
+        except Exception as e:
+            logger.warning(f"Ошибка инициализации Arq worker pool: {e}")
+
     # Start metrics server
     if settings.metrics_enabled:
         logger.info("Запуск сервера метрик...")
@@ -112,10 +129,13 @@ def build_dp() -> Dispatcher:
         health_router,  # Health check должен быть первым для быстрого ответа
         help.router,  # Help должен быть вторым для приоритета
         challenges_router,  # PvP challenges with consent (Requirements 8.x)
+        tournaments_router,  # Tournament standings (Requirements 10.5)
         games.router,
         moderation.router,
         antiraid.router,
         voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
+        summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
+        tips_router,  # Роутер для советов владельцам чатов (/советы, /tips)
         qna.router,
         achievements.router,
         trading.router,
@@ -126,6 +146,7 @@ def build_dp() -> Dispatcher:
         duos.router,
         statistics.router,
         quotes.router,
+        gif_patrol_router,  # GIF Patrol - анализ GIF на запрещённый контент (до vision)
         vision.router,  # Роутер для обработки изображений
         random_responses.router,  # Роутер для рандомных ответов
         reactions_router,  # Роутер для обработки реакций
@@ -185,6 +206,16 @@ async def main():
             from app.services.metrics_server import metrics_server
             await metrics_server.stop()
             logger.info("Сервер метрик остановлен")
+
+        # Close Arq worker pool
+        if settings.worker_enabled and settings.redis_enabled:
+            logger.info("Закрытие Arq worker pool...")
+            try:
+                from app.worker import close_arq_pool
+                await close_arq_pool()
+                logger.info("Arq worker pool закрыт")
+            except Exception as e:
+                logger.warning(f"Ошибка закрытия Arq worker pool: {e}")
 
         # Close Redis connection
         if settings.redis_enabled:

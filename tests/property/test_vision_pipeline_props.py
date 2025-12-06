@@ -153,16 +153,17 @@ class TestVisionPipelineStateRoundTrip:
     
     @settings(max_examples=50)
     @given(
-        description=st.text(
-            alphabet=st.characters(blacklist_categories=('Cs',)),
-            min_size=1,
-            max_size=100
-        ).filter(lambda x: any(c in x for c in ['"', '\\', '\n', '\t', '\r']))
+        prefix=st.text(min_size=0, max_size=40),
+        special_char=st.sampled_from(['"', '\\', '\n', '\t', '\r']),
+        suffix=st.text(min_size=0, max_size=40)
     )
-    def test_special_characters_preserved(self, description: str):
+    def test_special_characters_preserved(self, prefix: str, special_char: str, suffix: str):
         """
         Property: Special characters (quotes, backslashes, newlines) are preserved.
         """
+        # Build description that always contains at least one special character
+        description = prefix + special_char + suffix
+        
         state = VisionPipelineState(
             image_hash="a" * 16,
             description=description,

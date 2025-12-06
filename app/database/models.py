@@ -17,6 +17,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     status: Mapped[str] = mapped_column(String(16), default='active', index=True)  # active, left
     strikes: Mapped[int] = mapped_column(Integer, default=0)
+    # Fortress Update: Global reputation score
+    reputation_score: Mapped[int] = mapped_column(Integer, default=1000)
 
     game: Mapped["GameStat"] = relationship(back_populates="user", uselist=False)
     user_achievements: Mapped[list["UserAchievement"]] = relationship(back_populates="user")
@@ -55,6 +57,10 @@ class GameStat(Base):
     grow_count: Mapped[int] = mapped_column(Integer, default=0)
     casino_jackpots: Mapped[int] = mapped_column(Integer, default=0)
     reputation: Mapped[int] = mapped_column(Integer, default=0)
+    # Fortress Update: ELO and League system
+    elo_rating: Mapped[int] = mapped_column(Integer, default=1000)
+    league: Mapped[str] = mapped_column(String(20), default='scrap')  # scrap, silicon, quantum, elite
+    season_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
 
     user: Mapped[User] = relationship(back_populates="game")
 
@@ -322,8 +328,11 @@ class Quote(Base):
     telegram_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID чата в Telegram
     telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID сообщения в Telegram
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
+    # Fortress Update: Link to sticker pack
+    sticker_pack_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sticker_packs.id"), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="quotes")
+    sticker_pack: Mapped[Optional["StickerPack"]] = relationship(back_populates="quotes")
 
 
 class ModerationConfig(Base):
@@ -356,6 +365,9 @@ class Chat(Base):
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    # Fortress Update: DEFCON level and owner notifications
+    defcon_level: Mapped[int] = mapped_column(Integer, default=1)  # 1=Peaceful, 2=Strict, 3=Martial Law
+    owner_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Admin(Base):
@@ -436,3 +448,152 @@ class UserBalance(Base):
     balance: Mapped[int] = mapped_column(Integer, default=100)  # Стартовый баланс
     total_won: Mapped[int] = mapped_column(Integer, default=0)
     total_lost: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# ============================================================================
+# FORTRESS UPDATE v6.0 - New Models
+# ============================================================================
+
+
+class CitadelConfig(Base):
+    """DEFCON protection configuration per chat (Requirement 1.1)."""
+    __tablename__ = "citadel_configs"
+    
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    defcon_level: Mapped[int] = mapped_column(Integer, default=1)  # 1=Peaceful, 2=Strict, 3=Martial Law
+    raid_mode_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    anti_spam_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    profanity_filter_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    sticker_limit: Mapped[int] = mapped_column(Integer, default=0)  # 0 = disabled
+    forward_block_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    new_user_restriction_hours: Mapped[int] = mapped_column(Integer, default=24)
+    hard_captcha_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class UserReputation(Base):
+    """User reputation score per chat (Requirement 4.1)."""
+    __tablename__ = "user_reputations"
+    
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    score: Mapped[int] = mapped_column(Integer, default=1000)
+    is_read_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_change_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class ReputationHistory(Base):
+    """Reputation change history (Requirement 4.8)."""
+    __tablename__ = "reputation_history"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    change_amount: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
+
+
+class Tournament(Base):
+    """Tournament tracking (Requirement 10.1)."""
+    __tablename__ = "tournaments"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(20), index=True)  # daily, weekly, grand_cup
+    start_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    end_at: Mapped[datetime] = mapped_column(DateTime)
+    status: Mapped[str] = mapped_column(String(20), default='active', index=True)  # active, completed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    scores: Mapped[list["TournamentScore"]] = relationship(back_populates="tournament", cascade="all, delete-orphan")
+
+
+class TournamentScore(Base):
+    """Tournament scores per user per discipline (Requirement 10.1)."""
+    __tablename__ = "tournament_scores"
+    
+    tournament_id: Mapped[int] = mapped_column(ForeignKey("tournaments.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    discipline: Mapped[str] = mapped_column(String(20), primary_key=True)  # grow, pvp, roulette
+    score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    
+    tournament: Mapped["Tournament"] = relationship(back_populates="scores")
+
+
+class UserElo(Base):
+    """User ELO ratings for league system (Requirement 11.1)."""
+    __tablename__ = "user_elo"
+    
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    elo: Mapped[int] = mapped_column(Integer, default=1000, index=True)
+    league: Mapped[str] = mapped_column(String(20), default='scrap', index=True)  # scrap, silicon, quantum, elite
+    season_wins: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class NotificationConfig(Base):
+    """Owner notification settings per chat (Requirement 15.8)."""
+    __tablename__ = "notification_configs"
+    
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    raid_alert: Mapped[bool] = mapped_column(Boolean, default=True)
+    ban_notification: Mapped[bool] = mapped_column(Boolean, default=True)
+    toxicity_warning: Mapped[bool] = mapped_column(Boolean, default=True)
+    defcon_recommendation: Mapped[bool] = mapped_column(Boolean, default=True)
+    repeated_violator: Mapped[bool] = mapped_column(Boolean, default=True)
+    daily_tips: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class StickerPack(Base):
+    """Sticker pack management per chat (Requirement 8.1)."""
+    __tablename__ = "sticker_packs"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    pack_name: Mapped[str] = mapped_column(String(64), unique=True)
+    pack_title: Mapped[str] = mapped_column(String(64))
+    sticker_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    quotes: Mapped[list["Quote"]] = relationship(back_populates="sticker_pack")
+
+
+class SecurityBlacklist(Base):
+    """Security blacklist for abuse prevention (Requirement 17.7)."""
+    __tablename__ = "security_blacklist"
+    
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reason: Mapped[str] = mapped_column(Text)
+    blacklisted_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class RateLimit(Base):
+    """Rate limit tracking (fallback when Redis unavailable) (Requirement 17.2)."""
+    __tablename__ = "rate_limits"
+    
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class DailiesConfig(Base):
+    """
+    Dailies configuration per chat (Requirements 13.4, 13.5).
+    
+    Stores settings for daily scheduled messages including:
+    - Morning summary enabled/disabled
+    - Evening quote enabled/disabled
+    - Evening stats enabled/disabled
+    """
+    __tablename__ = "dailies_configs"
+    
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    summary_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # Morning summary
+    quote_enabled: Mapped[bool] = mapped_column(Boolean, default=True)    # Evening quote
+    stats_enabled: Mapped[bool] = mapped_column(Boolean, default=True)    # Evening stats
+    summary_time_hour: Mapped[int] = mapped_column(Integer, default=9)    # 09:00 Moscow
+    quote_time_hour: Mapped[int] = mapped_column(Integer, default=21)     # 21:00 Moscow
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)

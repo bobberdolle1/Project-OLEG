@@ -12,8 +12,9 @@ from sqlalchemy.orm import joinedload
 
 from app.config import settings
 from app.services.ollama_client import summarize_chat, generate_creative
+from app.services.tournaments import tournament_service, TournamentType, TournamentDiscipline
 from app.database.session import get_session
-from app.database.models import User, Wallet, GameStat, Auction, Bid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat, PendingVerification
+from app.database.models import User, Wallet, GameStat, Auction, Bid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat, PendingVerification, Tournament
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -444,6 +445,250 @@ async def job_sync_chat_members(bot: Bot):
 
 
 
+async def job_start_daily_tournament(bot: Bot):
+    """
+    Start a new daily tournament at 00:00 UTC.
+    
+    Also ends the previous daily tournament and announces winners.
+    
+    **Validates: Requirements 10.1**
+    """
+    async_session = get_session()
+    async with async_session() as session:
+        try:
+            # End any active daily tournaments first
+            result = await session.execute(
+                select(Tournament).filter(
+                    Tournament.type == TournamentType.DAILY.value,
+                    Tournament.status == 'active'
+                )
+            )
+            active_tournaments = result.scalars().all()
+            
+            for tournament in active_tournaments:
+                winners = await tournament_service.end_tournament(tournament.id, session)
+                
+                if winners:
+                    # Announce winners (simplified - in production would send to chats)
+                    logger.info(
+                        f"Daily tournament {tournament.id} ended with "
+                        f"{len(winners)} winners"
+                    )
+                    
+                    # Log top winners per discipline
+                    for discipline in TournamentDiscipline:
+                        discipline_winners = [
+                            w for w in winners 
+                            if w.discipline == discipline and w.rank == 1
+                        ]
+                        for winner in discipline_winners:
+                            logger.info(
+                                f"Daily {discipline.value} champion: "
+                                f"user {winner.user_id} with score {winner.score}"
+                            )
+            
+            # Start new daily tournament
+            new_tournament = await tournament_service.start_tournament(
+                TournamentType.DAILY, session
+            )
+            logger.info(f"Started new daily tournament (ID: {new_tournament.id})")
+            
+        except Exception as e:
+            logger.error(f"Error in daily tournament job: {e}")
+
+
+async def job_start_weekly_tournament(bot: Bot):
+    """
+    Start a new weekly tournament on Monday 00:00 UTC.
+    
+    Also ends the previous weekly tournament and announces winners.
+    
+    **Validates: Requirements 10.2**
+    """
+    async_session = get_session()
+    async with async_session() as session:
+        try:
+            # End any active weekly tournaments first
+            result = await session.execute(
+                select(Tournament).filter(
+                    Tournament.type == TournamentType.WEEKLY.value,
+                    Tournament.status == 'active'
+                )
+            )
+            active_tournaments = result.scalars().all()
+            
+            for tournament in active_tournaments:
+                winners = await tournament_service.end_tournament(tournament.id, session)
+                
+                if winners:
+                    logger.info(
+                        f"Weekly tournament {tournament.id} ended with "
+                        f"{len(winners)} winners"
+                    )
+                    
+                    for discipline in TournamentDiscipline:
+                        discipline_winners = [
+                            w for w in winners 
+                            if w.discipline == discipline and w.rank == 1
+                        ]
+                        for winner in discipline_winners:
+                            logger.info(
+                                f"Weekly {discipline.value} champion: "
+                                f"user {winner.user_id} with score {winner.score}"
+                            )
+            
+            # Start new weekly tournament
+            new_tournament = await tournament_service.start_tournament(
+                TournamentType.WEEKLY, session
+            )
+            logger.info(f"Started new weekly tournament (ID: {new_tournament.id})")
+            
+        except Exception as e:
+            logger.error(f"Error in weekly tournament job: {e}")
+
+
+async def job_start_monthly_tournament(bot: Bot):
+    """
+    Start a new Grand Cup (monthly) tournament on the 1st of each month.
+    
+    Also ends the previous monthly tournament and announces winners.
+    
+    **Validates: Requirements 10.3**
+    """
+    async_session = get_session()
+    async with async_session() as session:
+        try:
+            # End any active monthly tournaments first
+            result = await session.execute(
+                select(Tournament).filter(
+                    Tournament.type == TournamentType.GRAND_CUP.value,
+                    Tournament.status == 'active'
+                )
+            )
+            active_tournaments = result.scalars().all()
+            
+            for tournament in active_tournaments:
+                winners = await tournament_service.end_tournament(tournament.id, session)
+                
+                if winners:
+                    logger.info(
+                        f"Grand Cup tournament {tournament.id} ended with "
+                        f"{len(winners)} winners"
+                    )
+                    
+                    for discipline in TournamentDiscipline:
+                        discipline_winners = [
+                            w for w in winners 
+                            if w.discipline == discipline and w.rank == 1
+                        ]
+                        for winner in discipline_winners:
+                            logger.info(
+                                f"Grand Cup {discipline.value} champion: "
+                                f"user {winner.user_id} with score {winner.score}"
+                            )
+            
+            # Start new monthly tournament
+            new_tournament = await tournament_service.start_tournament(
+                TournamentType.GRAND_CUP, session
+            )
+            logger.info(f"Started new Grand Cup tournament (ID: {new_tournament.id})")
+            
+        except Exception as e:
+            logger.error(f"Error in monthly tournament job: {e}")
+
+
+# ============================================================================
+# Fortress Update: Dailies System Jobs (Requirements 13.1, 13.2, 13.3)
+# ============================================================================
+
+async def job_dailies_morning_summary(bot: Bot):
+    """
+    Send morning summary (#dailysummary) to all chats at 09:00 Moscow time.
+    
+    Respects chat-specific settings and skips chats with no activity.
+    
+    **Validates: Requirements 13.1, 13.4, 13.5**
+    """
+    from app.services.dailies import dailies_service
+    
+    async_session = get_session()
+    async with async_session() as session:
+        try:
+            # Get all chats
+            result = await session.execute(select(Chat))
+            chats = result.scalars().all()
+            
+            for chat in chats:
+                try:
+                    # Get morning messages (respects settings and activity)
+                    messages = await dailies_service.get_morning_messages(
+                        chat.id, session
+                    )
+                    
+                    for message in messages:
+                        await bot.send_message(
+                            chat_id=chat.id,
+                            text=message,
+                            disable_web_page_preview=True
+                        )
+                        await asyncio.sleep(0.5)  # Rate limiting
+                    
+                    if messages:
+                        logger.info(f"Sent morning summary to chat {chat.id}")
+                    else:
+                        logger.debug(f"Skipped morning summary for chat {chat.id} (no activity or disabled)")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to send morning summary to chat {chat.id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in morning summary job: {e}")
+
+
+async def job_dailies_evening_quote_and_stats(bot: Bot):
+    """
+    Send evening quote (#dailyquote) and stats (#dailystats) to all chats at 21:00 Moscow time.
+    
+    Respects chat-specific settings.
+    
+    **Validates: Requirements 13.2, 13.3, 13.4**
+    """
+    from app.services.dailies import dailies_service
+    
+    async_session = get_session()
+    async with async_session() as session:
+        try:
+            # Get all chats
+            result = await session.execute(select(Chat))
+            chats = result.scalars().all()
+            
+            for chat in chats:
+                try:
+                    # Get evening messages (respects settings)
+                    messages = await dailies_service.get_evening_messages(
+                        chat.id, session
+                    )
+                    
+                    for message in messages:
+                        await bot.send_message(
+                            chat_id=chat.id,
+                            text=message,
+                            disable_web_page_preview=True
+                        )
+                        await asyncio.sleep(0.5)  # Rate limiting
+                    
+                    if messages:
+                        logger.info(f"Sent evening quote/stats to chat {chat.id}")
+                    else:
+                        logger.debug(f"Skipped evening messages for chat {chat.id} (disabled)")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to send evening messages to chat {chat.id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in evening quote/stats job: {e}")
+
+
 async def setup_scheduler(bot: Bot):
     global _scheduler
     if _scheduler:
@@ -459,5 +704,45 @@ async def setup_scheduler(bot: Bot):
     _scheduler.add_job(job_sync_chat_members, CronTrigger(hour=3, minute=0), args=[bot], id="sync_chat_members")
     # Welcome 2.0: проверка истекших верификаций каждую минуту
     _scheduler.add_job(job_check_pending_verifications, IntervalTrigger(minutes=1), args=[bot], id="check_pending_verifications")
+    
+    # Fortress Update: Tournament scheduler jobs (Requirements 10.1, 10.2, 10.3)
+    # Daily tournament: starts at 00:00 UTC every day
+    _scheduler.add_job(
+        job_start_daily_tournament, 
+        CronTrigger(hour=0, minute=0, timezone='UTC'), 
+        args=[bot], 
+        id="start_daily_tournament"
+    )
+    # Weekly tournament: starts on Monday 00:00 UTC
+    _scheduler.add_job(
+        job_start_weekly_tournament, 
+        CronTrigger(day_of_week='mon', hour=0, minute=0, timezone='UTC'), 
+        args=[bot], 
+        id="start_weekly_tournament"
+    )
+    # Monthly tournament (Grand Cup): starts on 1st of each month 00:00 UTC
+    _scheduler.add_job(
+        job_start_monthly_tournament, 
+        CronTrigger(day=1, hour=0, minute=0, timezone='UTC'), 
+        args=[bot], 
+        id="start_monthly_tournament"
+    )
+    
+    # Fortress Update: Dailies System jobs (Requirements 13.1, 13.2, 13.3)
+    # Morning summary at 09:00 Moscow time (UTC+3)
+    _scheduler.add_job(
+        job_dailies_morning_summary,
+        CronTrigger(hour=9, minute=0, timezone='Europe/Moscow'),
+        args=[bot],
+        id="dailies_morning_summary"
+    )
+    # Evening quote and stats at 21:00 Moscow time (UTC+3)
+    _scheduler.add_job(
+        job_dailies_evening_quote_and_stats,
+        CronTrigger(hour=21, minute=0, timezone='Europe/Moscow'),
+        args=[bot],
+        id="dailies_evening_quote_stats"
+    )
+    
     _scheduler.start()
-    logger.info("Планировщик запущен с job_check_pending_verifications")
+    logger.info("Планировщик запущен с tournament jobs, dailies jobs и job_check_pending_verifications")

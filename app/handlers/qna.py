@@ -6,6 +6,7 @@ import re
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.exceptions import TelegramBadRequest
 from datetime import datetime
 from sqlalchemy import select
 
@@ -348,7 +349,13 @@ async def general_qna(msg: Message):
         
         # Send text response if voice wasn't sent
         if not voice_sent:
-            await msg.reply(reply, disable_web_page_preview=True)
+            try:
+                await msg.reply(reply, disable_web_page_preview=True)
+            except TelegramBadRequest as e:
+                if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+                    logger.warning(f"Cannot reply - topic/message deleted: {e}")
+                    return
+                raise
 
         # В случае высокой токсичности, бот может "наехать" на самых токсичных пользователей
         if chat_toxicity > 70 and msg.chat.type != "private":

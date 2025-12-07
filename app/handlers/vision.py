@@ -6,6 +6,7 @@ Step 2: Oleg LLM комментирует описание в своём сти�
 """
 
 import logging
+import random
 import re
 from typing import Optional
 from aiogram import Router, F
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Триггеры для упоминания Олега
 OLEG_TRIGGERS = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
+
+# Вероятность авто-ответа на изображения (2-5%)
+AUTO_IMAGE_REPLY_PROBABILITY = 0.035  # 3.5% базовая вероятность
 
 
 def _contains_bot_mention(text: str, bot) -> bool:
@@ -51,19 +55,20 @@ def _contains_bot_mention(text: str, bot) -> bool:
     return False
 
 
-async def should_process_image(msg: Message) -> bool:
+async def should_process_image(msg: Message) -> tuple[bool, bool]:
     """
     Проверяет, нужно ли обрабатывать изображение.
     
-    Бот обрабатывает изображение только если:
+    Бот обрабатывает изображение если:
     - В caption есть упоминание бота (@username или "олег")
     - Это ответ на сообщение бота
+    - Авто-ответ сработал по вероятности (2-5%)
     
     Args:
         msg: Сообщение с изображением
         
     Returns:
-        True если нужно обработать изображение
+        Tuple (should_process, is_auto_reply)
         
     **Validates: Requirements 1.1, 1.2, 1.3, 1.4**
     """
@@ -71,16 +76,23 @@ async def should_process_image(msg: Message) -> bool:
     caption = msg.caption or ""
     if _contains_bot_mention(caption, msg.bot):
         logger.debug(f"Image processing: bot mentioned in caption for message {msg.message_id}")
-        return True
+        return True, False
     
     # Проверяем, является ли это ответом на сообщение бота
     if msg.reply_to_message and msg.reply_to_message.from_user:
         if msg.reply_to_message.from_user.id == msg.bot.id:
             logger.debug(f"Image processing: reply to bot message for message {msg.message_id}")
-            return True
+            return True, False
+    
+    # Авто-ответ на изображения с вероятностью 2-5%
+    # Только в групповых чатах, не в личных сообщениях
+    if msg.chat.type != "private":
+        if random.random() < AUTO_IMAGE_REPLY_PROBABILITY:
+            logger.debug(f"Image processing: auto-reply triggered for message {msg.message_id}")
+            return True, True
     
     logger.debug(f"Image processing: skipping message {msg.message_id} - no explicit mention")
-    return False
+    return False, False
 
 router = Router()
 
@@ -144,15 +156,16 @@ async def handle_image_message(msg: Message):
     """
     Обработчик сообщений с изображениями.
     
-    Обрабатывает изображение только если бот явно вызван:
+    Обрабатывает изображение если:
     - Упоминание в caption (@username или "олег")
     - Ответ на сообщение бота
+    - Авто-ответ сработал (2-5% вероятность)
     
     **Validates: Requirements 1.1, 1.4**
     """
     # Проверяем, нужно ли обрабатывать изображение
-    # Бот отвечает только на явные вызовы
-    if not await should_process_image(msg):
+    should_process, is_auto_reply = await should_process_image(msg)
+    if not should_process:
         return
     
     # Проверяем, есть ли текст рядом с изображением (для запроса)
@@ -169,14 +182,18 @@ async def handle_image_message(msg: Message):
         return
 
     # Используем текст как user_query для VisionPipeline
-    user_query = text.strip() if text and text.strip() else None
+    # Для авто-ответов не используем caption как запрос
+    user_query = None
+    if not is_auto_reply and text and text.strip():
+        user_query = text.strip()
 
     from aiogram.exceptions import TelegramBadRequest
 
     processing_msg = None
     try:
-        # Отправляем индикатор процесса
-        processing_msg = await msg.reply("👀 Разглядываю...")
+        # Для авто-ответов не показываем индикатор процесса
+        if not is_auto_reply:
+            processing_msg = await msg.reply("👀 Разглядываю...")
 
         # Анализируем изображение через 2-step Vision Pipeline
         # Step 1: Vision model описывает изображение (скрыто от пользователя)
@@ -192,7 +209,8 @@ async def handle_image_message(msg: Message):
 
         # Проверяем на пустой результат
         if not analysis_result or not analysis_result.strip():
-            await msg.reply("Хм, модель молчит. Попробуй другую картинку или спроси текстом.")
+            if not is_auto_reply:
+                await msg.reply("Хм, модель молчит. Попробуй другую картинку или спроси текстом.")
             return
 
         # Обрезаем результат если слишком длинный (лимит Telegram - 4096 символов)
@@ -200,8 +218,16 @@ async def handle_image_message(msg: Message):
         if len(analysis_result) > max_length:
             analysis_result = analysis_result[:max_length] + "...\n\n[обрезано, слишком много текста]"
 
+        # Для авто-ответов добавляем префикс
+        if is_auto_reply:
+            prefixes = ["👀 ", "🤔 ", "Хм, ", "О, ", ""]
+            analysis_result = random.choice(prefixes) + analysis_result
+
         # Отправляем результат
         await msg.reply(analysis_result)
+        
+        if is_auto_reply:
+            logger.info(f"Auto-reply to image in chat {msg.chat.id}")
 
     except TelegramBadRequest as e:
         # Игнорируем ошибки типа "thread not found" - топик был удалён
@@ -211,10 +237,11 @@ async def handle_image_message(msg: Message):
             logger.error(f"Telegram ошибка при обработке изображения: {e}")
     except Exception as e:
         logger.error(f"Ошибка при обработке изображения: {e}")
-        try:
-            await msg.reply("Глаза мои разлюбили. Не могу разглядеть, что там на скрине.")
-        except:
-            pass  # Если не можем ответить - просто игнорируем
+        if not is_auto_reply:
+            try:
+                await msg.reply("Глаза мои разлюбили. Не могу разглядеть, что там на скрине.")
+            except:
+                pass  # Если не можем ответить - просто игнорируем
 
 
 # Команда для проверки работы модуля зрения

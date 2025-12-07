@@ -189,22 +189,30 @@ async def _generate_single_message_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
-        # Отправляем изображение как фото
-        await msg.answer_photo(photo=image_io, caption="💬 Цитата создана")
+        # Отправляем изображение как фото и сохраняем ID отправленного сообщения
+        sent_msg = await msg.answer_photo(photo=image_io, caption="💬 Цитата создана")
         
         # Сохраняем цитату в базу данных (Requirement 7.6)
         # Property 19: Quote persistence
+        # Используем ID отправленного сообщения для корректной работы /qs
         image_io.seek(0)  # Reset position for saving
         quote_id = await save_quote_to_db(
             user_id=original_msg.from_user.id,
             text=text,
             username=username,
             image_io=image_io,
-            telegram_chat_id=original_msg.chat.id,
-            telegram_message_id=original_msg.message_id
+            telegram_chat_id=msg.chat.id,
+            telegram_message_id=sent_msg.message_id
         )
         logger.info(f"Quote saved with ID {quote_id}")
         
+    except TelegramBadRequest as e:
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Cannot create quote - topic/message deleted: {e}")
+            return
+        logger.error(f"Telegram ошибка при создании цитаты: {e}")
+        if status:
+            await alive_ui_service.show_error(status, "Не удалось создать цитату", msg.bot)
     except Exception as e:
         logger.error(f"Ошибка при создании цитаты: {e}")
         
@@ -213,7 +221,10 @@ async def _generate_single_message_quote(msg: Message):
         if status:
             await alive_ui_service.show_error(status, "Не удалось создать цитату", msg.bot)
         else:
-            await msg.reply("❌ Ошибка при создании цитаты.")
+            try:
+                await msg.reply("❌ Ошибка при создании цитаты.")
+            except TelegramBadRequest:
+                pass
 
 
 async def _generate_multi_message_quote(msg: Message, count: int):
@@ -278,10 +289,11 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         image_io = await create_quote_chain_image(messages)
         
         caption = f"💬 Цитата ({len(messages)} сообщ.)"
-        await msg.answer_photo(photo=image_io, caption=caption)
+        sent_msg = await msg.answer_photo(photo=image_io, caption=caption)
         
         # Сохраняем цитату в базу данных (Requirement 7.6)
         # Property 19: Quote persistence
+        # Используем ID отправленного сообщения для корректной работы /qs
         image_io.seek(0)
         combined_text = "\n---\n".join([m.text for m in messages])
         quote_id = await save_quote_to_db(
@@ -289,14 +301,22 @@ async def _generate_multi_message_quote(msg: Message, count: int):
             text=combined_text,
             username=username,
             image_io=image_io,
-            telegram_chat_id=original_msg.chat.id,
-            telegram_message_id=original_msg.message_id
+            telegram_chat_id=msg.chat.id,
+            telegram_message_id=sent_msg.message_id
         )
         logger.info(f"Quote chain saved with ID {quote_id}")
         
+    except TelegramBadRequest as e:
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Cannot create quote chain - topic/message deleted: {e}")
+            return
+        logger.error(f"Telegram ошибка при создании цепочки цитат: {e}")
     except Exception as e:
         logger.error(f"Ошибка при создании цепочки цитат: {e}")
-        await msg.reply("❌ Ошибка при создании цепочки цитат.")
+        try:
+            await msg.reply("❌ Ошибка при создании цепочки цитат.")
+        except TelegramBadRequest:
+            pass
 
 
 async def _generate_roast_quote(msg: Message):
@@ -335,11 +355,12 @@ async def _generate_roast_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
-        # Отправляем изображение как фото
-        await msg.answer_photo(photo=image_io, caption="🔥 Режим прожарки активирован")
+        # Отправляем изображение как фото и сохраняем ID отправленного сообщения
+        sent_msg = await msg.answer_photo(photo=image_io, caption="🔥 Режим прожарки активирован")
         
         # Сохраняем цитату в базу данных (Requirement 7.6)
         # Property 19: Quote persistence
+        # Используем ID отправленного сообщения для корректной работы /qs
         image_io.seek(0)
         quote_id = await save_quote_to_db(
             user_id=original_msg.from_user.id,
@@ -347,11 +368,18 @@ async def _generate_roast_quote(msg: Message):
             username=username,
             image_io=image_io,
             comment="[roast mode]",  # Comment is embedded in image
-            telegram_chat_id=original_msg.chat.id,
-            telegram_message_id=original_msg.message_id
+            telegram_chat_id=msg.chat.id,
+            telegram_message_id=sent_msg.message_id
         )
         logger.info(f"Roast quote saved with ID {quote_id}")
         
+    except TelegramBadRequest as e:
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Cannot create roast quote - topic/message deleted: {e}")
+            return
+        logger.error(f"Telegram ошибка при создании цитаты с комментарием: {e}")
+        if status:
+            await alive_ui_service.show_error(status, "Не удалось создать цитату", msg.bot)
     except Exception as e:
         logger.error(f"Ошибка при создании цитаты с комментарием: {e}")
         
@@ -360,7 +388,10 @@ async def _generate_roast_quote(msg: Message):
         if status:
             await alive_ui_service.show_error(status, "Не удалось создать цитату", msg.bot)
         else:
-            await msg.reply("❌ Ошибка при создании цитаты с комментарием.")
+            try:
+                await msg.reply("❌ Ошибка при создании цитаты с комментарием.")
+            except TelegramBadRequest:
+                pass
 
 
 def extract_message_text(message: Message) -> str:
@@ -539,9 +570,17 @@ async def cmd_quote_save(msg: Message):
             else:
                 await msg.reply(f"❌ Ошибка: {result.error}")
 
+    except TelegramBadRequest as e:
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Cannot add to sticker pack - topic/message deleted: {e}")
+            return
+        logger.error(f"Telegram ошибка при добавлении цитаты в стикерпак: {e}")
     except Exception as e:
         logger.error(f"Ошибка при добавлении цитаты в стикерпак: {e}")
-        await msg.reply("❌ Ошибка при добавлении цитаты в стикерпак.")
+        try:
+            await msg.reply("❌ Ошибка при добавлении цитаты в стикерпак.")
+        except TelegramBadRequest:
+            pass
 
 
 @router.message(Command("qd"))
@@ -607,9 +646,17 @@ async def cmd_quote_delete(msg: Message):
             else:
                 await msg.reply("❌ Не удалось удалить цитату из стикерпака.")
                 
+    except TelegramBadRequest as e:
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Cannot delete from sticker pack - topic/message deleted: {e}")
+            return
+        logger.error(f"Telegram ошибка при удалении цитаты из стикерпака: {e}")
     except Exception as e:
         logger.error(f"Ошибка при удалении цитаты из стикерпака: {e}")
-        await msg.reply("❌ Ошибка при удалении цитаты из стикерпака.")
+        try:
+            await msg.reply("❌ Ошибка при удалении цитаты из стикерпака.")
+        except TelegramBadRequest:
+            pass
 
 
 # Обработчик реакций на сообщения (включая цитаты) для "живых цитат"

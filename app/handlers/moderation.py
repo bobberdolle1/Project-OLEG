@@ -139,12 +139,17 @@ async def cmd_ban(msg: Message):
         )
         
         # Fortress Update: Send ban notification to owner (Requirement 15.2)
-        await _notify_owner_ban(
-            msg=msg,
-            user_id=target_id,
-            username=msg.reply_to_message.from_user.username,
-            reason=reason or "Не указана"
-        )
+        try:
+            from app.services.notifications import notification_service
+            await notification_service.notify_ban(
+                chat_id=msg.chat.id,
+                chat_title=msg.chat.title or str(msg.chat.id),
+                user_id=target_id,
+                username=msg.reply_to_message.from_user.username,
+                reason=reason or "Не указана"
+            )
+        except Exception as notify_err:
+            logger.warning(f"Failed to notify owner about ban: {notify_err}")
     except Exception as e:
         logger.error(f"Ban failed: {e}")
         await msg.reply(f"Не смог забанить: {e}")

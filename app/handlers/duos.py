@@ -12,14 +12,17 @@ from app.services.duos import update_duo_elo
 
 logger = logging.getLogger(__name__)
 
+# Default ELO rating for new duos
+DEFAULT_RATING = 1000
+
 router = Router()
 
 
-@router.message(Command("duo_invite"))
+@router.message(Command("duo_invite", "create_duo"))
 async def cmd_duo_invite(msg: Message):
     """
     Invites another player to form a duo.
-    Usage: /duo_invite <@username>
+    Usage: /duo_invite <@username> or /create_duo <@username>
     """
     async_session = get_session()
     user = await ensure_user(msg.from_user)
@@ -156,110 +159,111 @@ async def cmd_duo_leave(msg: Message):
         await msg.reply("Вы покинули дуэт. Дуэт расформирован.")
 
 
-@router.message(Command("pvp_duo"))
+@router.message(Command("pvp_duo", "duo_pvp"))
 async def cmd_pvp_duo(msg: Message):
     """
     Initiates a 2v2 PvP duel.
-    Usage: /pvp_duo <@opponent1> <@opponent2> (or reply to one opponent)
+    Usage: /pvp_duo <@opponent1> <@opponent2> or /duo_pvp (or reply to one opponent)
     """
+    import random
     async_session = get_session()
     user = await ensure_user(msg.from_user)
 
-    # Determine user's duo
-    user_duo_res = await session.execute(
-        select(DuoTeam)
-        .filter(or_(DuoTeam.user1_id == user.id, DuoTeam.user2_id == user.id))
-        .options(joinedload(DuoTeam.stats))
-    )
-    user_duo = user_duo_res.scalars().first()
-    if not user_duo:
-        return await msg.reply("Для участия в дуэтных PvP вы должны состоять в дуэте.")
+    async with async_session() as session:
+        # Determine user's duo
+        user_duo_res = await session.execute(
+            select(DuoTeam)
+            .filter(or_(DuoTeam.user1_id == user.id, DuoTeam.user2_id == user.id))
+            .options(joinedload(DuoTeam.stats))
+        )
+        user_duo = user_duo_res.scalars().first()
+        if not user_duo:
+            return await msg.reply("Для участия в дуэтных PvP вы должны состоять в дуэте.")
     
-    user_duo_member_ids = {user_duo.user1_id, user_duo.user2_id}
+        user_duo_member_ids = {user_duo.user1_id, user_duo.user2_id}
 
-    # Identify opponents (can be complex, for simplicity, expect two usernames)
-    opponent_usernames = []
-    if msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.username:
-        opponent_usernames.append(msg.reply_to_message.from_user.username)
-        # If reply, expect second opponent in message text
-        parts = (msg.text or "").split()
-        if len(parts) >= 2 and parts[1].startswith("@"):
-            opponent_usernames.append(parts[1][1:])
-    else:
-        parts = (msg.text or "").split()
-        if len(parts) >= 3 and parts[1].startswith("@") and parts[2].startswith("@"):
-            opponent_usernames.append(parts[1][1:])
-            opponent_usernames.append(parts[2][1:])
-    
-    if len(opponent_usernames) != 2:
-        return await msg.reply("Использование: /pvp_duo <@оппонент1> <@оппонент2> (или ответьте на сообщение одного оппонента и укажите второго).")
-    
-    # Find opponent users
-    opponent_users_res = await session.execute(
-        select(User).filter(User.username.in_(opponent_usernames))
-    )
-    opponent_users = opponent_users_res.scalars().all()
-    if len(opponent_users) != 2:
-        return await msg.reply("Один или оба пользователя-оппонента не найдены.")
-    
-    opponent_user_ids = {u.id for u in opponent_users}
+        # Identify opponents (can be complex, for simplicity, expect two usernames)
+        opponent_usernames = []
+        if msg.reply_to_message and msg.reply_to_message.from_user and msg.reply_to_message.from_user.username:
+            opponent_usernames.append(msg.reply_to_message.from_user.username)
+            # If reply, expect second opponent in message text
+            parts = (msg.text or "").split()
+            if len(parts) >= 2 and parts[1].startswith("@"):
+                opponent_usernames.append(parts[1][1:])
+        else:
+            parts = (msg.text or "").split()
+            if len(parts) >= 3 and parts[1].startswith("@") and parts[2].startswith("@"):
+                opponent_usernames.append(parts[1][1:])
+                opponent_usernames.append(parts[2][1:])
+        
+        if len(opponent_usernames) != 2:
+            return await msg.reply("Использование: /duo_pvp <@оппонент1> <@оппонент2> (или ответьте на сообщение одного оппонента и укажите второго).")
+        
+        # Find opponent users
+        opponent_users_res = await session.execute(
+            select(User).filter(User.username.in_(opponent_usernames))
+        )
+        opponent_users = opponent_users_res.scalars().all()
+        if len(opponent_users) != 2:
+            return await msg.reply("Один или оба пользователя-оппонента не найдены.")
+        
+        opponent_user_ids = {u.id for u in opponent_users}
 
-    # Find opponent duo
-    opponent_duo_res = await session.execute(
-        select(DuoTeam)
-        .filter(and_(DuoTeam.user1_id.in_(opponent_user_ids), DuoTeam.user2_id.in_(opponent_user_ids)))
-        .options(joinedload(DuoTeam.stats))
-    )
-    opponent_duo = opponent_duo_res.scalars().first()
-    if not opponent_duo:
-        return await msg.reply("Оппоненты не образуют действующий дуэт.")
+        # Find opponent duo
+        opponent_duo_res = await session.execute(
+            select(DuoTeam)
+            .filter(and_(DuoTeam.user1_id.in_(opponent_user_ids), DuoTeam.user2_id.in_(opponent_user_ids)))
+            .options(joinedload(DuoTeam.stats))
+        )
+        opponent_duo = opponent_duo_res.scalars().first()
+        if not opponent_duo:
+            return await msg.reply("Оппоненты не образуют действующий дуэт.")
 
-    if user_duo.id == opponent_duo.id:
-        return await msg.reply("Вы не можете сражаться со своим собственным дуэтом.")
+        if user_duo.id == opponent_duo.id:
+            return await msg.reply("Вы не можете сражаться со своим собственным дуэтом.")
 
-    # Prevent fighting against own members of the duo
-    if user_duo.user1_id in opponent_user_ids or user_duo.user2_id in opponent_user_ids:
-        return await msg.reply("Вы не можете сражаться против членов своего дуэта.")
+        # Prevent fighting against own members of the duo
+        if user_duo.user1_id in opponent_user_ids or user_duo.user2_id in opponent_user_ids:
+            return await msg.reply("Вы не можете сражаться против членов своего дуэта.")
 
+        # Calculate power for each duo
+        # For simplicity, let's sum size_cm of duo members
+        user_duo_member_stats_res = await session.execute(
+            select(GameStat)
+            .filter(GameStat.user_id.in_(user_duo_member_ids))
+        )
+        user_duo_member_stats = user_duo_member_stats_res.scalars().all()
+        user_duo_power = sum(gs.size_cm for gs in user_duo_member_stats) + random.randint(-10, 10)
 
-    # Calculate power for each duo
-    # For simplicity, let's sum size_cm of duo members
-    user_duo_member_stats_res = await session.execute(
-        select(GameStat)
-        .filter(GameStat.user_id.in_(user_duo_member_ids))
-    )
-    user_duo_member_stats = user_duo_member_stats_res.scalars().all()
-    user_duo_power = sum(gs.size_cm for gs in user_duo_member_stats) + random.randint(-10, 10)
+        opponent_duo_member_stats_res = await session.execute(
+            select(GameStat)
+            .filter(GameStat.user_id.in_(opponent_user_ids))
+        )
+        opponent_duo_member_stats = opponent_duo_member_stats_res.scalars().all()
+        opponent_duo_power = sum(gs.size_cm for gs in opponent_duo_member_stats) + random.randint(-10, 10)
 
-    opponent_duo_member_stats_res = await session.execute(
-        select(GameStat)
-        .filter(GameStat.user_id.in_(opponent_user_ids))
-    )
-    opponent_duo_member_stats = opponent_duo_member_stats_res.scalars().all()
-    opponent_duo_power = sum(gs.size_cm for gs in opponent_duo_member_stats) + random.randint(-10, 10)
+        # Determine winner
+        winner_duo: DuoTeam | None = None
+        loser_duo: DuoTeam | None = None
+        if user_duo_power > opponent_duo_power:
+            winner_duo = user_duo
+            loser_duo = opponent_duo
+            winning_names = f"@{user.username or str(user.tg_user_id)} и партнер"
+            losing_names = f"@{opponent_users[0].username or str(opponent_users[0].tg_user_id)} и партнер"
+        elif opponent_duo_power > user_duo_power:
+            winner_duo = opponent_duo
+            loser_duo = user_duo
+            winning_names = f"@{opponent_users[0].username or str(opponent_users[0].tg_user_id)} и партнер"
+            losing_names = f"@{user.username or str(user.tg_user_id)} и партнер"
+        else:  # Draw
+            await msg.reply("Дуэль дуэтов закончилась ничьей!")
+            await update_duo_elo(session, user_duo.id, opponent_duo.id, draw=True)
+            return
 
-    # Determine winner
-    winner_duo: DuoTeam | None = None
-    loser_duo: DuoTeam | None = None
-    if user_duo_power > opponent_duo_power:
-        winner_duo = user_duo
-        loser_duo = opponent_duo
-        winning_names = f"@{user.username or str(user.tg_user_id)} и его(ее) партнер"
-        losing_names = f"@{opponent_users[0].username or str(opponent_users[0].tg_user_id)} и его(ее) партнер"
-    elif opponent_duo_power > user_duo_power:
-        winner_duo = opponent_duo
-        loser_duo = user_duo
-        winning_names = f"@{opponent_users[0].username or str(opponent_users[0].tg_user_id)} и его(ее) партнер"
-        losing_names = f"@{user.username or str(user.tg_user_id)} и его(ее) партнер"
-    else: # Draw
-        await msg.reply(f"Дуэль дуэтов закончилась ничьей между '{user_duo.user1.username or str(user_duo.user1.tg_user_id)} + {user_duo.user2.username or str(user_duo.user2.tg_user_id)}' и '{opponent_duo.user1.username or str(opponent_duo.user1.tg_user_id)} + {opponent_duo.user2.username or str(opponent_duo.user2.tg_user_id)}'.")
-        await update_duo_elo(session, user_duo.id, opponent_duo.id, draw=True)
-        return
+        # Update ELO ratings and stats
+        await update_duo_elo(session, winner_duo.id, loser_duo.id)
 
-    # Update ELO ratings and stats
-    await update_duo_elo(session, winner_duo.id, loser_duo.id)
-
-    await msg.reply(f"Дуэль дуэтов: {winning_names} победили {losing_names}!")
+        await msg.reply(f"Дуэль дуэтов: {winning_names} победили {losing_names}!")
 
 
 @router.message(Command("top_duos"))
@@ -291,10 +295,11 @@ async def cmd_top_duos(msg: Message):
         await msg.reply("\n".join(leaderboard_list))
 
 
-@router.message(Command("duo_profile"))
+@router.message(Command("duo_profile", "duo_stats"))
 async def cmd_duo_profile(msg: Message):
     """
     Displays the user's duo information and stats.
+    Usage: /duo_profile or /duo_stats
     """
     async_session = get_session()
     user = await ensure_user(msg.from_user)

@@ -73,8 +73,10 @@ async def cmd_say(msg: Message):
             # TTS service unavailable - fallback to text
             # **Validates: Requirements 5.4**
             logger.warning("TTS service unavailable, falling back to text")
+            # Reset TTS service to try again next time
+            tts_service.reset_edge_tts()
             await msg.reply(
-                f"🔊 <i>(голосом Олега)</i>\n\n{text}",
+                f"🔊 <b>Голосовой движок временно недоступен</b>\n\n<i>{text}</i>",
                 parse_mode="HTML"
             )
             return

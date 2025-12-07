@@ -99,6 +99,19 @@ async def _should_reply(msg: Message) -> bool:
             result = await session.execute(_select(_Chat).filter_by(id=msg.chat.id))
             chat = result.scalars().first()
             
+            # Получаем ID топика сообщения
+            msg_topic_id = getattr(msg, 'message_thread_id', None)
+            
+            # Проверяем active_topic_id — если установлен, бот отвечает только в этом топике
+            # Если не установлен (None) — бот отвечает во всех топиках
+            if chat and chat.active_topic_id is not None:
+                if msg_topic_id != chat.active_topic_id:
+                    logger.debug(
+                        f"Skipping message in topic {msg_topic_id}, "
+                        f"bot active only in topic {chat.active_topic_id}"
+                    )
+                    return False
+            
             if msg.text:
                 # Получаем настройки чата или используем дефолтные
                 auto_reply_chance = 1.0  # По умолчанию авто-ответ включен
@@ -110,7 +123,6 @@ async def _should_reply(msg: Message) -> bool:
                     chat_settings = AutoReplySettings(auto_reply_chance=auto_reply_chance)
                     
                     if auto_reply_system.should_reply(msg.text, chat_settings):
-                        msg_topic_id = getattr(msg, 'message_thread_id', None)
                         logger.debug(
                             f"Auto-reply triggered for chat {msg.chat.id}, "
                             f"topic {msg_topic_id}, chance={auto_reply_chance}"
@@ -254,6 +266,11 @@ async def general_qna(msg: Message):
     Отвечает на вопросы пользователей, если бот упомянут
     или это ответ на сообщение бота.
     """
+    # Логируем информацию о топике для отладки
+    topic_id = getattr(msg, 'message_thread_id', None)
+    if topic_id:
+        logger.debug(f"Сообщение из топика {topic_id} в чате {msg.chat.id}: {msg.text[:50] if msg.text else 'empty'}...")
+    
     if not await _should_reply(msg):
         return
 

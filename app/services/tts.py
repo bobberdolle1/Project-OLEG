@@ -105,10 +105,12 @@ class TTSService:
     async def _generate_audio(self, text: str) -> Optional[bytes]:
         """Generate audio using Edge TTS with gTTS fallback."""
         if not self._is_available:
+            logger.warning("TTS service marked as unavailable, skipping generation")
             return None
         
         # Try Edge TTS first
         if self._edge_available:
+            logger.debug("Attempting Edge TTS generation...")
             audio = await self._generate_edge_tts(text)
             if audio:
                 return audio
@@ -116,6 +118,7 @@ class TTSService:
             self._edge_available = False
         
         # Fallback to gTTS
+        logger.debug("Attempting gTTS generation...")
         return await self._generate_gtts(text)
     
     async def _generate_edge_tts(self, text: str) -> Optional[bytes]:

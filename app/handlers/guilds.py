@@ -173,3 +173,84 @@ async def cmd_guild_info(msg: Message):
             f"👥 Участники ({len(guild.members)}):\n" + "\n".join(members_list)
         )
         await msg.reply(guild_info_text)
+
+
+@router.message(Command("guild_war"))
+async def cmd_guild_war(msg: Message):
+    """
+    Handles the /guild_war command to declare war on another guild.
+    Usage: /guild_war <guild_name> [hours]
+    """
+    import random
+    async_session = get_session()
+    user = await ensure_user(msg.from_user)
+
+    parts = (msg.text or "").split()
+    if len(parts) < 2:
+        return await msg.reply("Использование: /guild_war <название_гильдии> [часы]")
+    
+    target_guild_name = parts[1].strip()
+    war_hours = 24  # Default war duration
+    if len(parts) >= 3:
+        try:
+            war_hours = int(parts[2])
+            war_hours = max(1, min(72, war_hours))  # Limit 1-72 hours
+        except ValueError:
+            pass
+
+    async with async_session() as session:
+        # Check if user is in a guild and is leader
+        member_res = await session.execute(
+            select(GuildMember)
+            .filter_by(user_id=user.id)
+            .options(joinedload(GuildMember.guild).joinedload(Guild.members))
+        )
+        guild_member = member_res.scalars().first()
+
+        if not guild_member:
+            return await msg.reply("Вы не состоите ни в какой гильдии.")
+        
+        if guild_member.role != "leader":
+            return await msg.reply("Только лидер гильдии может объявлять войну.")
+        
+        attacker_guild = guild_member.guild
+        
+        # Find target guild
+        target_res = await session.execute(
+            select(Guild)
+            .filter_by(name=target_guild_name)
+            .options(joinedload(Guild.members))
+        )
+        target_guild = target_res.scalars().first()
+        
+        if not target_guild:
+            return await msg.reply(f"Гильдия '{target_guild_name}' не найдена.")
+        
+        if target_guild.id == attacker_guild.id:
+            return await msg.reply("Нельзя объявить войну своей гильдии.")
+        
+        # Calculate guild power (sum of member count + random factor)
+        attacker_power = len(attacker_guild.members) * 10 + random.randint(1, 50)
+        defender_power = len(target_guild.members) * 10 + random.randint(1, 50)
+        
+        # Determine winner
+        if attacker_power > defender_power:
+            winner = attacker_guild.name
+            loser = target_guild.name
+            result_text = f"🏆 Гильдия '{winner}' победила в войне против '{loser}'!"
+        elif defender_power > attacker_power:
+            winner = target_guild.name
+            loser = attacker_guild.name
+            result_text = f"🏆 Гильдия '{winner}' отразила атаку '{loser}'!"
+        else:
+            result_text = f"⚔️ Война между '{attacker_guild.name}' и '{target_guild.name}' закончилась ничьей!"
+        
+        await msg.reply(
+            f"⚔️ <b>Война гильдий!</b>\n\n"
+            f"🛡️ {attacker_guild.name} (сила: {attacker_power})\n"
+            f"⚔️ vs\n"
+            f"🛡️ {target_guild.name} (сила: {defender_power})\n\n"
+            f"{result_text}",
+            parse_mode="HTML"
+        )
+        logger.info(f"Guild war: {attacker_guild.name} vs {target_guild.name}")

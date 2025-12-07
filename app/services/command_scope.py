@@ -18,18 +18,26 @@ GROUP_COMMANDS = [
     BotCommand(command="pvp", description="Дуэль с другим игроком"),
     BotCommand(command="casino", description="Слоты (по умолчанию 10 монет)"),
     BotCommand(command="achievements", description="Список всех достижений"),
+    BotCommand(command="my_achievements", description="Твои достижения"),
     BotCommand(command="quests", description="Активные квесты"),
+    BotCommand(command="quest_progress", description="Прогресс по квестам"),
+    BotCommand(command="create_guild", description="Создать гильдию"),
+    BotCommand(command="guild_info", description="Информация о гильдии"),
+    BotCommand(command="create_duo", description="Создать дуэт"),
+    BotCommand(command="duo_stats", description="Статистика дуэта"),
     BotCommand(command="say", description="Голосовое сообщение от Олега"),
+    BotCommand(command="tips", description="Советы по управлению чатом"),
 ]
 
 
 # Commands visible in private chats - admin panel, personal commands
 PRIVATE_COMMANDS = [
     BotCommand(command="help", description="Справка по командам"),
+    BotCommand(command="start", description="Приветствие"),
     BotCommand(command="admin", description="Админ-панель для управления чатами"),
     BotCommand(command="reset", description="Сбросить контекст диалога"),
+    BotCommand(command="myhistory", description="История твоих вопросов"),
     BotCommand(command="say", description="Голосовое сообщение от Олега"),
-    BotCommand(command="start", description="Приветствие"),
 ]
 
 

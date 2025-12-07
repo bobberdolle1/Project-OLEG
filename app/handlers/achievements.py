@@ -13,6 +13,26 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+@router.message(Command("achievements"))
+async def cmd_achievements(msg: Message):
+    """
+    Handles the /achievements command, displaying all available achievements.
+    """
+    async_session = get_session()
+    async with async_session() as session:
+        achievements_res = await session.execute(select(Achievement))
+        achievements = achievements_res.scalars().all()
+
+        if not achievements:
+            return await msg.reply("Достижения пока не настроены.")
+
+        achievements_list = ["🏆 <b>Все достижения:</b>\n"]
+        for ach in achievements:
+            achievements_list.append(f"• <b>{ach.name}</b> — {ach.description}")
+        
+        await msg.reply("\n".join(achievements_list), parse_mode="HTML")
+
+
 @router.message(Command("my_achievements"))
 async def cmd_my_achievements(msg: Message):
     """

@@ -34,11 +34,51 @@ async def cmd_quests(msg: Message):
         if not user_quests:
             return await msg.reply("У вас пока нет активных квестов.")
 
-        quests_list = ["Ваши текущие квесты:"]
+        quests_list = ["📜 <b>Ваши текущие квесты:</b>\n"]
         for uq in user_quests:
-            status = "✅ Выполнено" if uq.completed_at else f"➡️ Прогресс: {uq.progress}/{uq.quest.target_value}"
+            status = "✅ Выполнено" if uq.completed_at else f"➡️ {uq.progress}/{uq.quest.target_value}"
             quests_list.append(
-                f"- {uq.quest.name} ({uq.quest.description}) - {status}"
+                f"• <b>{uq.quest.name}</b> — {uq.quest.description}\n  {status}"
             )
         
-        await msg.reply("\n".join(quests_list))
+        await msg.reply("\n".join(quests_list), parse_mode="HTML")
+
+
+@router.message(Command("quest_progress"))
+async def cmd_quest_progress(msg: Message):
+    """
+    Handles the /quest_progress command, displaying detailed progress on quests.
+    """
+    async_session = get_session()
+    user = await ensure_user(msg.from_user)
+
+    async with async_session() as session:
+        user_quests_res = await session.execute(
+            select(UserQuest)
+            .filter_by(user_id=user.id)
+            .options(joinedload(UserQuest.quest))
+        )
+        user_quests = user_quests_res.scalars().all()
+
+        if not user_quests:
+            return await msg.reply("У вас пока нет активных квестов.")
+
+        progress_list = ["📊 <b>Прогресс по квестам:</b>\n"]
+        for uq in user_quests:
+            if uq.completed_at:
+                status = "✅ Выполнено!"
+                progress_bar = "██████████"
+            else:
+                progress_pct = min(100, int((uq.progress / uq.quest.target_value) * 100))
+                filled = progress_pct // 10
+                progress_bar = "█" * filled + "░" * (10 - filled)
+                status = f"{uq.progress}/{uq.quest.target_value} ({progress_pct}%)"
+            
+            reward_text = f"🎁 {uq.quest.reward_amount} {uq.quest.reward_type}"
+            progress_list.append(
+                f"• <b>{uq.quest.name}</b>\n"
+                f"  [{progress_bar}] {status}\n"
+                f"  {reward_text}"
+            )
+        
+        await msg.reply("\n".join(progress_list), parse_mode="HTML")

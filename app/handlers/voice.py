@@ -52,10 +52,14 @@ async def cmd_say(msg: Message):
     # Try to generate voice with Alive UI status
     # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
+    # Get thread_id for forum chats
+    thread_id = getattr(msg, 'message_thread_id', None)
     try:
         # Start status message for TTS generation (shows after 2 seconds)
         # **Property 29: Status message timing**
-        status = await alive_ui_service.start_status(msg.chat.id, "tts", msg.bot)
+        status = await alive_ui_service.start_status(
+            msg.chat.id, "tts", msg.bot, message_thread_id=thread_id
+        )
         
         result = await tts_service.generate_voice(text)
         

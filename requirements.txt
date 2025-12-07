@@ -19,6 +19,7 @@ ollama==0.3.3
 cachetools==5.5.0
 redis==5.0.1
 arq==0.26.1
+edge-tts==6.1.9
 
 # Development dependencies
 pytest==7.4.3

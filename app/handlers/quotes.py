@@ -174,8 +174,11 @@ async def _generate_single_message_quote(msg: Message):
     # Start Alive UI status for quote rendering
     # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
+    thread_id = getattr(msg, 'message_thread_id', None)
     try:
-        status = await alive_ui_service.start_status(msg.chat.id, "quote", msg.bot)
+        status = await alive_ui_service.start_status(
+            msg.chat.id, "quote", msg.bot, message_thread_id=thread_id
+        )
         
         # Создаем изображение цитаты (Requirement 7.1, 7.2, 7.5)
         image_io = await create_quote_image(text, username, timestamp)
@@ -316,8 +319,11 @@ async def _generate_roast_quote(msg: Message):
     # Start Alive UI status for roast quote (uses thinking category for LLM)
     # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
+    thread_id = getattr(msg, 'message_thread_id', None)
     try:
-        status = await alive_ui_service.start_status(msg.chat.id, "thinking", msg.bot)
+        status = await alive_ui_service.start_status(
+            msg.chat.id, "thinking", msg.bot, message_thread_id=thread_id
+        )
         
         # Создаем изображение цитаты с комментарием (Requirement 7.4, 7.5)
         # The roast comment is generated inside the service

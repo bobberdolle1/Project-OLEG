@@ -109,6 +109,7 @@ class StatusMessage:
     last_updated_at: float
     update_count: int = 0
     is_finished: bool = False
+    message_thread_id: Optional[int] = None
 
 
 @dataclass
@@ -202,7 +203,8 @@ class AliveUIService:
         self,
         chat_id: int,
         category: str,
-        bot: Any = None
+        bot: Any = None,
+        message_thread_id: Optional[int] = None
     ) -> Optional[StatusMessage]:
         """
         Start showing a status message.
@@ -218,6 +220,7 @@ class AliveUIService:
             chat_id: The chat ID to send status to
             category: The category of status message
             bot: Telegram bot instance for sending messages
+            message_thread_id: Optional thread/topic ID for forum chats
             
         Returns:
             StatusMessage if sent successfully, None otherwise
@@ -239,8 +242,12 @@ class AliveUIService:
         
         try:
             if bot is not None:
-                # Send the status message
-                message = await bot.send_message(chat_id, phrase)
+                # Send the status message (with thread_id for forum chats)
+                message = await bot.send_message(
+                    chat_id, 
+                    phrase,
+                    message_thread_id=message_thread_id
+                )
                 
                 status = StatusMessage(
                     chat_id=chat_id,
@@ -248,13 +255,14 @@ class AliveUIService:
                     category=category,
                     started_at=now,
                     last_updated_at=now,
-                    update_count=0
+                    update_count=0,
+                    message_thread_id=message_thread_id
                 )
                 
                 context.status_message = status
                 self._active_statuses[context_key] = context
                 
-                logger.debug(f"Started status message in chat {chat_id}: {phrase}")
+                logger.debug(f"Started status message in chat {chat_id} (thread {message_thread_id}): {phrase}")
                 return status
             else:
                 # No bot provided, just track timing
@@ -521,13 +529,15 @@ class StatusContextManager:
         chat_id: int,
         category: str,
         bot: Any = None,
-        delay_seconds: float = STATUS_THRESHOLD_SECONDS
+        delay_seconds: float = STATUS_THRESHOLD_SECONDS,
+        message_thread_id: Optional[int] = None
     ):
         self.service = service
         self.chat_id = chat_id
         self.category = category
         self.bot = bot
         self.delay_seconds = delay_seconds
+        self.message_thread_id = message_thread_id
         self.status: Optional[StatusMessage] = None
         self._start_time: float = 0
         self._update_task: Optional[asyncio.Task] = None
@@ -567,11 +577,12 @@ class StatusContextManager:
             # Wait for threshold before showing status
             await asyncio.sleep(self.delay_seconds)
             
-            # Show initial status
+            # Show initial status (with thread_id for forum chats)
             self.status = await self.service.start_status(
                 self.chat_id, 
                 self.category, 
-                self.bot
+                self.bot,
+                message_thread_id=self.message_thread_id
             )
             
             if not self.status:
@@ -597,7 +608,8 @@ def status_context(
     chat_id: int,
     category: str,
     bot: Any = None,
-    delay_seconds: float = STATUS_THRESHOLD_SECONDS
+    delay_seconds: float = STATUS_THRESHOLD_SECONDS,
+    message_thread_id: Optional[int] = None
 ) -> StatusContextManager:
     """
     Create a status context manager for automatic status handling.
@@ -607,6 +619,7 @@ def status_context(
         category: The status category
         bot: Telegram bot instance
         delay_seconds: Delay before showing status (default 2 seconds)
+        message_thread_id: Optional thread/topic ID for forum chats
         
     Returns:
         StatusContextManager instance
@@ -616,5 +629,6 @@ def status_context(
         chat_id,
         category,
         bot,
-        delay_seconds
+        delay_seconds,
+        message_thread_id
     )

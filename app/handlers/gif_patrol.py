@@ -106,7 +106,8 @@ async def handle_unsafe_content(
         try:
             await bot.send_message(
                 chat_id=message.chat.id,
-                text=notification
+                text=notification,
+                message_thread_id=thread_id
             )
         except TelegramBadRequest:
             pass  # Игнорируем ошибки отправки уведомления
@@ -177,9 +178,12 @@ async def handle_animation_message(message: Message, bot: Bot):
     # Start Alive UI status for GIF analysis
     # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
+    thread_id = getattr(message, 'message_thread_id', None)
     try:
         # Only show status for potentially long analysis
-        status = await alive_ui_service.start_status(message.chat.id, "gif", bot)
+        status = await alive_ui_service.start_status(
+            message.chat.id, "gif", bot, message_thread_id=thread_id
+        )
         
         # Анализируем GIF
         result = await gif_patrol_service.analyze_gif(animation_bytes)

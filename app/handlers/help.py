@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-HELP_TEXT_TEMPLATE = """
+# Help text for group chats - focuses on games, moderation, and group features
+HELP_TEXT_GROUP = """
 🤖 <b>Олег — Твой цифровой гигачад</b>
 
-<b>📋 Основные команды:</b>
+<b>📋 Команды для группы:</b>
 
 <b>🎮 Игры:</b>
 /games — <b>Полный гайд по играм для новичков!</b>
@@ -56,8 +57,7 @@ HELP_TEXT_TEMPLATE = """
 <b>Другое:</b>
 /start — Приветствие
 /help — Эта справка
-/myhistory — История твоих вопросов
-/reset — Сбросить контекст (только в ЛС)
+/say [текст] — Голосовое сообщение от Олега
 /советы или /tips — Советы по управлению чатом (для админов)
 
 <b>💬 Q&A:</b>
@@ -71,10 +71,59 @@ HELP_TEXT_TEMPLATE = """
 • Спам-фильтр
 
 <b>⚙️ Настройка:</b>
-Напиши мне в личку /start для доступа к админ-панели
+Напиши мне в личку /admin для доступа к админ-панели
 
 <i>Я живу в этом чате. Это моя территория. Я здесь закон.</i>
 """
+
+
+# Help text for private chats - focuses on admin panel and personal commands
+HELP_TEXT_PRIVATE = """
+🤖 <b>Олег — Твой цифровой гигачад</b>
+
+<b>📋 Команды для личных сообщений:</b>
+
+<b>⚙️ Управление:</b>
+/admin — <b>Админ-панель для управления твоими чатами</b>
+/reset — Сбросить контекст диалога
+/myhistory — История твоих вопросов
+
+<b>🔊 Голос:</b>
+/say [текст] — Голосовое сообщение от Олега
+
+<b>📖 Справка:</b>
+/start — Приветствие
+/help — Эта справка
+
+<b>💬 Q&A:</b>
+Просто напиши мне — я отвечу!
+
+<b>💡 Подсказка:</b>
+Используй /admin чтобы настроить бота в своих чатах:
+• Режимы модерации
+• Антираид защита
+• Автоматические функции
+• И многое другое!
+
+<i>В личке я добрее. Но всё ещё гигачад.</i>
+"""
+
+
+def get_help_text(chat_type: str, bot_username: str = "@bot") -> str:
+    """
+    Get appropriate help text based on chat type.
+    
+    Args:
+        chat_type: Type of chat ('private', 'group', 'supergroup', etc.)
+        bot_username: Bot's username for mentions
+        
+    Returns:
+        Formatted help text for the given context
+    """
+    if chat_type == "private":
+        return HELP_TEXT_PRIVATE
+    else:
+        return HELP_TEXT_GROUP.format(bot_username=bot_username)
 
 
 @router.message(Command("help"))
@@ -82,10 +131,14 @@ async def cmd_help(msg: Message):
     """
     Команда /help — показать справку по командам.
     
+    Shows context-appropriate help:
+    - Private chat: admin panel, reset, personal commands
+    - Group chat: games, moderation, group features
+    
     Args:
         msg: Входящее сообщение
     """
     bot_username = f"@{msg.bot._me.username}" if msg.bot._me and msg.bot._me.username else "@bot"
-    help_text = HELP_TEXT_TEMPLATE.format(bot_username=bot_username)
+    help_text = get_help_text(msg.chat.type, bot_username)
     await msg.reply(help_text, parse_mode="HTML")
-    logger.info(f"Help requested by @{msg.from_user.username or msg.from_user.id}")
+    logger.info(f"Help requested by @{msg.from_user.username or msg.from_user.id} in {msg.chat.type} chat")

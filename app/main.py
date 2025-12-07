@@ -41,6 +41,14 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     await init_db()
     logger.info("База данных инициализирована")
     
+    # Register command scopes for different chat types
+    logger.info("Регистрация команд для разных типов чатов...")
+    from app.services.command_scope import setup_commands
+    if await setup_commands(bot):
+        logger.info("Команды зарегистрированы для групп и ЛС")
+    else:
+        logger.warning("Не удалось зарегистрировать команды, используются значения по умолчанию")
+    
     # Initialize Redis
     if settings.redis_enabled:
         logger.info("Подключение к Redis...")

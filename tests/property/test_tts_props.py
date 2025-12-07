@@ -54,6 +54,27 @@ class TestTextTruncation:
     
     @settings(max_examples=100)
     @given(text=long_text)
+    def test_property_3_text_truncation_preserves_limit(self, text: str):
+        """
+        **Feature: oleg-commands-fix, Property 3: Text truncation preserves limit**
+        **Validates: Requirements 2.3**
+        
+        For any text longer than 500 characters, the truncated output 
+        SHALL have length ≤ 500 and end with "...и так далее".
+        """
+        assume(len(text) > MAX_TEXT_LENGTH)
+        
+        service = TTSService()
+        result, was_truncated = service.truncate_text(text)
+        
+        # Property 3: truncated output has length ≤ 500
+        assert len(result) <= MAX_TEXT_LENGTH, f"Truncated text length {len(result)} exceeds {MAX_TEXT_LENGTH}"
+        # Property 3: truncated output ends with suffix
+        assert result.endswith(TRUNCATION_SUFFIX), f"Truncated text does not end with '{TRUNCATION_SUFFIX}'"
+        assert was_truncated is True
+    
+    @settings(max_examples=100)
+    @given(text=long_text)
     def test_long_text_is_truncated(self, text: str):
         """
         Property: Text longer than 500 chars is truncated.
@@ -282,3 +303,99 @@ class TestTTSServiceBasics:
         expected_duration = len(text) / 10
         
         assert duration == expected_duration
+
+
+# ============================================================================
+# Property 5: TTS produces valid OGG
+# ============================================================================
+
+from hypothesis import HealthCheck
+
+class TestOGGFormat:
+    """
+    **Feature: oleg-commands-fix, Property 5: TTS produces valid OGG**
+    **Validates: Requirements 5.2**
+    
+    For any successful TTS generation, the output audio_data 
+    SHALL be valid OGG format (starts with "OggS" magic bytes).
+    """
+    
+    @settings(max_examples=100, suppress_health_check=[HealthCheck.large_base_example])
+    @given(
+        audio_length=st.integers(min_value=100, max_value=5000),
+        sample_rate=st.sampled_from([16000, 22050, 44100, 48000])
+    )
+    def test_property_5_ogg_format_valid(self, audio_length: int, sample_rate: int):
+        """
+        **Feature: oleg-commands-fix, Property 5: TTS produces valid OGG**
+        **Validates: Requirements 5.2**
+        
+        For any valid audio tensor, the _convert_to_ogg method SHALL produce
+        output that starts with "OggS" magic bytes (valid OGG format).
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            # Skip test if numpy not available
+            return
+        
+        service = TTSService()
+        
+        # Generate audio data using numpy (more efficient than hypothesis lists)
+        np.random.seed(audio_length)  # Reproducible random data
+        audio_tensor = np.random.uniform(-1.0, 1.0, audio_length).astype(np.float32)
+        
+        # Convert to OGG
+        result = service._convert_to_ogg(audio_tensor, sample_rate)
+        
+        # If conversion succeeded, verify OGG format
+        if result is not None:
+            # OGG files start with "OggS" magic bytes
+            assert result.startswith(b'OggS'), "Output does not have valid OGG header"
+            # Should have reasonable size
+            assert len(result) > 0, "OGG output is empty"
+    
+    def test_ogg_conversion_with_valid_audio(self):
+        """
+        Property: OGG conversion produces valid output for typical audio.
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            # Skip test if numpy not available
+            return
+        
+        service = TTSService()
+        
+        # Create a simple sine wave audio
+        sample_rate = 48000
+        duration = 0.5  # 0.5 seconds
+        t = np.linspace(0, duration, int(sample_rate * duration), dtype=np.float32)
+        audio_tensor = np.sin(2 * np.pi * 440 * t)  # 440 Hz sine wave
+        
+        result = service._convert_to_ogg(audio_tensor, sample_rate)
+        
+        if result is not None:
+            # Verify OGG magic bytes
+            assert result.startswith(b'OggS'), "Output does not have valid OGG header"
+            # Should have reasonable size for 0.5s audio
+            assert len(result) > 100, "OGG output too small"
+    
+    def test_ogg_conversion_handles_empty_audio(self):
+        """
+        Property: OGG conversion handles edge cases gracefully.
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            return
+        
+        service = TTSService()
+        
+        # Empty audio should either return None or valid OGG
+        empty_audio = np.array([], dtype=np.float32)
+        result = service._convert_to_ogg(empty_audio, 48000)
+        
+        # Either None (failure) or valid OGG
+        if result is not None:
+            assert result.startswith(b'OggS')

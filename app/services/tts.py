@@ -4,15 +4,17 @@ This module provides TTS functionality including:
 - Voice message generation with text truncation
 - Auto-voice probability check (0.1% chance)
 - Fallback to text on service unavailability
+- Silero TTS model for Russian voice synthesis
 
-**Feature: fortress-update**
+**Feature: fortress-update, oleg-commands-fix**
 **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5**
 """
 
+import io
 import logging
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +40,18 @@ class TTSService:
     
     Provides voice generation with Oleg's characteristic voice,
     text truncation for long messages, and auto-voice probability.
+    Uses Silero TTS model for Russian voice synthesis.
     
-    **Feature: fortress-update**
+    **Feature: fortress-update, oleg-commands-fix**
     **Validates: Requirements 5.1, 5.2, 5.3, 5.5**
     """
+    
+    # Silero TTS configuration
+    SILERO_REPO = 'snakers4/silero-models'
+    SILERO_MODEL = 'silero_tts'
+    SILERO_LANGUAGE = 'ru'
+    SILERO_SPEAKER = 'baya'  # Russian male voice
+    SILERO_SAMPLE_RATE = 48000
     
     def __init__(self, tts_model: Optional[str] = None):
         """
@@ -50,8 +60,56 @@ class TTSService:
         Args:
             tts_model: TTS model to use (optional, for future extensibility)
         """
-        self._tts_model = tts_model
+        self._tts_model_name = tts_model
+        self._model: Optional[Any] = None  # Cached Silero model
         self._is_available = True  # Track service availability
+        self._model_load_attempted = False  # Track if we tried to load model
+    
+    def _load_model(self) -> bool:
+        """
+        Lazy load Silero TTS model on first use.
+        
+        **Feature: oleg-commands-fix**
+        **Validates: Requirements 5.1, 5.3**
+        
+        Returns:
+            True if model loaded successfully, False otherwise
+        """
+        # Return cached model if already loaded
+        if self._model is not None:
+            return True
+        
+        # Don't retry if we already failed
+        if self._model_load_attempted and self._model is None:
+            return False
+        
+        self._model_load_attempted = True
+        
+        try:
+            import torch
+            
+            logger.info("Loading Silero TTS model...")
+            
+            # Load Silero TTS model from torch hub
+            model, _ = torch.hub.load(
+                repo_or_dir=self.SILERO_REPO,
+                model=self.SILERO_MODEL,
+                language=self.SILERO_LANGUAGE,
+                speaker=self.SILERO_MODEL
+            )
+            
+            self._model = model
+            logger.info("Silero TTS model loaded successfully")
+            return True
+            
+        except ImportError as e:
+            logger.error(f"PyTorch not installed, TTS unavailable: {e}")
+            self._is_available = False
+            return False
+        except Exception as e:
+            logger.error(f"Failed to load Silero TTS model: {e}")
+            self._is_available = False
+            return False
     
     def truncate_text(self, text: str, max_length: int = MAX_TEXT_LENGTH) -> tuple[str, bool]:
         """
@@ -143,10 +201,10 @@ class TTSService:
     
     async def _generate_audio(self, text: str) -> Optional[bytes]:
         """
-        Generate audio data from text using TTS model.
+        Generate audio data from text using Silero TTS model.
         
-        This is a placeholder implementation. In production, this would
-        call an actual TTS service (e.g., Silero, Coqui, or cloud TTS).
+        **Feature: oleg-commands-fix**
+        **Validates: Requirements 2.1, 5.1**
         
         Args:
             text: Text to convert to speech
@@ -154,24 +212,92 @@ class TTSService:
         Returns:
             Audio data in OGG format, or None if unavailable
         """
-        # TODO: Implement actual TTS generation
-        # For now, return None to indicate service unavailable
-        # This will trigger the fallback to text response
-        
         if not self._is_available:
             return None
         
-        # Placeholder: In production, call actual TTS service here
-        # Example with Silero TTS:
-        # import torch
-        # model, _ = torch.hub.load('snakers4/silero-models', 'silero_tts', ...)
-        # audio = model.apply_tts(text=text, speaker='ru_v3')
+        # Try to load model if not already loaded
+        if not self._load_model():
+            logger.warning("TTS model not available, returning None")
+            return None
         
-        logger.debug(f"TTS generation requested for text: {text[:50]}...")
+        try:
+            import torch
+            
+            logger.debug(f"TTS generation requested for text: {text[:50]}...")
+            
+            # Generate audio tensor using Silero model
+            audio_tensor = self._model.apply_tts(
+                text=text,
+                speaker=self.SILERO_SPEAKER,
+                sample_rate=self.SILERO_SAMPLE_RATE
+            )
+            
+            # Convert tensor to OGG format for Telegram
+            ogg_data = self._convert_to_ogg(audio_tensor, self.SILERO_SAMPLE_RATE)
+            
+            if ogg_data is None:
+                logger.error("Failed to convert audio to OGG format")
+                return None
+            
+            logger.info(f"Generated TTS audio: {len(ogg_data)} bytes")
+            return ogg_data
+            
+        except Exception as e:
+            logger.error(f"TTS audio generation failed: {e}")
+            return None
+    
+    def _convert_to_ogg(self, audio_tensor: Any, sample_rate: int) -> Optional[bytes]:
+        """
+        Convert audio tensor to OGG format for Telegram voice messages.
         
-        # Return None to indicate TTS not yet implemented
-        # This triggers fallback behavior
-        return None
+        **Feature: oleg-commands-fix**
+        **Validates: Requirements 5.2**
+        
+        Args:
+            audio_tensor: PyTorch tensor with audio data
+            sample_rate: Sample rate of the audio
+            
+        Returns:
+            OGG audio data as bytes, or None on failure
+        """
+        try:
+            import numpy as np
+            import soundfile as sf
+            
+            # Convert tensor to numpy array
+            if hasattr(audio_tensor, 'numpy'):
+                audio_np = audio_tensor.numpy()
+            else:
+                audio_np = np.array(audio_tensor)
+            
+            # Ensure audio is 1D
+            if audio_np.ndim > 1:
+                audio_np = audio_np.squeeze()
+            
+            # Normalize audio to [-1, 1] range if needed
+            if audio_np.max() > 1.0 or audio_np.min() < -1.0:
+                audio_np = audio_np / max(abs(audio_np.max()), abs(audio_np.min()))
+            
+            # Write to OGG format in memory
+            buffer = io.BytesIO()
+            sf.write(buffer, audio_np, sample_rate, format='OGG', subtype='VORBIS')
+            buffer.seek(0)
+            
+            ogg_data = buffer.read()
+            
+            # Verify OGG magic bytes
+            if not ogg_data.startswith(b'OggS'):
+                logger.error("Generated audio does not have valid OGG header")
+                return None
+            
+            return ogg_data
+            
+        except ImportError as e:
+            logger.error(f"soundfile not installed, cannot convert to OGG: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to convert audio to OGG: {e}")
+            return None
     
     def _estimate_duration(self, text: str) -> float:
         """

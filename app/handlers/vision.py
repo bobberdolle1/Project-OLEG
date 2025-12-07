@@ -6,6 +6,7 @@ Step 2: Oleg LLM комментирует описание в своём сти�
 """
 
 import logging
+import re
 from typing import Optional
 from aiogram import Router, F
 from aiogram.types import Message
@@ -14,6 +15,72 @@ from aiogram.filters import Command
 from app.services.vision_pipeline import vision_pipeline
 
 logger = logging.getLogger(__name__)
+
+
+# Триггеры для упоминания Олега
+OLEG_TRIGGERS = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
+
+
+def _contains_bot_mention(text: str, bot) -> bool:
+    """
+    Проверяет, содержит ли текст упоминание бота.
+    
+    Args:
+        text: Текст для проверки (caption или message text)
+        bot: Объект бота для получения username
+        
+    Returns:
+        True если текст содержит упоминание бота
+    """
+    if not text:
+        return False
+    
+    text_lower = text.lower()
+    
+    # Проверяем @username бота
+    if bot and bot._me and bot._me.username:
+        bot_username = bot._me.username.lower()
+        if f"@{bot_username}" in text_lower:
+            return True
+    
+    # Проверяем слово "олег" и его формы как отдельное слово
+    for trigger in OLEG_TRIGGERS:
+        if re.search(rf'\b{trigger}\b', text_lower):
+            return True
+    
+    return False
+
+
+async def should_process_image(msg: Message) -> bool:
+    """
+    Проверяет, нужно ли обрабатывать изображение.
+    
+    Бот обрабатывает изображение только если:
+    - В caption есть упоминание бота (@username или "олег")
+    - Это ответ на сообщение бота
+    
+    Args:
+        msg: Сообщение с изображением
+        
+    Returns:
+        True если нужно обработать изображение
+        
+    **Validates: Requirements 1.1, 1.2, 1.3, 1.4**
+    """
+    # Проверяем caption на упоминание бота
+    caption = msg.caption or ""
+    if _contains_bot_mention(caption, msg.bot):
+        logger.debug(f"Image processing: bot mentioned in caption for message {msg.message_id}")
+        return True
+    
+    # Проверяем, является ли это ответом на сообщение бота
+    if msg.reply_to_message and msg.reply_to_message.from_user:
+        if msg.reply_to_message.from_user.id == msg.bot.id:
+            logger.debug(f"Image processing: reply to bot message for message {msg.message_id}")
+            return True
+    
+    logger.debug(f"Image processing: skipping message {msg.message_id} - no explicit mention")
+    return False
 
 router = Router()
 
@@ -76,7 +143,18 @@ async def extract_image_bytes(message: Message) -> Optional[bytes]:
 async def handle_image_message(msg: Message):
     """
     Обработчик сообщений с изображениями.
+    
+    Обрабатывает изображение только если бот явно вызван:
+    - Упоминание в caption (@username или "олег")
+    - Ответ на сообщение бота
+    
+    **Validates: Requirements 1.1, 1.4**
     """
+    # Проверяем, нужно ли обрабатывать изображение
+    # Бот отвечает только на явные вызовы
+    if not await should_process_image(msg):
+        return
+    
     # Проверяем, есть ли текст рядом с изображением (для запроса)
     text = msg.caption if msg.caption else ""
 

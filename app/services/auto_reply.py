@@ -38,13 +38,23 @@ class AutoReplySystem:
     - 5.5: Skip auto-reply evaluation when disabled
     """
     
-    # Probability bounds - увеличены для активного участия в чате
-    MIN_PROBABILITY: float = 0.10  # 10% minimum
-    MAX_PROBABILITY: float = 0.40  # 40% maximum cap
+    # Probability bounds - снижены для менее навязчивого поведения (Requirements 2.1, 2.4)
+    MIN_PROBABILITY: float = 0.02  # 2% minimum
+    MAX_PROBABILITY: float = 0.15  # 15% maximum cap
     
-    # Base probability range - бот как настоящий участник чата
-    BASE_PROBABILITY_MIN: float = 0.15  # 15%
-    BASE_PROBABILITY_MAX: float = 0.25  # 25%
+    # Base probability range - снижены для менее частых ответов (Requirements 2.1)
+    BASE_PROBABILITY_MIN: float = 0.02  # 2%
+    BASE_PROBABILITY_MAX: float = 0.05  # 5%
+    
+    # Message length filter (Requirements 2.2)
+    MIN_MESSAGE_LENGTH: int = 15
+    
+    # Blocked short phrases - не отвечаем на короткие фразы (Requirements 2.3)
+    BLOCKED_SHORT_PHRASES: set = {
+        "че", "чё", "ок", "да", "нет", "лол", "кек",
+        "ага", "угу", "ну", "хз", "пон", "ясн", "норм",
+        "го", "gg", "wp", "лан", "ладно", "окей"
+    }
     
     # Boosts (Requirements 5.2)
     CAPS_BOOST: float = 0.10  # +10% for CAPS LOCK
@@ -151,6 +161,38 @@ class AutoReplySystem:
         
         return probability
     
+    def is_message_too_short(self, text: str) -> bool:
+        """
+        Проверяет, слишком ли короткое сообщение для авто-ответа.
+        
+        Requirements 2.2: Сообщения короче MIN_MESSAGE_LENGTH символов отклоняются.
+        
+        Args:
+            text: Текст сообщения
+            
+        Returns:
+            True если сообщение слишком короткое
+        """
+        if not text:
+            return True
+        return len(text) < self.MIN_MESSAGE_LENGTH
+    
+    def is_blocked_phrase(self, text: str) -> bool:
+        """
+        Проверяет, является ли сообщение заблокированной короткой фразой.
+        
+        Requirements 2.3: Короткие фразы типа "че", "ок", "да" отклоняются.
+        
+        Args:
+            text: Текст сообщения
+            
+        Returns:
+            True если сообщение в блоклисте
+        """
+        if not text:
+            return False
+        return text.lower().strip() in self.BLOCKED_SHORT_PHRASES
+    
     def should_reply(self, text: str, chat_settings: ChatSettings) -> bool:
         """
         Определяет, нужно ли отвечать на сообщение.
@@ -164,6 +206,16 @@ class AutoReplySystem:
         """
         # Requirements 5.4, 5.5: Respect disabled setting
         if chat_settings.auto_reply_chance <= 0:
+            return False
+        
+        # Requirements 2.2: Фильтр по длине сообщения
+        if self.is_message_too_short(text):
+            logger.debug(f"Auto-reply skipped: message too short ({len(text) if text else 0} < {self.MIN_MESSAGE_LENGTH})")
+            return False
+        
+        # Requirements 2.3: Фильтр по блоклисту коротких фраз
+        if self.is_blocked_phrase(text):
+            logger.debug(f"Auto-reply skipped: blocked phrase '{text}'")
             return False
         
         # Вычисляем вероятность

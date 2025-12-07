@@ -18,31 +18,131 @@ AutoReplySystem = _auto_reply_module.AutoReplySystem
 ChatSettings = _auto_reply_module.ChatSettings
 
 
+class TestShortMessageRejection:
+    """
+    **Feature: oleg-behavior-improvements, Property 3: Short message rejection**
+    **Validates: Requirements 2.2, 2.3**
+    
+    *For any* message with fewer than 15 characters OR consisting only of 
+    blocked short phrases, the Auto_Reply_System should return False 
+    regardless of probability.
+    """
+    
+    @settings(max_examples=100)
+    @given(st.text(min_size=0, max_size=14))
+    def test_short_messages_rejected(self, short_text: str):
+        """
+        Property 3a: Messages shorter than MIN_MESSAGE_LENGTH are rejected.
+        
+        For any text with fewer than 15 characters, should_reply must return False.
+        """
+        system = AutoReplySystem()
+        
+        # Ensure text is actually short
+        assume(len(short_text) < system.MIN_MESSAGE_LENGTH)
+        
+        # Even with high auto_reply_chance, short messages should be rejected
+        settings_obj = ChatSettings(auto_reply_chance=1.0)
+        
+        result = system.should_reply(short_text, settings_obj)
+        assert result is False, \
+            f"Short message ({len(short_text)} chars) should be rejected"
+    
+    @settings(max_examples=100)
+    @given(st.sampled_from(list(AutoReplySystem.BLOCKED_SHORT_PHRASES)))
+    def test_blocked_phrases_rejected(self, blocked_phrase: str):
+        """
+        Property 3b: Blocked short phrases are rejected.
+        
+        For any phrase in BLOCKED_SHORT_PHRASES, should_reply must return False.
+        """
+        system = AutoReplySystem()
+        
+        # Even with high auto_reply_chance, blocked phrases should be rejected
+        settings_obj = ChatSettings(auto_reply_chance=1.0)
+        
+        result = system.should_reply(blocked_phrase, settings_obj)
+        assert result is False, \
+            f"Blocked phrase '{blocked_phrase}' should be rejected"
+    
+    @settings(max_examples=100)
+    @given(st.sampled_from(list(AutoReplySystem.BLOCKED_SHORT_PHRASES)))
+    def test_blocked_phrases_case_insensitive(self, blocked_phrase: str):
+        """
+        Property 3c: Blocked phrase check is case-insensitive.
+        
+        Variations like "ОК", "Ок", "OK" should all be rejected.
+        """
+        system = AutoReplySystem()
+        settings_obj = ChatSettings(auto_reply_chance=1.0)
+        
+        # Test uppercase
+        result_upper = system.should_reply(blocked_phrase.upper(), settings_obj)
+        # Test with whitespace
+        result_whitespace = system.should_reply(f"  {blocked_phrase}  ", settings_obj)
+        
+        assert result_upper is False, \
+            f"Uppercase blocked phrase '{blocked_phrase.upper()}' should be rejected"
+        assert result_whitespace is False, \
+            f"Blocked phrase with whitespace '  {blocked_phrase}  ' should be rejected"
+    
+    @settings(max_examples=100)
+    @given(st.text(min_size=0, max_size=14))
+    def test_is_message_too_short_method(self, text: str):
+        """
+        Property 3d: is_message_too_short correctly identifies short messages.
+        """
+        system = AutoReplySystem()
+        
+        result = system.is_message_too_short(text)
+        expected = len(text) < system.MIN_MESSAGE_LENGTH
+        
+        assert result == expected, \
+            f"is_message_too_short({repr(text)}) should be {expected}, got {result}"
+    
+    @settings(max_examples=100)
+    @given(st.sampled_from(list(AutoReplySystem.BLOCKED_SHORT_PHRASES)))
+    def test_is_blocked_phrase_method(self, phrase: str):
+        """
+        Property 3e: is_blocked_phrase correctly identifies blocked phrases.
+        """
+        system = AutoReplySystem()
+        
+        # Direct match
+        assert system.is_blocked_phrase(phrase) is True
+        # Case variation
+        assert system.is_blocked_phrase(phrase.upper()) is True
+        # With whitespace
+        assert system.is_blocked_phrase(f"  {phrase}  ") is True
+
+
 class TestAutoReplyProbabilityBounds:
     """
-    **Feature: oleg-v5-refactoring, Property 6: Auto-Reply Probability Bounds**
-    **Validates: Requirements 5.1**
+    **Feature: oleg-behavior-improvements, Property 4: Probability bounds**
+    **Validates: Requirements 2.1, 2.4**
     
-    *For any* message, the calculated auto-reply probability SHALL be 
-    between 0.01 (1%) and 0.15 (15%).
+    *For any* message, the calculated probability should be between 
+    2% and 15% (MIN_PROBABILITY and MAX_PROBABILITY).
     """
     
     @settings(max_examples=100)
     @given(st.text(min_size=0, max_size=1000))
     def test_probability_within_bounds(self, text: str):
         """
-        Property 6: Auto-Reply Probability Bounds
+        Property 4: Probability bounds
         
         For any text input, calculate_probability must return a value
-        in the range [0.01, 0.15].
+        in the range [0.02, 0.15] (2% to 15%).
         """
         system = AutoReplySystem()
         probability = system.calculate_probability(text)
         
+        # Requirements 2.1: base probability 2-5%
+        # Requirements 2.4: max probability 15%
         assert probability >= system.MIN_PROBABILITY, \
-            f"Probability {probability} is below minimum {system.MIN_PROBABILITY}"
+            f"Probability {probability} is below minimum {system.MIN_PROBABILITY} (2%)"
         assert probability <= system.MAX_PROBABILITY, \
-            f"Probability {probability} is above maximum {system.MAX_PROBABILITY}"
+            f"Probability {probability} is above maximum {system.MAX_PROBABILITY} (15%)"
     
     @settings(max_examples=100)
     @given(
@@ -51,13 +151,33 @@ class TestAutoReplyProbabilityBounds:
     )
     def test_probability_bounds_with_custom_triggers(self, text: str, triggers: list):
         """
-        Property 6 extended: Even with many custom triggers, probability stays bounded.
+        Property 4 extended: Even with many custom triggers, probability stays bounded.
+        
+        Validates that MAX_PROBABILITY (15%) is never exceeded.
         """
         system = AutoReplySystem()
         probability = system.calculate_probability(text, triggers=triggers)
         
         assert probability >= system.MIN_PROBABILITY
         assert probability <= system.MAX_PROBABILITY
+    
+    @settings(max_examples=100)
+    @given(st.text(min_size=0, max_size=500))
+    def test_base_probability_range(self, text: str):
+        """
+        Property 4b: Base probability is in range 2-5%.
+        
+        Verifies the constants are set correctly per Requirements 2.1.
+        """
+        system = AutoReplySystem()
+        
+        # Verify constants match requirements
+        assert system.BASE_PROBABILITY_MIN == 0.02, \
+            f"BASE_PROBABILITY_MIN should be 0.02 (2%), got {system.BASE_PROBABILITY_MIN}"
+        assert system.BASE_PROBABILITY_MAX == 0.05, \
+            f"BASE_PROBABILITY_MAX should be 0.05 (5%), got {system.BASE_PROBABILITY_MAX}"
+        assert system.MAX_PROBABILITY == 0.15, \
+            f"MAX_PROBABILITY should be 0.15 (15%), got {system.MAX_PROBABILITY}"
 
 
 class TestAutoReplyProbabilityIncrease:

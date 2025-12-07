@@ -50,7 +50,8 @@ COPY --from=builder --chown=oleg:oleg /root/.local /home/oleg/.local
 
 # Копирование кода приложения
 COPY --chown=oleg:oleg app ./app
-COPY --chown=oleg:oleg alembic.ini migrations ./
+COPY --chown=oleg:oleg alembic.ini ./
+COPY --chown=oleg:oleg migrations ./migrations
 
 # Переключение на непривилегированного пользователя
 USER oleg

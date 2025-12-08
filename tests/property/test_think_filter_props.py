@@ -186,14 +186,20 @@ class TestThinkTagFilterPreservesExternalContent:
         result = filter_instance.filter(text)
         
         # The result should contain the before and after text
-        # (accounting for whitespace normalization)
-        before_stripped = before.strip()
-        after_stripped = after.strip()
+        # (accounting for whitespace normalization - multiple spaces become single)
+        # Normalize the expected strings the same way the filter does
+        def normalize_whitespace(s: str) -> str:
+            s = s.strip()
+            s = re.sub(r' {2,}', ' ', s)
+            return s
         
-        if before_stripped:
-            assert before_stripped in result
-        if after_stripped:
-            assert after_stripped in result
+        before_normalized = normalize_whitespace(before)
+        after_normalized = normalize_whitespace(after)
+        
+        if before_normalized:
+            assert before_normalized in result
+        if after_normalized:
+            assert after_normalized in result
     
     @settings(max_examples=100)
     @given(text=text_without_think_tags)

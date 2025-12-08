@@ -7,6 +7,157 @@
 
 ---
 
+## [7.0.0] - 2025-12-08
+
+### 🎰 Grand Casino & Dictator
+
+Масштабное обновление игровой системы с полноценным казино, системой лиг и ELO-рейтинга, улучшенным AI-контекстом и миграцией TTS.
+
+### 🚀 Добавлено
+
+#### Game Hub UI
+- **Центральное меню игр** — Inline-кнопки для доступа ко всем играм
+  - `app/handlers/game_hub.py` — GameHubUI с 6 кнопками
+  - Кнопки: 🔫 Рулетка, 🎲 Кости, 🥒 Пиписомер, ⚔️ Дуэль, 📊 Топ Элиты, 🏆 Турниры
+  - Команда `/games` для открытия хаба
+  - Legacy команды (/roulette, /bj, /grow, /challenge) продолжают работать
+  - _Requirements: 1.1, 1.2, 1.3, 1.4_
+
+#### State Manager
+- **Отслеживание игровых сессий** — предотвращение множественных игр
+  - `app/services/state_manager.py` — StateManager с Redis-хранилищем
+  - GameSession dataclass с user_id, chat_id, game_type, message_id, state
+  - Методы: register_game, is_playing, get_session, end_game, update_state
+  - _Requirements: 2.1, 2.2, 2.3, 2.4_
+
+#### Anti-Click Protection
+- **Защита игровых кнопок** — middleware для проверки владельца
+  - `app/middleware/anti_click.py` — AntiClickMiddleware
+  - Проверка callback.from_user.id против game owner ID
+  - Alert: "⚠️ Это не твоя кнопка, сталкер!"
+  - _Requirements: 3.1, 3.2, 3.3, 3.4_
+
+#### Blackjack Game
+- **Полноценная игра в Blackjack** — против дилера Олега
+  - `app/services/blackjack.py` — BlackjackEngine с Card, Hand, BlackjackGame
+  - Кнопки: [Hit], [Stand], [Double]
+  - Правила: A=11/1, J/Q/K=10, Blackjack 1.5x payout
+  - Dealer draws to 17+
+  - `app/handlers/blackjack.py` — callback handlers
+  - _Requirements: 9.1-9.8_
+
+#### Duel System Rework
+- **RPG-стиль дуэли** — с HP-барами и зонами атаки/защиты
+  - `app/services/duel_engine.py` — DuelEngine с Zone enum
+  - Зоны: HEAD, BODY, LEGS (Rock-Paper-Scissors механика)
+  - HP: 100, Damage: 25
+  - HP-бар: [████░░░] 60%
+  - PvE режим с Олегом (random moves)
+  - `app/handlers/challenges.py` — обновлённые handlers
+  - _Requirements: 4.1-4.4, 6.1-6.5_
+
+#### Russian Roulette Enhancement
+- **Анимация и ставки** — улучшенная русская рулетка
+  - `app/handlers/games.py` — анимация "Заряжаем..." → "Крутим..." → Result
+  - Поддержка ставок монетами через /roulette <amount>
+  - _Requirements: 5.1-5.5_
+
+#### Coinflip Enhancement
+- **Русский ввод** — поддержка "орёл"/"решка"
+  - `app/handlers/games.py` — обновлённый coinflip
+  - Проверка баланса перед ставкой
+  - _Requirements: 8.1-8.4_
+
+#### ELO Rating System
+- **Система рейтинга** — стандартная ELO формула
+  - `app/services/elo.py` — EloCalculator с K-factor 32
+  - expected_score() и calculate() методы
+  - Интеграция с PvP играми
+  - _Requirements: 10.1-10.4_
+
+#### League System
+- **Лиги по ELO** — ранговая система
+  - `app/services/leagues.py` — LeagueManager с League enum
+  - 🔩 Scrap (0-500), 💾 Silicon (500-1000), ⚛️ Quantum (1000-2000), 👑 Elite (2000+)
+  - Автоматическое обновление при изменении ELO
+  - _Requirements: 11.1-11.6_
+
+#### Profile Generator
+- **Визуальный профиль** — PNG с аватаром и статистикой
+  - `app/services/profile_generator.py` — ProfileGenerator с Pillow
+  - Включает: аватар, username, league badge, ELO, win/loss stats
+  - Команда /profile отправляет изображение
+  - _Requirements: 12.1-12.4_
+
+#### Grow Sparkline
+- **Визуализация истории** — sparkline для /grow
+  - `app/services/sparkline.py` — генерация мини-графика
+  - grow_history в GameStat модели (последние 7 дней)
+  - Титулы: "Гигант мысли" (largest), "Нано-технолог" (smallest)
+  - _Requirements: 7.1-7.4_
+
+#### Broadcast Wizard
+- **FSM для рассылки** — пошаговый wizard для админов
+  - `app/handlers/broadcast.py` — BroadcastStates FSM
+  - Шаги: content_type → recipients → content → confirmation
+  - Типы: Текст, Фото, Видео, Кружочек
+  - Recipients: ЛС Бота, Группы, Везде
+  - Flood protection: asyncio.sleep(0.05)
+  - _Requirements: 13.1-13.7_
+
+#### Reply Context Enhancement
+- **Улучшенный AI-контекст** — инъекция reply context
+  - `app/services/reply_context.py` — ReplyContextInjector
+  - Формат: "User replies to: '{text}'"
+  - Интеграция с QnA handler
+  - _Requirements: 14.1-14.4_
+
+#### Edge-TTS Migration
+- **Microsoft Edge TTS** — замена gTTS
+  - `app/services/tts_edge.py` — EdgeTTSService
+  - Голоса: ru-RU-DmitryNeural, ru-RU-SvetlanaNeural
+  - Lifecycle: create temp file → send → delete
+  - _Requirements: 15.1-15.4_
+
+#### Game State Serialization
+- **Сериализация состояния** — для Redis хранения
+  - SerializableGameState dataclass с to_json/from_json
+  - Поддержка всех типов игр
+  - _Requirements: 16.1-16.3_
+
+### 🧪 Тестирование
+
+- **21 Property-Based Test** — полное покрытие на Hypothesis
+  - `tests/property/test_state_manager_props.py` — Property 1
+  - `tests/property/test_anti_click_props.py` — Property 2
+  - `tests/property/test_duel_props.py` — Properties 3, 5, 6
+  - `tests/property/test_roulette_props.py` — Property 4
+  - `tests/property/test_coinflip_props.py` — Properties 7, 8
+  - `tests/property/test_blackjack_props.py` — Properties 9-14
+  - `tests/property/test_elo_props.py` — Property 15
+  - `tests/property/test_leagues_props.py` — Properties 16, 17
+  - `tests/property/test_broadcast_props.py` — Property 18
+  - `tests/property/test_reply_context_props.py` — Property 19
+  - `tests/property/test_tts_edge_props.py` — Property 20
+  - `tests/property/test_game_state_serialization_props.py` — Property 21
+
+### 📊 Новые метрики
+
+- `bot_blackjack_games_total` — игры в Blackjack
+- `bot_duels_total` — дуэли (PvP и PvE)
+- `bot_elo_changes_total` — изменения ELO
+- `bot_league_promotions_total` — повышения лиги
+- `bot_broadcasts_sent_total` — отправленные рассылки
+
+### 🔧 Изменено
+
+- **Main router** — добавлены game_hub, blackjack, broadcast routers
+- **Callback router** — добавлен AntiClickMiddleware
+- **Voice handler** — использует EdgeTTSService вместо gTTS
+- **QnA handler** — интегрирован ReplyContextInjector
+
+---
+
 ## [6.6.0] - 2025-12-07
 
 ### 🎭 Behavior Refinement Update

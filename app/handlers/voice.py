@@ -4,8 +4,10 @@ This module provides handlers for:
 - /say command for text-to-speech conversion
 - Auto-voice integration for responses
 
-**Feature: fortress-update**
-**Validates: Requirements 5.1, 5.2, 5.4**
+Uses EdgeTTSService for Russian voice synthesis (Microsoft Edge TTS).
+
+**Feature: fortress-update, grand-casino-dictator**
+**Validates: Requirements 5.1, 5.2, 5.4, 15.1, 15.2, 15.3, 15.4**
 """
 
 import logging
@@ -14,11 +16,15 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.services.tts import tts_service
+from app.services.tts_edge import edge_tts_service
 from app.services.alive_ui import alive_ui_service, status_context
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Configuration: Use new EdgeTTSService with file lifecycle management
+USE_EDGE_TTS_SERVICE = True
 
 
 @router.message(Command("say"))
@@ -27,9 +33,10 @@ async def cmd_say(msg: Message):
     Command /say <text> — convert text to voice message.
     
     Generates a voice message with Oleg's characteristic voice
-    and sends it as a voice note.
+    and sends it as a voice note. Uses EdgeTTSService with proper
+    temp file lifecycle management (Create → Send → Delete).
     
-    **Validates: Requirements 5.1**
+    **Validates: Requirements 5.1, 15.1, 15.2, 15.3**
     
     Args:
         msg: Incoming message with /say command
@@ -61,35 +68,57 @@ async def cmd_say(msg: Message):
             msg.chat.id, "tts", msg.bot, message_thread_id=thread_id
         )
         
-        result = await tts_service.generate_voice(text)
-        
-        # Clean up status message before sending response
-        # **Property 32: Status cleanup**
-        if status:
-            await alive_ui_service.finish_status(status, msg.bot)
-            status = None
-        
-        if result is None:
-            # TTS service unavailable - fallback to text
-            # **Validates: Requirements 5.4**
-            logger.warning("TTS service unavailable, falling back to text")
-            # Reset TTS service to try again next time
-            tts_service.reset_edge_tts()
-            await msg.reply(
-                f"🔊 <b>Голосовой движок временно недоступен</b>\n\n<i>{text}</i>",
-                parse_mode="HTML"
+        if USE_EDGE_TTS_SERVICE:
+            # Use new EdgeTTSService with file lifecycle management
+            # **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
+            result = await edge_tts_service.send_voice_with_notification(
+                bot=msg.bot,
+                chat_id=msg.chat.id,
+                text=text,
+                reply_to_message_id=msg.message_id
             )
-            return
-        
-        # Send voice message
-        await msg.reply_voice(
-            voice=result.audio_data,
-            caption=f"🎤 {result.original_text[:100]}..." if len(result.original_text) > 100 else None,
-            duration=int(result.duration_seconds)
-        )
-        
-        if result.was_truncated:
-            logger.info(f"Text was truncated for TTS: {len(text)} -> {len(result.original_text)} chars")
+            
+            # Clean up status message
+            if status:
+                await alive_ui_service.finish_status(status, msg.bot)
+                status = None
+            
+            if result.error:
+                logger.warning(f"EdgeTTS failed: {result.error}")
+                # Error notification already sent by send_voice_with_notification
+            else:
+                logger.info(f"Voice sent successfully, file lifecycle: created={result.created}, sent={result.sent}, deleted={result.deleted}")
+        else:
+            # Fallback to legacy TTS service
+            result = await tts_service.generate_voice(text)
+            
+            # Clean up status message before sending response
+            # **Property 32: Status cleanup**
+            if status:
+                await alive_ui_service.finish_status(status, msg.bot)
+                status = None
+            
+            if result is None:
+                # TTS service unavailable - fallback to text
+                # **Validates: Requirements 5.4, 15.4**
+                logger.warning("TTS service unavailable, falling back to text")
+                # Reset TTS service to try again next time
+                tts_service.reset_edge_tts()
+                await msg.reply(
+                    f"🔊 <b>Голосовой движок временно недоступен</b>\n\n<i>{text}</i>",
+                    parse_mode="HTML"
+                )
+                return
+            
+            # Send voice message
+            await msg.reply_voice(
+                voice=result.audio_data,
+                caption=f"🎤 {result.original_text[:100]}..." if len(result.original_text) > 100 else None,
+                duration=int(result.duration_seconds)
+            )
+            
+            if result.was_truncated:
+                logger.info(f"Text was truncated for TTS: {len(text)} -> {len(result.original_text)} chars")
             
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
@@ -100,7 +129,7 @@ async def cmd_say(msg: Message):
             await alive_ui_service.show_error(status, "Не удалось сгенерировать голос", msg.bot)
         
         # Fallback to text on any error
-        # **Validates: Requirements 5.4**
+        # **Validates: Requirements 5.4, 15.4**
         await msg.reply(
             f"🔊 <i>(голосом Олега)</i>\n\n{text}",
             parse_mode="HTML"
@@ -113,9 +142,10 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
     
     This function implements the 0.1% auto-voice probability.
     Call this before sending a text response to potentially
-    convert it to voice.
+    convert it to voice. Uses EdgeTTSService with proper file
+    lifecycle management.
     
-    **Validates: Requirements 5.2**
+    **Validates: Requirements 5.2, 15.1, 15.2, 15.3**
     
     Args:
         text: Response text to potentially voice
@@ -130,18 +160,35 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
     logger.info(f"Auto-voice triggered for response to @{msg.from_user.username or msg.from_user.id}")
     
     try:
-        result = await tts_service.generate_voice(text)
-        
-        if result is None:
-            # TTS unavailable, fall back to text
-            return False
-        
-        await msg.reply_voice(
-            voice=result.audio_data,
-            caption="🎤 Олег решил ответить голосом",
-            duration=int(result.duration_seconds)
-        )
-        return True
+        if USE_EDGE_TTS_SERVICE:
+            # Use new EdgeTTSService with file lifecycle management
+            # **Validates: Requirements 15.1, 15.2, 15.3**
+            result = await edge_tts_service.send_voice(
+                bot=msg.bot,
+                chat_id=msg.chat.id,
+                text=text,
+                reply_to_message_id=msg.message_id
+            )
+            
+            if result.error:
+                logger.warning(f"Auto-voice EdgeTTS failed: {result.error}")
+                return False
+            
+            return result.sent
+        else:
+            # Fallback to legacy TTS service
+            result = await tts_service.generate_voice(text)
+            
+            if result is None:
+                # TTS unavailable, fall back to text
+                return False
+            
+            await msg.reply_voice(
+                voice=result.audio_data,
+                caption="🎤 Олег решил ответить голосом",
+                duration=int(result.duration_seconds)
+            )
+            return True
         
     except Exception as e:
         logger.error(f"Auto-voice generation failed: {e}")

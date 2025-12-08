@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint, func, Float, LargeBinary
+from sqlalchemy import BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Text, UniqueConstraint, CheckConstraint, func, Float, LargeBinary, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .session import Base
@@ -61,6 +61,9 @@ class GameStat(Base):
     elo_rating: Mapped[int] = mapped_column(Integer, default=1000)
     league: Mapped[str] = mapped_column(String(20), default='scrap')  # scrap, silicon, quantum, elite
     season_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    # Grand Casino v7.0: Growth history for sparkline (Requirements 7.4)
+    # Stores last 7 days of growth data as JSON: [{"date": "2025-12-08", "size": 50, "change": 5}, ...]
+    grow_history: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
 
     user: Mapped[User] = relationship(back_populates="game")
 

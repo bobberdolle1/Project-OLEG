@@ -90,6 +90,8 @@ class RouletteResult:
     shot: bool  # True if the player got "shot"
     points_change: int  # Positive for survival, negative for shot
     new_balance: int
+    bet_amount: int = 0  # Amount bet (0 for standard mode)
+    error_code: Optional[str] = None
 
 
 @dataclass
@@ -564,19 +566,21 @@ class GameEngine:
                 result.append(challenge)
         return result
     
-    def play_roulette(self, user_id: int, chat_id: int) -> RouletteResult:
+    def play_roulette(self, user_id: int, chat_id: int, bet_amount: int = 0) -> RouletteResult:
         """
         Play Russian Roulette.
         
         Requirements:
-        - 9.1: 1/6 probability for "shot"
-        - 9.2: Point deduction on shot
-        - 9.3: Award survival points on empty chamber
-        - 9.4: Oleg-style result messages
+        - 5.1: Animation phases (handled by handler)
+        - 5.2: "БАХ! 💀" on shot
+        - 5.3: "Щелк... 😅" on survival
+        - 5.4: Coin betting option
+        - 5.5: Deduct bet on loss, award winnings on survival
         
         Args:
             user_id: Telegram user ID
             chat_id: Telegram chat ID
+            bet_amount: Amount to bet (0 for standard mode with fixed points)
             
         Returns:
             RouletteResult with outcome and new balance
@@ -584,32 +588,70 @@ class GameEngine:
         # Get current balance
         balance_data = self.get_balance(user_id, chat_id)
         
+        # Validate bet amount if betting mode
+        if bet_amount < 0:
+            return RouletteResult(
+                success=False,
+                message="Ставка должна быть положительной, гений.",
+                shot=False,
+                points_change=0,
+                new_balance=balance_data.balance,
+                bet_amount=bet_amount,
+                error_code="INVALID_BET"
+            )
+        
+        # Check sufficient balance for betting mode
+        if bet_amount > 0 and balance_data.balance < bet_amount:
+            return RouletteResult(
+                success=False,
+                message="Денег нет, но ты держись.",
+                shot=False,
+                points_change=0,
+                new_balance=balance_data.balance,
+                bet_amount=bet_amount,
+                error_code="INSUFFICIENT_BALANCE"
+            )
+        
         # Spin the chamber - 1/6 chance of shot
         chamber = int(self._random() * self.ROULETTE_CHAMBERS)
         shot = (chamber == 0)  # Chamber 0 = bullet
         
-        if shot:
-            # Shot - deduct points
-            points_change = -self.ROULETTE_SHOT_PENALTY
-            message_template = random.choice(self.ROULETTE_SHOT_MESSAGES)
-            message = message_template.format(points=self.ROULETTE_SHOT_PENALTY)
-            
-            # Update balance (can go negative)
-            balance_data.balance += points_change
-            balance_data.total_lost += self.ROULETTE_SHOT_PENALTY
+        if bet_amount > 0:
+            # Betting mode: bet on survival
+            if shot:
+                # Shot - lose bet
+                points_change = -bet_amount
+                message_template = random.choice(self.ROULETTE_SHOT_MESSAGES)
+                message = message_template.format(points=bet_amount)
+                balance_data.balance += points_change
+                balance_data.total_lost += bet_amount
+            else:
+                # Survived - win bet (1:1 payout, so net gain = bet_amount)
+                points_change = bet_amount
+                message_template = random.choice(self.ROULETTE_SURVIVAL_MESSAGES)
+                message = message_template.format(points=bet_amount)
+                balance_data.balance += points_change
+                balance_data.total_won += bet_amount
         else:
-            # Survived - award points
-            points_change = self.ROULETTE_SURVIVAL_REWARD
-            message_template = random.choice(self.ROULETTE_SURVIVAL_MESSAGES)
-            message = message_template.format(points=self.ROULETTE_SURVIVAL_REWARD)
-            
-            # Update balance
-            balance_data.balance += points_change
-            balance_data.total_won += self.ROULETTE_SURVIVAL_REWARD
+            # Standard mode: fixed points
+            if shot:
+                # Shot - deduct points
+                points_change = -self.ROULETTE_SHOT_PENALTY
+                message_template = random.choice(self.ROULETTE_SHOT_MESSAGES)
+                message = message_template.format(points=self.ROULETTE_SHOT_PENALTY)
+                balance_data.balance += points_change
+                balance_data.total_lost += self.ROULETTE_SHOT_PENALTY
+            else:
+                # Survived - award points
+                points_change = self.ROULETTE_SURVIVAL_REWARD
+                message_template = random.choice(self.ROULETTE_SURVIVAL_MESSAGES)
+                message = message_template.format(points=self.ROULETTE_SURVIVAL_REWARD)
+                balance_data.balance += points_change
+                balance_data.total_won += self.ROULETTE_SURVIVAL_REWARD
         
         logger.info(
             f"Roulette: user {user_id} in chat {chat_id} - "
-            f"{'SHOT' if shot else 'SURVIVED'}, balance change: {points_change}"
+            f"{'SHOT' if shot else 'SURVIVED'}, bet={bet_amount}, balance change: {points_change}"
         )
         
         return RouletteResult(
@@ -617,7 +659,8 @@ class GameEngine:
             message=message,
             shot=shot,
             points_change=points_change,
-            new_balance=balance_data.balance
+            new_balance=balance_data.balance,
+            bet_amount=bet_amount
         )
     
     def flip_coin(

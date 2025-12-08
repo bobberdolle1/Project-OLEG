@@ -17,6 +17,7 @@ from app.services.ollama_client import generate_text_reply as generate_reply, ge
 from app.services.recommendations import generate_recommendation
 from app.services.tts import tts_service
 from app.services.golden_fund import golden_fund_service
+from app.services.reply_context import reply_context_injector
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -287,6 +288,10 @@ async def general_qna(msg: Message):
         # Проверяем, спрашивает ли про игры — даём контекст ИИ
         games_context = GAMES_AI_CONTEXT if _is_games_help_request(text) else None
 
+        # Inject reply context if this message is a reply to another message
+        # **Validates: Requirements 14.1, 14.2, 14.3, 14.4**
+        text_with_context = reply_context_injector.inject(msg, text)
+
         # Получаем уровень токсичности в чате
         chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
 
@@ -333,15 +338,19 @@ async def general_qna(msg: Message):
         if msg.chat.type == "private":
             # Здесь в реальной реализации нужно анализировать поведение пользователя
             # и адаптировать стиль ответа соответственно
+            # Use text_with_context to include reply context for AI
+            # **Validates: Requirements 14.4**
             reply = await generate_reply(
-                user_text=text,
+                user_text=text_with_context,
                 username=msg.from_user.username,
                 chat_context=games_context
             )
         else:
             # Для групповых чатов используем функцию с контекстом из памяти
+            # Use text_with_context to include reply context for AI
+            # **Validates: Requirements 14.4**
             reply = await generate_reply_with_context(
-                user_text=text,
+                user_text=text_with_context,
                 username=msg.from_user.username,
                 chat_id=msg.chat.id,
                 chat_context=games_context

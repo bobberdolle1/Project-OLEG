@@ -9,6 +9,7 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
+from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
 from app.handlers.tournaments import router as tournaments_router
 from app.handlers.health import router as health_router
@@ -20,6 +21,8 @@ from app.handlers.summarizer import router as summarizer_router
 from app.handlers.topic_listener import router as topic_listener_router
 from app.handlers.challenges import router as challenges_router
 from app.handlers.tips import router as tips_router
+from app.handlers.blackjack import router as blackjack_router
+from app.handlers.broadcast import router as broadcast_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -29,6 +32,7 @@ from app.middleware.spam_control import SpamControlMiddleware
 from app.middleware.mode_filter import ModeFilterMiddleware
 from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
 from app.middleware.blacklist_filter import BlacklistMiddleware
+from app.middleware.anti_click import AntiClickMiddleware
 from app.jobs.scheduler import setup_scheduler
 
 # Логгер будет инициализирован в main()
@@ -59,6 +63,11 @@ async def on_startup(bot: Bot, dp: Dispatcher):
         from app.middleware.rate_limit import rate_limiter
         rate_limiter.set_redis_client(redis_client)
         logger.info("Redis подключен и настроен для rate limiting")
+        
+        # Configure StateManager to use Redis for game sessions (Requirements 2.x)
+        from app.services.state_manager import state_manager
+        state_manager.set_redis_client(redis_client)
+        logger.info("StateManager настроен для использования Redis")
 
     logger.info("Настройка планировщика задач...")
     await setup_scheduler(bot)
@@ -131,12 +140,17 @@ def build_dp() -> Dispatcher:
     # Rate limiting (should be one of the first middlewares)
     from app.middleware.rate_limit import RateLimitMiddleware
     dp.message.outer_middleware(RateLimitMiddleware())
+    
+    # Anti-click protection for game buttons (Requirements 3.x)
+    dp.callback_query.middleware(AntiClickMiddleware())
 
     # Routers
     dp.include_routers(
         health_router,  # Health check должен быть первым для быстрого ответа
         help.router,  # Help должен быть вторым для приоритета
+        game_hub_router,  # Game Hub UI (Requirements 1.x) - before games for /games priority
         challenges_router,  # PvP challenges with consent (Requirements 8.x)
+        blackjack_router,  # Blackjack game (Requirements 9.x)
         tournaments_router,  # Tournament standings (Requirements 10.5)
         games.router,
         moderation.router,
@@ -161,6 +175,7 @@ def build_dp() -> Dispatcher:
         content_downloader_router,  # Роутер для скачивания контента
         private_admin_router,  # Роутер для админ-панели в ЛС
         admin_dashboard_router,  # Роутер для расширенной админ-панели владельца (Requirements 7.x)
+        broadcast_router,  # Broadcast wizard for admin announcements (Requirements 13.x)
         chat_join_router,  # Роутер для обработки событий добавления в чат
         topic_listener_router,  # Роутер для глобального слушателя топиков (RAG) - должен быть последним
     )

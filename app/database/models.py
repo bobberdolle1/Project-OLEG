@@ -471,6 +471,7 @@ class CitadelConfig(Base):
     forward_block_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     new_user_restriction_hours: Mapped[int] = mapped_column(Integer, default=24)
     hard_captcha_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    gif_patrol_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # GIF moderation (work in progress)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 

@@ -61,6 +61,7 @@ class CitadelConfigData:
         forward_block_enabled: Whether channel forward blocking is enabled
         new_user_restriction_hours: Hours to restrict new users
         hard_captcha_enabled: Whether hard captcha (AI puzzles) is enabled
+        gif_patrol_enabled: Whether GIF moderation is enabled (work in progress)
     """
     chat_id: int
     defcon_level: DEFCONLevel = DEFCONLevel.PEACEFUL
@@ -71,6 +72,7 @@ class CitadelConfigData:
     forward_block_enabled: bool = False
     new_user_restriction_hours: int = 24
     hard_captcha_enabled: bool = False
+    gif_patrol_enabled: bool = False  # GIF moderation (work in progress)
     
     @property
     def is_raid_mode_active(self) -> bool:
@@ -574,6 +576,7 @@ class CitadelService:
             forward_block_enabled=db_config.forward_block_enabled,
             new_user_restriction_hours=db_config.new_user_restriction_hours,
             hard_captcha_enabled=db_config.hard_captcha_enabled,
+            gif_patrol_enabled=getattr(db_config, 'gif_patrol_enabled', False),
         )
     
     def _cleanup_old_join_events(self, chat_id: int, now: datetime) -> None:

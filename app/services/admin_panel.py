@@ -409,6 +409,9 @@ class AdminPanelService:
         level = config.defcon_level.value
         emoji, name = DEFCON_DISPLAY.get(level, ("❓", "Неизвестно"))
         
+        # Get gif_patrol_enabled safely
+        gif_patrol_enabled = getattr(config, 'gif_patrol_enabled', False)
+        
         text = (
             f"🛡 <b>Защита</b>\n\n"
             f"Текущий уровень: {emoji} DEFCON {level} ({name})\n\n"
@@ -420,7 +423,8 @@ class AdminPanelService:
             f"• Антиспам: {'✅' if config.anti_spam_enabled else '❌'}\n"
             f"• Фильтр мата: {'✅' if config.profanity_filter_enabled else '❌'}\n"
             f"• Лимит стикеров: {config.sticker_limit if config.sticker_limit > 0 else 'Выкл'}\n"
-            f"• Блок пересылок: {'✅' if config.forward_block_enabled else '❌'}"
+            f"• Блок пересылок: {'✅' if config.forward_block_enabled else '❌'}\n"
+            f"• GIF-патруль: {'✅' if gif_patrol_enabled else '❌'} <i>(work in progress)</i>"
         )
         
         keyboard = InlineKeyboardBuilder()
@@ -451,13 +455,17 @@ class AdminPanelService:
             text=f"{'✅' if config.forward_block_enabled else '❌'} Блок пересылок",
             callback_data=f"{CALLBACK_PREFIX}toggle_{chat_id}_forward"
         )
+        keyboard.button(
+            text=f"{'✅' if gif_patrol_enabled else '❌'} GIF-патруль 🚧",
+            callback_data=f"{CALLBACK_PREFIX}toggle_{chat_id}_gifpatrol"
+        )
         
         keyboard.button(
             text="🔙 Назад",
             callback_data=f"{CALLBACK_PREFIX}chat_{chat_id}"
         )
         
-        keyboard.adjust(3, 2, 2, 1)
+        keyboard.adjust(3, 2, 2, 1, 1)
         return text, keyboard.as_markup()
 
     
@@ -893,6 +901,10 @@ class AdminPanelService:
             db_config.sticker_limit = 0 if db_config.sticker_limit > 0 else 3
         elif toggle_type == "forward":
             db_config.forward_block_enabled = not db_config.forward_block_enabled
+        elif toggle_type == "gifpatrol":
+            # GIF patrol toggle (work in progress)
+            current = getattr(db_config, 'gif_patrol_enabled', False)
+            db_config.gif_patrol_enabled = not current
         
         await session.commit()
         citadel_service.invalidate_cache(chat_id)

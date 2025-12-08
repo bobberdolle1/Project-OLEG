@@ -163,14 +163,8 @@ class ModeFilterMiddleware(BaseMiddleware):
                 except Exception as e:
                     logger.error(f"Ошибка при модерации ссылки: {e}")
             elif config.mode == "normal":
-                # В нормальном режиме просто предупреждаем
-                try:
-                    await event.answer(
-                        f"@{event.from_user.username or event.from_user.id}, "
-                        f"ссылки в этом режиме не приветствуются!"
-                    )
-                except Exception:
-                    pass  # Игнорируем ошибки при отправке сообщения
+                # В нормальном режиме просто логируем, без уведомления
+                logger.debug(f"Link detected from user {event.from_user.id} in normal mode, no action taken")
         return False
 
     async def _check_banned_words(self, event: Message, config: ModerationConfig) -> bool:

@@ -4,6 +4,7 @@ This module provides TTS functionality using Microsoft Edge TTS API:
 - Russian voices: Dmitry (male) and Svetlana (female)
 - Temp file lifecycle management: Create → Send → Delete
 - Error handling with user notification
+- Silero TTS fallback for Russia (offline, no geo-blocking)
 
 **Feature: grand-casino-dictator, Property 20: TTS File Lifecycle**
 **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
@@ -22,6 +23,14 @@ from aiogram import Bot
 from aiogram.types import FSInputFile
 
 logger = logging.getLogger(__name__)
+
+# Try to import Silero for fallback
+SILERO_AVAILABLE = False
+try:
+    from app.services.tts_silero import silero_tts_service
+    SILERO_AVAILABLE = True
+except ImportError:
+    silero_tts_service = None
 
 
 class TTSSynthesisError(Exception):
@@ -321,6 +330,7 @@ class EdgeTTSService:
         Generate and send voice message with error notification to user.
         
         Same as send_voice but notifies user on failure.
+        Falls back to Silero TTS if Edge TTS fails (works in Russia).
         
         Args:
             bot: Aiogram Bot instance
@@ -337,7 +347,37 @@ class EdgeTTSService:
         result = await self.send_voice(bot, chat_id, text, voice, reply_to_message_id)
         
         if result.error:
-            # Notify user of failure
+            # Try Silero TTS fallback (works offline, no geo-blocking)
+            if SILERO_AVAILABLE and silero_tts_service:
+                logger.info("Edge TTS failed, trying Silero fallback...")
+                try:
+                    speaker = "male" if voice == "male" else "female" if voice == "female" else "male"
+                    silero_result = await silero_tts_service.send_voice(
+                        bot=bot,
+                        chat_id=chat_id,
+                        text=text,
+                        speaker=speaker,
+                        reply_to_message_id=reply_to_message_id
+                    )
+                    if silero_result.sent:
+                        logger.info("Silero TTS fallback succeeded")
+                        # Convert to TTSFileResult for compatibility
+                        return TTSFileResult(
+                            file_path=silero_result.file_path,
+                            audio_bytes=silero_result.audio_bytes,
+                            text=text,
+                            voice=f"silero:{silero_result.speaker}",
+                            created=silero_result.created,
+                            sent=silero_result.sent,
+                            deleted=silero_result.deleted,
+                            error=None
+                        )
+                    else:
+                        logger.warning(f"Silero fallback also failed: {silero_result.error}")
+                except Exception as e:
+                    logger.error(f"Silero fallback error: {e}")
+            
+            # Both failed - notify user
             try:
                 error_msg = "🔊 <b>Голосовой движок временно недоступен</b>\n\n"
                 error_msg += f"<i>{text[:200]}{'...' if len(text) > 200 else ''}</i>"

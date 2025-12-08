@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Создание пользователя без привилегий
 RUN useradd -m -u 1000 oleg && \
-    mkdir -p /app/data /app/logs /app/data/chroma /home/oleg/.cache/whisper && \
+    mkdir -p /app/data /app/logs /app/data/chroma /home/oleg/.cache/whisper /home/oleg/.cache/torch/hub && \
     chown -R oleg:oleg /app /home/oleg/.cache
 
 # Копирование установленных пакетов из builder
@@ -60,7 +60,8 @@ USER oleg
 ENV PATH="/home/oleg/.local/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    TORCH_HOME=/home/oleg/.cache/torch
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

@@ -4,7 +4,7 @@ This module provides handlers for:
 - /say command for text-to-speech conversion
 - Auto-voice integration for responses
 
-Uses EdgeTTSService for Russian voice synthesis (Microsoft Edge TTS).
+Uses Silero TTS for Russian voice synthesis (offline, works in Russia).
 
 **Feature: fortress-update, grand-casino-dictator**
 **Validates: Requirements 5.1, 5.2, 5.4, 15.1, 15.2, 15.3, 15.4**
@@ -16,15 +16,12 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.services.tts import tts_service
-from app.services.tts_edge import edge_tts_service
+from app.services.tts_silero import silero_tts_service
 from app.services.alive_ui import alive_ui_service, status_context
 
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-# Configuration: Use new EdgeTTSService with file lifecycle management
-USE_EDGE_TTS_SERVICE = True
 
 
 @router.message(Command("say"))
@@ -68,54 +65,29 @@ async def cmd_say(msg: Message):
             msg.chat.id, "tts", msg.bot, message_thread_id=thread_id
         )
         
-        if USE_EDGE_TTS_SERVICE:
-            # Use new EdgeTTSService with file lifecycle management
-            # **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
-            result = await edge_tts_service.send_voice_with_notification(
-                bot=msg.bot,
-                chat_id=msg.chat.id,
-                text=text,
-                reply_to_message_id=msg.message_id
+        # Use Silero TTS (offline, works in Russia without restrictions)
+        # **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
+        result = await silero_tts_service.send_voice(
+            bot=msg.bot,
+            chat_id=msg.chat.id,
+            text=text,
+            reply_to_message_id=msg.message_id
+        )
+        
+        # Clean up status message
+        if status:
+            await alive_ui_service.finish_status(status, msg.bot)
+            status = None
+        
+        if result.error:
+            logger.warning(f"Silero TTS failed: {result.error}")
+            # Send text fallback
+            await msg.reply(
+                f"🔊 <b>Голосовой движок временно недоступен</b>\n\n<i>{text}</i>",
+                parse_mode="HTML"
             )
-            
-            # Clean up status message
-            if status:
-                await alive_ui_service.finish_status(status, msg.bot)
-                status = None
-            
-            if result.error:
-                logger.warning(f"EdgeTTS failed: {result.error}")
-                # Error notification already sent by send_voice_with_notification
-            else:
-                logger.info(f"Voice sent successfully, file lifecycle: created={result.created}, sent={result.sent}, deleted={result.deleted}")
         else:
-            # Fallback to legacy TTS service
-            result = await tts_service.generate_voice(text)
-            
-            # Clean up status message before sending response
-            # **Property 32: Status cleanup**
-            if status:
-                await alive_ui_service.finish_status(status, msg.bot)
-                status = None
-            
-            if result is None:
-                # TTS service unavailable - fallback to text
-                # **Validates: Requirements 5.4, 15.4**
-                logger.warning("TTS service unavailable, falling back to text")
-                # Reset TTS service to try again next time
-                tts_service.reset_edge_tts()
-                await msg.reply(
-                    f"🔊 <b>Голосовой движок временно недоступен</b>\n\n<i>{text}</i>",
-                    parse_mode="HTML"
-                )
-                return
-            
-            # Send voice message
-            await msg.reply_voice(
-                voice=result.audio_data,
-                caption=f"🎤 {result.original_text[:100]}..." if len(result.original_text) > 100 else None,
-                duration=int(result.duration_seconds)
-            )
+            logger.info(f"Voice sent successfully, file lifecycle: created={result.created}, sent={result.sent}, deleted={result.deleted}")
             
             if result.was_truncated:
                 logger.info(f"Text was truncated for TTS: {len(text)} -> {len(result.original_text)} chars")
@@ -142,8 +114,7 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
     
     This function implements the 0.1% auto-voice probability.
     Call this before sending a text response to potentially
-    convert it to voice. Uses EdgeTTSService with proper file
-    lifecycle management.
+    convert it to voice. Uses Silero TTS (offline, works in Russia).
     
     **Validates: Requirements 5.2, 15.1, 15.2, 15.3**
     
@@ -160,35 +131,19 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
     logger.info(f"Auto-voice triggered for response to @{msg.from_user.username or msg.from_user.id}")
     
     try:
-        if USE_EDGE_TTS_SERVICE:
-            # Use new EdgeTTSService with file lifecycle management
-            # **Validates: Requirements 15.1, 15.2, 15.3**
-            result = await edge_tts_service.send_voice(
-                bot=msg.bot,
-                chat_id=msg.chat.id,
-                text=text,
-                reply_to_message_id=msg.message_id
-            )
-            
-            if result.error:
-                logger.warning(f"Auto-voice EdgeTTS failed: {result.error}")
-                return False
-            
-            return result.sent
-        else:
-            # Fallback to legacy TTS service
-            result = await tts_service.generate_voice(text)
-            
-            if result is None:
-                # TTS unavailable, fall back to text
-                return False
-            
-            await msg.reply_voice(
-                voice=result.audio_data,
-                caption="🎤 Олег решил ответить голосом",
-                duration=int(result.duration_seconds)
-            )
-            return True
+        # Use Silero TTS (offline, works in Russia)
+        result = await silero_tts_service.send_voice(
+            bot=msg.bot,
+            chat_id=msg.chat.id,
+            text=text,
+            reply_to_message_id=msg.message_id
+        )
+        
+        if result.error:
+            logger.warning(f"Auto-voice Silero failed: {result.error}")
+            return False
+        
+        return result.sent
         
     except Exception as e:
         logger.error(f"Auto-voice generation failed: {e}")

@@ -21,6 +21,9 @@ redis==5.0.1
 arq==0.26.1
 edge-tts>=7.0.0
 gTTS>=2.5.0
+# Silero TTS - offline Russian TTS (works in Russia without restrictions)
+torch>=2.0.0
+numpy>=1.24.0
 
 # Development dependencies
 pytest==7.4.3

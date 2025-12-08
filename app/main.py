@@ -106,6 +106,20 @@ async def on_startup(bot: Bot, dp: Dispatcher):
         else:
             logger.warning("Whisper не удалось инициализировать, распознавание голосовых недоступно")
 
+    # Preload Silero TTS model for /say command (works offline in Russia)
+    logger.info("Предзагрузка Silero TTS модели...")
+    try:
+        from app.services.tts_silero import silero_tts_service
+        # Trigger async model load
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: silero_tts_service._preload_model())
+        if silero_tts_service.is_available:
+            logger.info("Silero TTS модель загружена")
+        else:
+            logger.warning("Silero TTS недоступен, /say будет возвращать текст")
+    except Exception as e:
+        logger.warning(f"Не удалось загрузить Silero TTS: {e}")
+
     # Initialize Arq worker pool for heavy tasks
     if settings.worker_enabled and settings.redis_enabled:
         logger.info("Инициализация Arq worker pool...")

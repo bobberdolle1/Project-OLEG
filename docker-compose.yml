@@ -25,7 +25,7 @@ services:
       - oleg-logs:/app/logs
       # Данные векторной базы
       - chroma-data:/app/chroma_data
-      # Кэш моделей Whisper (чтобы не скачивать при каждом перезапуске)
+      # Кэш моделей Whisper и Silero TTS (чтобы не скачивать при каждом перезапуске)
       - whisper-cache:/home/oleg/.cache
     networks:
       - oleg-network

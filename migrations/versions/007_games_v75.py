@@ -1,7 +1,7 @@
 """Games v7.5 - New mini games and economy tables
 
 Revision ID: 007_games_v75
-Revises: 
+Revises: 20251208_gif_patrol
 Create Date: 2025-12-08
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '007_games_v75'
-down_revision = None
+down_revision = '20251208_gif_patrol'
 branch_labels = None
 depends_on = None
 

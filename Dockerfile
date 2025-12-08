@@ -1,71 +1,51 @@
-# Multi-stage build для оптимизации размера образа
-FROM python:3.12-slim AS builder
-
-WORKDIR /build
-
-# Установка системных зависимостей для сборки
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && update-ca-certificates
-
-# Настройка pip для работы с SSL
-ENV PIP_TRUSTED_HOST="pypi.org pypi.python.org files.pythonhosted.org"
-
-# Установка зависимостей Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    --trusted-host pypi.org \
-    --trusted-host pypi.python.org \
-    --trusted-host files.pythonhosted.org && \
-    pip install --no-cache-dir --user -r requirements.txt \
-    --trusted-host pypi.org \
-    --trusted-host pypi.python.org \
-    --trusted-host files.pythonhosted.org
-
-# Финальный образ
-FROM python:3.12-slim
-
-LABEL maintainer="Oleg Bot Team"
-LABEL description="Telegram bot with AI, moderation and game mechanics"
+# Multi-stage build для уменьшения размера
+FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Установка runtime зависимостей
-# ffmpeg - для Whisper (распознавание голоса) и yt-dlp (конвертация медиа)
+# Российское зеркало apt для ускорения
+RUN sed -i 's|deb.debian.org|mirror.yandex.ru|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|deb.debian.org|mirror.yandex.ru|g' /etc/apt/sources.list 2>/dev/null || true
+
+# Минимальные зависимости для сборки
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ffmpeg \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Создание пользователя без привилегий
-RUN useradd -m -u 1000 oleg && \
-    mkdir -p /app/data /app/logs /app/data/chroma /home/oleg/.cache/whisper /home/oleg/.cache/torch/hub && \
-    chown -R oleg:oleg /app /home/oleg/.cache
+COPY requirements.prod.txt .
 
-# Копирование установленных пакетов из builder
-COPY --from=builder --chown=oleg:oleg /root/.local /home/oleg/.local
+# Используем Яндекс зеркало PyPI + CPU-only torch
+RUN pip install --upgrade pip && \
+    pip wheel --no-cache-dir --wheel-dir /wheels \
+    --index-url https://pypi.yandex.ru/simple \
+    --trusted-host pypi.yandex.ru \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    --extra-index-url https://pypi.org/simple \
+    -r requirements.prod.txt
 
-# Копирование кода приложения
-COPY --chown=oleg:oleg app ./app
-COPY --chown=oleg:oleg alembic.ini ./
-COPY --chown=oleg:oleg migrations ./migrations
+# Финальный образ
+FROM python:3.11-slim
 
-# Переключение на непривилегированного пользователя
-USER oleg
+WORKDIR /app
 
-# Настройка PATH для пользовательских пакетов
-ENV PATH="/home/oleg/.local/bin:$PATH" \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app \
-    TORCH_HOME=/home/oleg/.cache/torch
+# Российское зеркало apt
+RUN sed -i 's|deb.debian.org|mirror.yandex.ru|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's|deb.debian.org|mirror.yandex.ru|g' /etc/apt/sources.list 2>/dev/null || true
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+# Runtime зависимости (ffmpeg для аудио, espeak для офлайн TTS)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    espeak \
+    && rm -rf /var/lib/apt/lists/*
 
-# Запуск приложения
-CMD ["python", "app/main.py"]
+# Копируем wheels и устанавливаем
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
+
+# Копируем код
+COPY . .
+
+RUN mkdir -p /app/data
+
+CMD ["python", "-m", "app.main"]

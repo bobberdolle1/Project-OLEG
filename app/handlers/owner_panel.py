@@ -317,11 +317,11 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
     except Exception:
         services_status.append("❌ ChromaDB")
     
-    # Whisper
+    # Whisper (faster-whisper)
     if settings.voice_recognition_enabled:
         try:
-            from app.services.voice_recognition import whisper_model
-            if whisper_model:
+            from app.services.voice_recognition import is_available
+            if is_available():
                 services_status.append("✅ Whisper")
             else:
                 services_status.append("⚠️ Whisper (не загружен)")

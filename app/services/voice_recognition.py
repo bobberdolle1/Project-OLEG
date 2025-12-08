@@ -1,4 +1,4 @@
-"""Сервис распознавания голосовых сообщений (STT)."""
+"""Сервис распознавания голосовых сообщений (STT) на базе faster-whisper."""
 
 import logging
 import os
@@ -7,16 +7,16 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Флаг доступности whisper
+# Флаг доступности faster-whisper
 _whisper_available = False
 _whisper_model = None
 
 try:
-    import whisper
+    from faster_whisper import WhisperModel
     _whisper_available = True
-    logger.info("Whisper успешно импортирован")
+    logger.info("faster-whisper успешно импортирован")
 except ImportError:
-    logger.warning("Whisper не установлен. Распознавание голосовых недоступно. Установи: pip install openai-whisper")
+    logger.warning("faster-whisper не установлен. Распознавание голосовых недоступно. Установи: pip install faster-whisper")
 
 
 async def init_whisper():
@@ -24,19 +24,20 @@ async def init_whisper():
     global _whisper_model
     
     if not _whisper_available:
-        logger.warning("Whisper недоступен, пропускаем инициализацию")
+        logger.warning("faster-whisper недоступен, пропускаем инициализацию")
         return False
     
     try:
         from app.config import settings
         model_name = settings.whisper_model
         
-        logger.info(f"Загрузка модели Whisper: {model_name}...")
-        _whisper_model = whisper.load_model(model_name)
-        logger.info(f"Модель Whisper '{model_name}' загружена")
+        logger.info(f"Загрузка модели faster-whisper: {model_name}...")
+        # CPU mode, int8 для скорости
+        _whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        logger.info(f"Модель faster-whisper '{model_name}' загружена")
         return True
     except Exception as e:
-        logger.error(f"Ошибка при загрузке модели Whisper: {e}")
+        logger.error(f"Ошибка при загрузке модели faster-whisper: {e}")
         return False
 
 
@@ -56,7 +57,7 @@ async def transcribe_voice(file_path: str) -> Optional[str]:
         Распознанный текст или None при ошибке
     """
     if not is_available():
-        logger.warning("Whisper недоступен для распознавания")
+        logger.warning("faster-whisper недоступен для распознавания")
         return None
     
     if not os.path.exists(file_path):
@@ -66,14 +67,15 @@ async def transcribe_voice(file_path: str) -> Optional[str]:
     try:
         logger.info(f"Начинаю распознавание: {file_path}")
         
-        # Whisper работает синхронно, но файлы обычно небольшие
-        result = _whisper_model.transcribe(
+        # faster-whisper API
+        segments, info = _whisper_model.transcribe(
             file_path,
-            language="ru",  # Приоритет русского языка
-            fp16=False  # Для совместимости с CPU
+            language="ru",
+            beam_size=5
         )
         
-        text = result.get("text", "").strip()
+        # Собираем текст из сегментов
+        text = " ".join(segment.text for segment in segments).strip()
         
         if text:
             logger.info(f"Распознано: {text[:100]}...")
@@ -85,6 +87,7 @@ async def transcribe_voice(file_path: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Ошибка при распознавании голоса: {e}")
         return None
+
 
 
 async def transcribe_voice_message(bot, file_id: str) -> Optional[str]:
@@ -102,6 +105,7 @@ async def transcribe_voice_message(bot, file_id: str) -> Optional[str]:
         return None
     
     temp_file = None
+    temp_path = None
     try:
         # Получаем информацию о файле
         file_info = await bot.get_file(file_id)
@@ -126,7 +130,7 @@ async def transcribe_voice_message(bot, file_id: str) -> Optional[str]:
         
     finally:
         # Удаляем временный файл
-        if temp_file and os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
                 logger.debug(f"Временный файл удалён: {temp_path}")
@@ -152,6 +156,8 @@ async def transcribe_video_note(bot, file_id: str) -> Optional[str]:
     
     temp_video = None
     temp_audio = None
+    video_path = None
+    audio_path = None
     try:
         # Получаем информацию о файле
         file_info = await bot.get_file(file_id)
@@ -205,7 +211,7 @@ async def transcribe_video_note(bot, file_id: str) -> Optional[str]:
         
     finally:
         # Удаляем временные файлы
-        for path in [video_path if temp_video else None, audio_path if temp_audio else None]:
+        for path in [video_path, audio_path]:
             if path and os.path.exists(path):
                 try:
                     os.unlink(path)

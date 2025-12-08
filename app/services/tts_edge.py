@@ -4,33 +4,22 @@ This module provides TTS functionality using Microsoft Edge TTS API:
 - Russian voices: Dmitry (male) and Svetlana (female)
 - Temp file lifecycle management: Create → Send → Delete
 - Error handling with user notification
-- Silero TTS fallback for Russia (offline, no geo-blocking)
 
 **Feature: grand-casino-dictator, Property 20: TTS File Lifecycle**
 **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
 """
 
-import asyncio
 import logging
 import os
 import tempfile
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 from aiogram import Bot
 from aiogram.types import FSInputFile
 
 logger = logging.getLogger(__name__)
-
-# Try to import Silero for fallback
-SILERO_AVAILABLE = False
-try:
-    from app.services.tts_silero import silero_tts_service
-    SILERO_AVAILABLE = True
-except ImportError:
-    silero_tts_service = None
 
 
 class TTSSynthesisError(Exception):
@@ -347,37 +336,19 @@ class EdgeTTSService:
         result = await self.send_voice(bot, chat_id, text, voice, reply_to_message_id)
         
         if result.error:
-            # Try Silero TTS fallback (works offline, no geo-blocking)
-            if SILERO_AVAILABLE and silero_tts_service:
-                logger.info("Edge TTS failed, trying Silero fallback...")
-                try:
-                    speaker = "male" if voice == "male" else "female" if voice == "female" else "male"
-                    silero_result = await silero_tts_service.send_voice(
-                        bot=bot,
-                        chat_id=chat_id,
-                        text=text,
-                        speaker=speaker,
-                        reply_to_message_id=reply_to_message_id
-                    )
-                    if silero_result.sent:
-                        logger.info("Silero TTS fallback succeeded")
-                        # Convert to TTSFileResult for compatibility
-                        return TTSFileResult(
-                            file_path=silero_result.file_path,
-                            audio_bytes=silero_result.audio_bytes,
-                            text=text,
-                            voice=f"silero:{silero_result.speaker}",
-                            created=silero_result.created,
-                            sent=silero_result.sent,
-                            deleted=silero_result.deleted,
-                            error=None
-                        )
-                    else:
-                        logger.warning(f"Silero fallback also failed: {silero_result.error}")
-                except Exception as e:
-                    logger.error(f"Silero fallback error: {e}")
+            # Try gTTS fallback (Google Translate TTS)
+            logger.info("Edge TTS failed, trying gTTS fallback...")
+            gtts_result = await self._gtts_fallback(bot, chat_id, text, reply_to_message_id)
+            if gtts_result and gtts_result.sent:
+                return gtts_result
             
-            # Both failed - notify user
+            # Try pyttsx3 fallback (offline TTS)
+            logger.info("gTTS failed, trying pyttsx3 offline fallback...")
+            pyttsx3_result = await self._pyttsx3_fallback(bot, chat_id, text, reply_to_message_id)
+            if pyttsx3_result and pyttsx3_result.sent:
+                return pyttsx3_result
+            
+            # All failed - notify user
             try:
                 error_msg = "🔊 <b>Голосовой движок временно недоступен</b>\n\n"
                 error_msg += f"<i>{text[:200]}{'...' if len(text) > 200 else ''}</i>"
@@ -390,6 +361,156 @@ class EdgeTTSService:
                 logger.info(f"Sent TTS error notification to chat {chat_id}")
             except Exception as e:
                 logger.error(f"Failed to send error notification: {e}")
+        
+        return result
+    
+    async def _gtts_fallback(
+        self,
+        bot: Bot,
+        chat_id: int,
+        text: str,
+        reply_to_message_id: Optional[int] = None
+    ) -> Optional[TTSFileResult]:
+        """Fallback to gTTS (Google Translate TTS)."""
+        file_path = self._generate_temp_path()
+        
+        result = TTSFileResult(
+            file_path=file_path,
+            audio_bytes=None,
+            text=text,
+            voice="gtts",
+            created=False,
+            sent=False,
+            deleted=False,
+            error=None
+        )
+        
+        try:
+            from gtts import gTTS
+            import asyncio
+            
+            # gTTS is synchronous, run in executor
+            def generate_gtts():
+                tts = gTTS(text=text, lang='ru')
+                tts.save(file_path)
+            
+            await asyncio.get_event_loop().run_in_executor(None, generate_gtts)
+            
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                result.created = True
+                logger.info(f"gTTS created file: {file_path}")
+                
+                # Send voice
+                voice_file = FSInputFile(file_path)
+                await bot.send_voice(
+                    chat_id=chat_id,
+                    voice=voice_file,
+                    reply_to_message_id=reply_to_message_id
+                )
+                result.sent = True
+                logger.info(f"gTTS fallback succeeded for chat {chat_id}")
+            else:
+                result.error = "gTTS file creation failed"
+                
+        except ImportError:
+            logger.warning("gTTS not installed")
+            result.error = "gTTS not installed"
+        except Exception as e:
+            logger.error(f"gTTS fallback failed: {e}")
+            result.error = str(e)
+        finally:
+            # Cleanup
+            result.deleted = self.delete_temp_file(file_path)
+        
+        return result
+    
+    async def _pyttsx3_fallback(
+        self,
+        bot: Bot,
+        chat_id: int,
+        text: str,
+        reply_to_message_id: Optional[int] = None
+    ) -> Optional[TTSFileResult]:
+        """Fallback to pyttsx3 (offline TTS with espeak)."""
+        # pyttsx3 saves as wav, need to convert
+        wav_path = self._generate_temp_path().replace('.mp3', '.wav')
+        mp3_path = self._generate_temp_path()
+        
+        result = TTSFileResult(
+            file_path=mp3_path,
+            audio_bytes=None,
+            text=text,
+            voice="pyttsx3",
+            created=False,
+            sent=False,
+            deleted=False,
+            error=None
+        )
+        
+        try:
+            import pyttsx3
+            import asyncio
+            import subprocess
+            
+            def generate_pyttsx3():
+                engine = pyttsx3.init()
+                # Set Russian voice if available
+                voices = engine.getProperty('voices')
+                for voice in voices:
+                    if 'ru' in voice.id.lower() or 'russian' in voice.name.lower():
+                        engine.setProperty('voice', voice.id)
+                        break
+                engine.setProperty('rate', 150)
+                engine.save_to_file(text, wav_path)
+                engine.runAndWait()
+            
+            await asyncio.get_event_loop().run_in_executor(None, generate_pyttsx3)
+            
+            # Convert wav to mp3 using ffmpeg
+            if os.path.exists(wav_path):
+                proc = await asyncio.create_subprocess_exec(
+                    'ffmpeg', '-y', '-i', wav_path, '-acodec', 'libmp3lame', '-q:a', '4', mp3_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                await proc.wait()
+                
+                # Cleanup wav
+                try:
+                    os.remove(wav_path)
+                except:
+                    pass
+            
+            if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
+                result.created = True
+                logger.info(f"pyttsx3 created file: {mp3_path}")
+                
+                # Send voice
+                voice_file = FSInputFile(mp3_path)
+                await bot.send_voice(
+                    chat_id=chat_id,
+                    voice=voice_file,
+                    reply_to_message_id=reply_to_message_id
+                )
+                result.sent = True
+                logger.info(f"pyttsx3 fallback succeeded for chat {chat_id}")
+            else:
+                result.error = "pyttsx3 file creation failed"
+                
+        except ImportError:
+            logger.warning("pyttsx3 not installed")
+            result.error = "pyttsx3 not installed"
+        except Exception as e:
+            logger.error(f"pyttsx3 fallback failed: {e}")
+            result.error = str(e)
+        finally:
+            # Cleanup
+            result.deleted = self.delete_temp_file(mp3_path)
+            try:
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
+            except:
+                pass
         
         return result
 

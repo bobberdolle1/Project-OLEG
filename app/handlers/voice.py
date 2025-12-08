@@ -1,27 +1,119 @@
-"""Voice command handlers for TTS functionality.
+"""Voice command handlers for TTS and STT functionality.
 
 This module provides handlers for:
 - /say command for text-to-speech conversion
+- Incoming voice message recognition (STT)
 - Auto-voice integration for responses
 
-Uses Silero TTS for Russian voice synthesis (offline, works in Russia).
+Uses Edge TTS for Russian voice synthesis (Microsoft API).
+Uses faster-whisper for speech recognition (STT).
 
 **Feature: fortress-update, grand-casino-dictator**
 **Validates: Requirements 5.1, 5.2, 5.4, 15.1, 15.2, 15.3, 15.4**
 """
 
 import logging
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.services.tts import tts_service
-from app.services.tts_silero import silero_tts_service
-from app.services.alive_ui import alive_ui_service, status_context
+from app.services.tts_edge import edge_tts_service
+from app.services.alive_ui import alive_ui_service
+from app.services.voice_recognition import transcribe_voice_message, transcribe_video_note, is_available as stt_available
+from app.services.ollama_client import generate_reply_with_context
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+@router.message(F.voice)
+async def handle_voice_message(msg: Message):
+    """
+    Handle incoming voice messages - transcribe and respond.
+    
+    Uses faster-whisper for speech recognition.
+    """
+    if not stt_available():
+        logger.warning("STT not available, skipping voice message")
+        return
+    
+    logger.info(f"Voice message from @{msg.from_user.username or msg.from_user.id}")
+    
+    # Show typing indicator
+    await msg.bot.send_chat_action(msg.chat.id, "typing")
+    
+    try:
+        # Transcribe voice message
+        text = await transcribe_voice_message(msg.bot, msg.voice.file_id)
+        
+        if not text:
+            await msg.reply("🎤 Не удалось распознать голосовое сообщение")
+            return
+        
+        logger.info(f"Transcribed: {text[:100]}...")
+        
+        # Get Oleg's response
+        response = await generate_reply_with_context(
+            text,
+            username=msg.from_user.username or msg.from_user.first_name,
+            chat_id=msg.chat.id
+        )
+        
+        if response:
+            # Reply with transcription and response
+            reply_text = f"🎤 <i>{text}</i>\n\n{response}"
+            await msg.reply(reply_text, parse_mode="HTML")
+        else:
+            # Just show transcription if no response
+            await msg.reply(f"🎤 <i>{text}</i>", parse_mode="HTML")
+            
+    except Exception as e:
+        logger.error(f"Voice message handling failed: {e}")
+        await msg.reply("🎤 Ошибка при обработке голосового сообщения")
+
+
+@router.message(F.video_note)
+async def handle_video_note(msg: Message):
+    """
+    Handle incoming video notes (circles) - extract audio, transcribe and respond.
+    """
+    if not stt_available():
+        logger.warning("STT not available, skipping video note")
+        return
+    
+    logger.info(f"Video note from @{msg.from_user.username or msg.from_user.id}")
+    
+    # Show typing indicator
+    await msg.bot.send_chat_action(msg.chat.id, "typing")
+    
+    try:
+        # Transcribe video note
+        text = await transcribe_video_note(msg.bot, msg.video_note.file_id)
+        
+        if not text:
+            await msg.reply("🎥 Не удалось распознать речь в кружочке")
+            return
+        
+        logger.info(f"Transcribed video note: {text[:100]}...")
+        
+        # Get Oleg's response
+        response = await generate_reply_with_context(
+            text,
+            username=msg.from_user.username or msg.from_user.first_name,
+            chat_id=msg.chat.id
+        )
+        
+        if response:
+            reply_text = f"🎥 <i>{text}</i>\n\n{response}"
+            await msg.reply(reply_text, parse_mode="HTML")
+        else:
+            await msg.reply(f"🎥 <i>{text}</i>", parse_mode="HTML")
+            
+    except Exception as e:
+        logger.error(f"Video note handling failed: {e}")
+        await msg.reply("🎥 Ошибка при обработке кружочка")
 
 
 @router.message(Command("say"))
@@ -54,20 +146,16 @@ async def cmd_say(msg: Message):
     logger.info(f"TTS requested by @{msg.from_user.username or msg.from_user.id}: {text[:50]}...")
     
     # Try to generate voice with Alive UI status
-    # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
-    # Get thread_id for forum chats
     thread_id = getattr(msg, 'message_thread_id', None)
     try:
-        # Start status message for TTS generation (shows after 2 seconds)
-        # **Property 29: Status message timing**
+        # Start status message for TTS generation
         status = await alive_ui_service.start_status(
             msg.chat.id, "tts", msg.bot, message_thread_id=thread_id
         )
         
-        # Use Silero TTS (offline, works in Russia without restrictions)
-        # **Validates: Requirements 15.1, 15.2, 15.3, 15.4**
-        result = await silero_tts_service.send_voice(
+        # Use Edge TTS (Microsoft API)
+        result = await edge_tts_service.send_voice_with_notification(
             bot=msg.bot,
             chat_id=msg.chat.id,
             text=text,
@@ -80,28 +168,17 @@ async def cmd_say(msg: Message):
             status = None
         
         if result.error:
-            logger.warning(f"Silero TTS failed: {result.error}")
-            # Send text fallback
-            await msg.reply(
-                f"🔊 <b>Голосовой движок временно недоступен</b>\n\n<i>{text}</i>",
-                parse_mode="HTML"
-            )
+            logger.warning(f"Edge TTS failed: {result.error}")
         else:
             logger.info(f"Voice sent successfully, file lifecycle: created={result.created}, sent={result.sent}, deleted={result.deleted}")
-            
-            if result.was_truncated:
-                logger.info(f"Text was truncated for TTS: {len(text)} -> {len(result.original_text)} chars")
             
     except Exception as e:
         logger.error(f"TTS generation failed: {e}")
         
-        # Show error on status message if it exists
-        # **Validates: Requirements 12.6**
         if status:
             await alive_ui_service.show_error(status, "Не удалось сгенерировать голос", msg.bot)
         
         # Fallback to text on any error
-        # **Validates: Requirements 5.4, 15.4**
         await msg.reply(
             f"🔊 <i>(голосом Олега)</i>\n\n{text}",
             parse_mode="HTML"
@@ -113,10 +190,6 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
     Check if response should be auto-voiced and send voice if so.
     
     This function implements the 0.1% auto-voice probability.
-    Call this before sending a text response to potentially
-    convert it to voice. Uses Silero TTS (offline, works in Russia).
-    
-    **Validates: Requirements 5.2, 15.1, 15.2, 15.3**
     
     Args:
         text: Response text to potentially voice
@@ -131,8 +204,8 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
     logger.info(f"Auto-voice triggered for response to @{msg.from_user.username or msg.from_user.id}")
     
     try:
-        # Use Silero TTS (offline, works in Russia)
-        result = await silero_tts_service.send_voice(
+        # Use Edge TTS
+        result = await edge_tts_service.send_voice(
             bot=msg.bot,
             chat_id=msg.chat.id,
             text=text,
@@ -140,7 +213,7 @@ async def maybe_voice_response(text: str, msg: Message) -> bool:
         )
         
         if result.error:
-            logger.warning(f"Auto-voice Silero failed: {result.error}")
+            logger.warning(f"Auto-voice Edge TTS failed: {result.error}")
             return False
         
         return result.sent

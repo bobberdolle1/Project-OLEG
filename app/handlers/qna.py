@@ -103,6 +103,13 @@ async def _should_reply(msg: Message) -> bool:
             # Получаем ID топика сообщения
             msg_topic_id = getattr(msg, 'message_thread_id', None)
             
+            # Логируем для отладки топиков
+            logger.debug(
+                f"[TOPIC DEBUG] chat_id={msg.chat.id}, msg_topic_id={msg_topic_id}, "
+                f"chat_active_topic_id={chat.active_topic_id if chat else 'no_chat'}, "
+                f"is_forum={msg.chat.is_forum}"
+            )
+            
             # Проверяем active_topic_id — если установлен, бот отвечает только в этом топике
             # Если не установлен (None) — бот отвечает во всех топиках
             if chat and chat.active_topic_id is not None:
@@ -267,6 +274,10 @@ async def general_qna(msg: Message):
     Отвечает на вопросы пользователей, если бот упомянут
     или это ответ на сообщение бота.
     """
+    # Пропускаем команды — они обрабатываются другими роутерами
+    if msg.text and msg.text.startswith('/'):
+        return
+    
     # Логируем информацию о топике для отладки
     topic_id = getattr(msg, 'message_thread_id', None)
     if topic_id:

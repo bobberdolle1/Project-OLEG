@@ -148,4 +148,12 @@ async def handle_all_messages(message: Message):
     Этот обработчик должен быть зарегистрирован с низким приоритетом,
     чтобы не блокировать другие обработчики.
     """
+    # Логируем все входящие сообщения для отладки топиков
+    topic_id = getattr(message, 'message_thread_id', None)
+    logger.info(
+        f"[TOPIC LISTENER] Получено сообщение: chat_id={message.chat.id}, "
+        f"topic_id={topic_id}, chat_type={message.chat.type}, "
+        f"is_forum={message.chat.is_forum}, text={message.text[:50] if message.text else 'empty'}..."
+    )
+    
     await topic_listener.on_message(message)

@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 SESSION_TIMEOUT = 1800
 
 # Supported game types
-GAME_TYPES = frozenset({"blackjack", "duel", "roulette", "coinflip", "grow"})
+GAME_TYPES = frozenset({
+    "blackjack", "duel", "roulette", "coinflip", "grow",
+    # v7.5 new games
+    "fish", "crash", "dice", "guess", "war", "wheel", "loot", "cockfight"
+})
 
 
 @dataclass

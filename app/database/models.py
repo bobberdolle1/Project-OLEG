@@ -692,3 +692,92 @@ class SilentBan(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_silent_ban'),
     )
+
+
+# ============================================================================
+# GAMES v7.5 - New Models for Economy and Inventory
+# ============================================================================
+
+
+class UserInventory(Base):
+    """
+    User inventory for storing purchased items (v7.5).
+    
+    Stores items purchased from the shop or won in games.
+    Items can be consumable (one-time use) or permanent.
+    """
+    __tablename__ = "user_inventory"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    item_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', 'item_type', name='uq_user_chat_item'),
+    )
+
+
+class FishingStats(Base):
+    """
+    Fishing statistics per user (v7.5).
+    
+    Tracks fishing progress, catches, and equipped rod.
+    """
+    __tablename__ = "fishing_stats"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    total_catches: Mapped[int] = mapped_column(Integer, default=0)
+    legendary_catches: Mapped[int] = mapped_column(Integer, default=0)
+    total_earnings: Mapped[int] = mapped_column(Integer, default=0)
+    equipped_rod: Mapped[str] = mapped_column(String(64), default="basic")
+    last_cast: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_fishing'),
+    )
+
+
+class CockfightStats(Base):
+    """
+    Cockfight statistics per user (v7.5).
+    
+    Tracks cockfight wins, losses, and owned roosters.
+    """
+    __tablename__ = "cockfight_stats"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    total_earnings: Mapped[int] = mapped_column(Integer, default=0)
+    owned_roosters: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list of rooster types
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_cockfight'),
+    )
+
+
+class GameHistory(Base):
+    """
+    Game history for tracking all game results (v7.5).
+    
+    Stores history of all games played for statistics and leaderboards.
+    """
+    __tablename__ = "game_history"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    game_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    bet_amount: Mapped[int] = mapped_column(Integer, default=0)
+    result_amount: Mapped[int] = mapped_column(Integer, default=0)  # Positive = win, negative = loss
+    won: Mapped[bool] = mapped_column(Boolean, default=False)
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON with game-specific details
+    played_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)

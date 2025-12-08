@@ -33,33 +33,70 @@ class GameHubUI:
     
     Requirements:
     - 1.1: Display inline message with banner and game buttons
-    - 1.2: Show 6 game options
+    - 1.2: Show game options
     - 1.3: Navigate to game interface on button click
+    
+    Updated in v7.5 with new games.
     """
     
-    BUTTONS = [
+    BUTTONS_PAGE_1 = [
         ("🔫 Рулетка", "game:roulette"),
         ("🎲 Кости", "game:dice"),
         ("🥒 Пиписомер", "game:grow"),
         ("⚔️ Дуэль", "game:duel"),
+        ("🃏 Блэкджек", "game:blackjack"),
+        ("🎰 Казино", "game:casino"),
+    ]
+    
+    BUTTONS_PAGE_2 = [
+        ("🎣 Рыбалка", "game:fish"),
+        ("🚀 Краш", "game:crash"),
+        ("🎡 Колесо", "game:wheel"),
+        ("🃏 Война", "game:war"),
+        ("🔮 Угадай", "game:guess"),
+        ("📦 Лутбоксы", "game:loot"),
+    ]
+    
+    BUTTONS_PAGE_3 = [
+        ("🐔 Петухи", "game:cockfight"),
+        ("🏪 Магазин", "game:shop"),
         ("📊 Топ Элиты", "game:top"),
         ("🏆 Турниры", "game:tournaments"),
     ]
     
     @classmethod
-    def get_keyboard(cls) -> InlineKeyboardMarkup:
+    def get_keyboard(cls, page: int = 1) -> InlineKeyboardMarkup:
         """Create inline keyboard with game buttons.
         
+        Args:
+            page: Page number (1, 2, or 3)
+        
         Returns:
-            InlineKeyboardMarkup with 6 game buttons in 2x3 grid
+            InlineKeyboardMarkup with game buttons in 2x3 grid
         """
+        if page == 1:
+            buttons_list = cls.BUTTONS_PAGE_1
+        elif page == 2:
+            buttons_list = cls.BUTTONS_PAGE_2
+        else:
+            buttons_list = cls.BUTTONS_PAGE_3
+        
         # Create 2x3 grid of buttons
         keyboard = []
-        for i in range(0, len(cls.BUTTONS), 2):
+        for i in range(0, len(buttons_list), 2):
             row = []
-            for text, callback_data in cls.BUTTONS[i:i+2]:
+            for text, callback_data in buttons_list[i:i+2]:
                 row.append(InlineKeyboardButton(text=text, callback_data=callback_data))
             keyboard.append(row)
+        
+        # Add navigation buttons
+        nav_row = []
+        if page > 1:
+            nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"game:page:{page-1}"))
+        nav_row.append(InlineKeyboardButton(text=f"📄 {page}/3", callback_data="game:noop"))
+        if page < 3:
+            nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"game:page:{page+1}"))
+        keyboard.append(nav_row)
         
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
     
@@ -90,6 +127,19 @@ class GameHubUI:
         user_id = callback.from_user.id
         chat_id = callback.message.chat.id if callback.message else 0
         
+        game_type = callback.data[len(GAME_PREFIX):]
+        
+        # Handle pagination
+        if game_type.startswith("page:"):
+            page = int(game_type.split(":")[1])
+            await callback.message.edit_reply_markup(reply_markup=cls.get_keyboard(page))
+            await callback.answer()
+            return
+        
+        if game_type == "noop":
+            await callback.answer()
+            return
+        
         # Check if user is already playing (Requirements 2.2, 2.3)
         if await state_manager.is_playing(user_id, chat_id):
             session = await state_manager.get_session(user_id, chat_id)
@@ -100,55 +150,31 @@ class GameHubUI:
             )
             return
         
-        game_type = callback.data[len(GAME_PREFIX):]
-        
         # Route to appropriate game
-        if game_type == "roulette":
-            await callback.answer("🔫 Используй /roulette для игры!")
+        game_commands = {
+            "roulette": ("🔫 Русская рулетка", "/roulette", "Крути барабан командой /roulette\nИли /roulette [ставка] для игры на монеты"),
+            "dice": ("🎲 Кости", "/dice", "Бросай кости командой /dice"),
+            "grow": ("🥒 Пиписомер", "/grow", "Выращивай свою гордость командой /grow\nКулдаун: 12-24 часа"),
+            "duel": ("⚔️ Дуэль", "/challenge", "Вызови соперника: /challenge @username [ставка]\nИли /pvp @username для быстрой дуэли"),
+            "blackjack": ("🃏 Блэкджек", "/bj", "Играй в блэкджек командой /bj [ставка]"),
+            "casino": ("🎰 Казино", "/casino", "Крути слоты командой /casino [ставка]"),
+            "fish": ("🎣 Рыбалка", "/fish", "Лови рыбу и продавай за монеты!"),
+            "crash": ("🚀 Краш", "/crash", "Множитель растёт — успей забрать до краша!"),
+            "wheel": ("🎡 Колесо Фортуны", "/wheel", "Крути колесо и испытай удачу!"),
+            "war": ("🃏 Война", "/war", "Простая карточная игра — у кого карта старше!"),
+            "guess": ("🔮 Угадай число", "/guess", "Угадай число от 1 до 100 за 7 попыток!"),
+            "loot": ("📦 Лутбоксы", "/loot", "Открывай коробки и получай награды!"),
+            "cockfight": ("🐔 Петушиные бои", "/cockfight", "Выбери петуха и сделай ставку!"),
+            "shop": ("🏪 Магазин", "/shop", "Покупай предметы за монеты!"),
+            "top": ("📊 Топ Элиты", "/top", "/top — Топ по размеру\n/top_rep — Топ по репутации"),
+            "tournaments": ("🏆 Турниры", "/tournament", "/tournament — Текущий турнир\n/tournament_top — Таблица лидеров"),
+        }
+        
+        if game_type in game_commands:
+            title, cmd, desc = game_commands[game_type]
+            await callback.answer(f"Используй {cmd}!")
             await callback.message.answer(
-                "🔫 <b>Русская рулетка</b>\n\n"
-                "Крути барабан командой /roulette\n"
-                "Или /roulette [ставка] для игры на монеты",
-                parse_mode="HTML"
-            )
-        elif game_type == "dice":
-            await callback.answer("🎲 Используй /casino для игры!")
-            await callback.message.answer(
-                "🎲 <b>Кости (Казино)</b>\n\n"
-                "Крути слоты командой /casino [ставка]\n"
-                "Пример: /casino 100",
-                parse_mode="HTML"
-            )
-        elif game_type == "grow":
-            await callback.answer("🥒 Используй /grow для игры!")
-            await callback.message.answer(
-                "🥒 <b>Пиписомер</b>\n\n"
-                "Выращивай свою гордость командой /grow\n"
-                "Кулдаун: 12-24 часа",
-                parse_mode="HTML"
-            )
-        elif game_type == "duel":
-            await callback.answer("⚔️ Используй /challenge для дуэли!")
-            await callback.message.answer(
-                "⚔️ <b>Дуэль</b>\n\n"
-                "Вызови соперника: /challenge @username [ставка]\n"
-                "Или /pvp @username для быстрой дуэли",
-                parse_mode="HTML"
-            )
-        elif game_type == "top":
-            await callback.answer("📊 Показываю топ!")
-            await callback.message.answer(
-                "📊 <b>Топ Элиты</b>\n\n"
-                "/top — Топ по размеру\n"
-                "/top_rep — Топ по репутации",
-                parse_mode="HTML"
-            )
-        elif game_type == "tournaments":
-            await callback.answer("🏆 Турниры!")
-            await callback.message.answer(
-                "🏆 <b>Турниры</b>\n\n"
-                "/tournament — Текущий турнир\n"
-                "/tournament_top — Таблица лидеров",
+                f"<b>{title}</b>\n\n{desc}",
                 parse_mode="HTML"
             )
         else:

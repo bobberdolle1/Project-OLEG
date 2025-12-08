@@ -1,0 +1,237 @@
+"""Shop Handler - Central shop for buying items with inline buttons.
+
+Version 7.5
+"""
+
+import logging
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from sqlalchemy import select
+
+from app.database.session import get_session
+from app.database.models import UserBalance
+from app.services.economy import economy_service, SHOP_ITEMS, ItemType, Rarity
+
+logger = logging.getLogger(__name__)
+router = Router()
+
+SHOP_PREFIX = "shop:"
+
+# Shop categories
+CATEGORIES = {
+    "lootboxes": ("📦 Лутбоксы", [ItemType.LOOTBOX_COMMON, ItemType.LOOTBOX_RARE, ItemType.LOOTBOX_EPIC, ItemType.LOOTBOX_LEGENDARY]),
+    "fishing": ("🎣 Рыбалка", [ItemType.FISHING_ROD_BASIC, ItemType.FISHING_ROD_PRO, ItemType.FISHING_ROD_GOLDEN]),
+    "boosters": ("⚡ Бустеры", [ItemType.LUCKY_CHARM, ItemType.DOUBLE_XP, ItemType.SHIELD, ItemType.ENERGY_DRINK, ItemType.VIP_STATUS]),
+    "roosters": ("🐔 Петухи", [ItemType.ROOSTER_COMMON, ItemType.ROOSTER_RARE, ItemType.ROOSTER_EPIC]),
+}
+
+
+async def get_user_balance(user_id: int, chat_id: int) -> int:
+    """Get user balance."""
+    async_session = get_session()
+    async with async_session() as session:
+        res = await session.execute(
+            select(UserBalance).where(
+                UserBalance.user_id == user_id,
+                UserBalance.chat_id == chat_id
+            )
+        )
+        balance = res.scalars().first()
+        if not balance:
+            balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=100)
+            session.add(balance)
+            await session.commit()
+        return balance.balance
+
+
+async def update_user_balance(user_id: int, chat_id: int, change: int) -> int:
+    """Update user balance."""
+    async_session = get_session()
+    async with async_session() as session:
+        res = await session.execute(
+            select(UserBalance).where(
+                UserBalance.user_id == user_id,
+                UserBalance.chat_id == chat_id
+            )
+        )
+        balance = res.scalars().first()
+        if not balance:
+            balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=100)
+            session.add(balance)
+        
+        balance.balance += change
+        if change > 0:
+            balance.total_won += change
+        else:
+            balance.total_lost += abs(change)
+        
+        await session.commit()
+        return balance.balance
+
+
+def get_main_shop_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Create main shop keyboard with categories."""
+    buttons = []
+    for cat_id, (cat_name, _) in CATEGORIES.items():
+        buttons.append([InlineKeyboardButton(text=cat_name, callback_data=f"{SHOP_PREFIX}{user_id}:cat:{cat_id}")])
+    
+    buttons.append([InlineKeyboardButton(text="💰 Мой баланс", callback_data=f"{SHOP_PREFIX}{user_id}:balance")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
+    """Create category items keyboard."""
+    _, items = CATEGORIES.get(category, ("", []))
+    buttons = []
+    
+    for item_type in items:
+        item = SHOP_ITEMS.get(item_type)
+        if item:
+            rarity_emoji = {"common": "", "uncommon": "⭐", "rare": "⭐⭐", "epic": "💜", "legendary": "🌟"}.get(item.rarity.value, "")
+            text = f"{item.emoji} {item.name} — {item.price}💰 {rarity_emoji}"
+            buttons.append([InlineKeyboardButton(text=text, callback_data=f"{SHOP_PREFIX}{user_id}:buy:{item_type.value}")])
+    
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{SHOP_PREFIX}{user_id}:main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_item_keyboard(user_id: int, item_type: str) -> InlineKeyboardMarkup:
+    """Create item purchase confirmation keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Купить", callback_data=f"{SHOP_PREFIX}{user_id}:confirm:{item_type}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"{SHOP_PREFIX}{user_id}:main"),
+        ],
+    ])
+
+
+@router.message(Command("shop"))
+async def cmd_shop(message: Message):
+    """Open the shop."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    balance = await get_user_balance(user_id, chat_id)
+    
+    text = (
+        "🏪 <b>МАГАЗИН ОЛЕГА</b>\n\n"
+        "Добро пожаловать в магазин!\n"
+        "Здесь ты можешь купить полезные предметы за монеты.\n\n"
+        f"💰 Твой баланс: <b>{balance}</b> монет\n\n"
+        "Выбери категорию:"
+    )
+    
+    await message.reply(text, reply_markup=get_main_shop_keyboard(user_id), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith(SHOP_PREFIX))
+async def callback_shop(callback: CallbackQuery):
+    """Handle shop callbacks."""
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return await callback.answer("Ошибка")
+    
+    _, owner_id, action = parts[:3]
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    if int(owner_id) != user_id:
+        return await callback.answer("Это не твой магазин!", show_alert=True)
+    
+    if action == "main":
+        balance = await get_user_balance(user_id, chat_id)
+        text = (
+            "🏪 <b>МАГАЗИН ОЛЕГА</b>\n\n"
+            f"💰 Твой баланс: <b>{balance}</b> монет\n\n"
+            "Выбери категорию:"
+        )
+        await callback.message.edit_text(text, reply_markup=get_main_shop_keyboard(user_id), parse_mode="HTML")
+        await callback.answer()
+    
+    elif action == "cat":
+        category = parts[3] if len(parts) > 3 else "lootboxes"
+        cat_name, _ = CATEGORIES.get(category, ("Категория", []))
+        balance = await get_user_balance(user_id, chat_id)
+        
+        text = (
+            f"🏪 <b>{cat_name}</b>\n\n"
+            f"💰 Баланс: <b>{balance}</b> монет\n\n"
+            "Выбери товар:"
+        )
+        await callback.message.edit_text(text, reply_markup=get_category_keyboard(user_id, category), parse_mode="HTML")
+        await callback.answer()
+    
+    elif action == "buy":
+        item_type_str = parts[3] if len(parts) > 3 else ""
+        try:
+            item_type = ItemType(item_type_str)
+        except ValueError:
+            return await callback.answer("Товар не найден", show_alert=True)
+        
+        item = SHOP_ITEMS.get(item_type)
+        if not item:
+            return await callback.answer("Товар не найден", show_alert=True)
+        
+        balance = await get_user_balance(user_id, chat_id)
+        
+        rarity_names = {
+            Rarity.COMMON: "Обычный",
+            Rarity.UNCOMMON: "Необычный",
+            Rarity.RARE: "Редкий",
+            Rarity.EPIC: "Эпический",
+            Rarity.LEGENDARY: "Легендарный",
+        }
+        
+        text = (
+            f"🏪 <b>ПОКУПКА</b>\n\n"
+            f"{item.emoji} <b>{item.name}</b>\n"
+            f"📝 {item.description}\n"
+            f"⭐ Редкость: {rarity_names.get(item.rarity, item.rarity.value)}\n"
+            f"💰 Цена: <b>{item.price}</b> монет\n\n"
+            f"💰 Твой баланс: {balance} монет\n\n"
+        )
+        
+        if balance < item.price:
+            text += "❌ <i>Недостаточно монет!</i>"
+        else:
+            text += "Подтвердить покупку?"
+        
+        await callback.message.edit_text(text, reply_markup=get_item_keyboard(user_id, item_type_str), parse_mode="HTML")
+        await callback.answer()
+    
+    elif action == "confirm":
+        item_type_str = parts[3] if len(parts) > 3 else ""
+        try:
+            item_type = ItemType(item_type_str)
+        except ValueError:
+            return await callback.answer("Товар не найден", show_alert=True)
+        
+        item = SHOP_ITEMS.get(item_type)
+        if not item:
+            return await callback.answer("Товар не найден", show_alert=True)
+        
+        balance = await get_user_balance(user_id, chat_id)
+        
+        if balance < item.price:
+            return await callback.answer(f"Недостаточно монет! У тебя {balance}, нужно {item.price}", show_alert=True)
+        
+        # Deduct balance
+        new_balance = await update_user_balance(user_id, chat_id, -item.price)
+        
+        # TODO: Add item to inventory
+        
+        text = (
+            f"🏪 <b>ПОКУПКА УСПЕШНА!</b>\n\n"
+            f"✅ Куплено: {item.emoji} {item.name}\n"
+            f"💰 Потрачено: {item.price} монет\n\n"
+            f"💰 Остаток: {new_balance} монет"
+        )
+        
+        await callback.message.edit_text(text, reply_markup=get_main_shop_keyboard(user_id), parse_mode="HTML")
+        await callback.answer(f"✅ Куплено: {item.name}!")
+        
+        logger.info(f"User {user_id} purchased {item.name} for {item.price}")
+    
+    elif action == "balance":
+        balance = await get_user_balance(user_id, chat_id)
+        await callback.answer(f"💰 Твой баланс: {balance} монет", show_alert=True)

@@ -24,6 +24,8 @@ from app.handlers.tips import router as tips_router
 from app.handlers.blackjack import router as blackjack_router
 from app.handlers.broadcast import router as broadcast_router
 from app.handlers.owner_panel import router as owner_panel_router
+from app.handlers.mini_games import router as mini_games_router
+from app.handlers.shop import router as shop_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -169,6 +171,8 @@ def build_dp() -> Dispatcher:
         game_hub_router,  # Game Hub UI (Requirements 1.x) - before games for /games priority
         challenges_router,  # PvP challenges with consent (Requirements 8.x)
         blackjack_router,  # Blackjack game (Requirements 9.x)
+        mini_games_router,  # New mini games v7.5 (fish, crash, dice, guess, war, wheel, loot, cockfight)
+        shop_router,  # Shop system v7.5
         tournaments_router,  # Tournament standings (Requirements 10.5)
         games.router,
         moderation.router,

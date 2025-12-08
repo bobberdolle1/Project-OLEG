@@ -1,0 +1,314 @@
+"""Economy Service - Central economy management for all games.
+
+Manages user balances, transactions, items, and shop functionality.
+Version 7.5
+"""
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Optional, List, Dict, Any
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.session import get_session
+from app.database.models import User, Wallet, UserBalance
+from app.utils import utc_now
+
+logger = logging.getLogger(__name__)
+
+
+class ItemType(str, Enum):
+    """Types of items available in the shop."""
+    LOOTBOX_COMMON = "lootbox_common"
+    LOOTBOX_RARE = "lootbox_rare"
+    LOOTBOX_EPIC = "lootbox_epic"
+    LOOTBOX_LEGENDARY = "lootbox_legendary"
+    FISHING_ROD_BASIC = "fishing_rod_basic"
+    FISHING_ROD_PRO = "fishing_rod_pro"
+    FISHING_ROD_GOLDEN = "fishing_rod_golden"
+    LUCKY_CHARM = "lucky_charm"  # +5% к выигрышу
+    DOUBLE_XP = "double_xp"  # x2 опыт на 1 час
+    SHIELD = "shield"  # Защита от PvP на 1 час
+    ENERGY_DRINK = "energy_drink"  # Сброс кулдауна /grow
+    VIP_STATUS = "vip_status"  # VIP на 24 часа
+    ROOSTER_COMMON = "rooster_common"
+    ROOSTER_RARE = "rooster_rare"
+    ROOSTER_EPIC = "rooster_epic"
+
+
+class Rarity(str, Enum):
+    """Item rarity levels."""
+    COMMON = "common"
+    UNCOMMON = "uncommon"
+    RARE = "rare"
+    EPIC = "epic"
+    LEGENDARY = "legendary"
+
+
+@dataclass
+class ShopItem:
+    """Represents an item in the shop."""
+    item_type: ItemType
+    name: str
+    description: str
+    price: int
+    emoji: str
+    rarity: Rarity = Rarity.COMMON
+    duration_hours: int = 0  # 0 = permanent/consumable
+
+
+# Shop catalog
+SHOP_ITEMS: Dict[ItemType, ShopItem] = {
+    ItemType.LOOTBOX_COMMON: ShopItem(
+        ItemType.LOOTBOX_COMMON, "Обычный лутбокс", "Шанс на редкие предметы", 
+        50, "📦", Rarity.COMMON
+    ),
+    ItemType.LOOTBOX_RARE: ShopItem(
+        ItemType.LOOTBOX_RARE, "Редкий лутбокс", "Повышенный шанс на эпики",
+        150, "📦", Rarity.RARE
+    ),
+    ItemType.LOOTBOX_EPIC: ShopItem(
+        ItemType.LOOTBOX_EPIC, "Эпический лутбокс", "Гарантированный эпик+",
+        400, "📦", Rarity.EPIC
+    ),
+    ItemType.LOOTBOX_LEGENDARY: ShopItem(
+        ItemType.LOOTBOX_LEGENDARY, "Легендарный лутбокс", "Шанс на легендарку!",
+        1000, "📦", Rarity.LEGENDARY
+    ),
+    ItemType.FISHING_ROD_BASIC: ShopItem(
+        ItemType.FISHING_ROD_BASIC, "Удочка новичка", "Базовая удочка для рыбалки",
+        100, "🎣", Rarity.COMMON
+    ),
+    ItemType.FISHING_ROD_PRO: ShopItem(
+        ItemType.FISHING_ROD_PRO, "Про удочка", "+20% к редкой рыбе",
+        500, "🎣", Rarity.RARE
+    ),
+    ItemType.FISHING_ROD_GOLDEN: ShopItem(
+        ItemType.FISHING_ROD_GOLDEN, "Золотая удочка", "+50% к редкой рыбе",
+        2000, "🎣", Rarity.EPIC
+    ),
+    ItemType.LUCKY_CHARM: ShopItem(
+        ItemType.LUCKY_CHARM, "Талисман удачи", "+5% к выигрышам на 1 час",
+        200, "🍀", Rarity.UNCOMMON, duration_hours=1
+    ),
+    ItemType.DOUBLE_XP: ShopItem(
+        ItemType.DOUBLE_XP, "Энергетик x2", "Двойной опыт на 1 час",
+        300, "⚡", Rarity.RARE, duration_hours=1
+    ),
+    ItemType.SHIELD: ShopItem(
+        ItemType.SHIELD, "Щит", "Защита от PvP на 1 час",
+        250, "🛡️", Rarity.UNCOMMON, duration_hours=1
+    ),
+    ItemType.ENERGY_DRINK: ShopItem(
+        ItemType.ENERGY_DRINK, "Энергетик", "Сброс кулдауна /grow",
+        150, "🥤", Rarity.UNCOMMON
+    ),
+    ItemType.VIP_STATUS: ShopItem(
+        ItemType.VIP_STATUS, "VIP статус", "VIP бонусы на 24 часа",
+        500, "👑", Rarity.EPIC, duration_hours=24
+    ),
+    ItemType.ROOSTER_COMMON: ShopItem(
+        ItemType.ROOSTER_COMMON, "Обычный петух", "Базовый боец",
+        200, "🐔", Rarity.COMMON
+    ),
+    ItemType.ROOSTER_RARE: ShopItem(
+        ItemType.ROOSTER_RARE, "Редкий петух", "Сильный боец",
+        600, "🐓", Rarity.RARE
+    ),
+    ItemType.ROOSTER_EPIC: ShopItem(
+        ItemType.ROOSTER_EPIC, "Эпический петух", "Элитный боец",
+        1500, "🦃", Rarity.EPIC
+    ),
+}
+
+
+@dataclass
+class TransactionResult:
+    """Result of a transaction."""
+    success: bool
+    message: str
+    new_balance: int = 0
+    error_code: Optional[str] = None
+
+
+@dataclass
+class InventoryItem:
+    """Item in user's inventory."""
+    item_type: str
+    quantity: int
+    expires_at: Optional[datetime] = None
+
+
+class EconomyService:
+    """Central economy management service."""
+    
+    DEFAULT_BALANCE = 100
+    DAILY_BONUS = 50
+    DAILY_BONUS_STREAK_MULTIPLIER = 1.1  # +10% за каждый день стрика
+    MAX_STREAK_BONUS = 2.0  # Максимум x2
+    
+    async def get_balance(self, user_id: int, chat_id: int = 0) -> int:
+        """Get user's balance."""
+        async_session = get_session()
+        async with async_session() as session:
+            # Try UserBalance first (per-chat)
+            if chat_id:
+                res = await session.execute(
+                    select(UserBalance).where(
+                        UserBalance.user_id == user_id,
+                        UserBalance.chat_id == chat_id
+                    )
+                )
+                balance = res.scalars().first()
+                if balance:
+                    return balance.balance
+            
+            # Fallback to Wallet (global)
+            res = await session.execute(
+                select(Wallet).join(User).where(User.tg_user_id == user_id)
+            )
+            wallet = res.scalars().first()
+            return wallet.balance if wallet else self.DEFAULT_BALANCE
+    
+    async def add_balance(
+        self, user_id: int, amount: int, chat_id: int = 0, reason: str = ""
+    ) -> TransactionResult:
+        """Add coins to user's balance."""
+        if amount <= 0:
+            return TransactionResult(False, "Сумма должна быть положительной", error_code="INVALID_AMOUNT")
+        
+        async_session = get_session()
+        async with async_session() as session:
+            # Get or create balance
+            if chat_id:
+                res = await session.execute(
+                    select(UserBalance).where(
+                        UserBalance.user_id == user_id,
+                        UserBalance.chat_id == chat_id
+                    )
+                )
+                balance = res.scalars().first()
+                if not balance:
+                    balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=self.DEFAULT_BALANCE)
+                    session.add(balance)
+                
+                balance.balance += amount
+                balance.total_won += amount
+                await session.commit()
+                
+                logger.info(f"Added {amount} to user {user_id} in chat {chat_id}: {reason}")
+                return TransactionResult(True, f"+{amount} монет", balance.balance)
+            else:
+                # Global wallet
+                res = await session.execute(
+                    select(Wallet).join(User).where(User.tg_user_id == user_id)
+                )
+                wallet = res.scalars().first()
+                if wallet:
+                    wallet.balance += amount
+                    await session.commit()
+                    return TransactionResult(True, f"+{amount} монет", wallet.balance)
+                
+                return TransactionResult(False, "Кошелёк не найден", error_code="NO_WALLET")
+    
+    async def deduct_balance(
+        self, user_id: int, amount: int, chat_id: int = 0, reason: str = ""
+    ) -> TransactionResult:
+        """Deduct coins from user's balance."""
+        if amount <= 0:
+            return TransactionResult(False, "Сумма должна быть положительной", error_code="INVALID_AMOUNT")
+        
+        current = await self.get_balance(user_id, chat_id)
+        if current < amount:
+            return TransactionResult(
+                False, f"Недостаточно монет. У тебя {current}, нужно {amount}",
+                current, "INSUFFICIENT_FUNDS"
+            )
+        
+        async_session = get_session()
+        async with async_session() as session:
+            if chat_id:
+                res = await session.execute(
+                    select(UserBalance).where(
+                        UserBalance.user_id == user_id,
+                        UserBalance.chat_id == chat_id
+                    )
+                )
+                balance = res.scalars().first()
+                if balance:
+                    balance.balance -= amount
+                    balance.total_lost += amount
+                    await session.commit()
+                    logger.info(f"Deducted {amount} from user {user_id} in chat {chat_id}: {reason}")
+                    return TransactionResult(True, f"-{amount} монет", balance.balance)
+            else:
+                res = await session.execute(
+                    select(Wallet).join(User).where(User.tg_user_id == user_id)
+                )
+                wallet = res.scalars().first()
+                if wallet:
+                    wallet.balance -= amount
+                    await session.commit()
+                    return TransactionResult(True, f"-{amount} монет", wallet.balance)
+        
+        return TransactionResult(False, "Ошибка транзакции", error_code="TRANSACTION_ERROR")
+    
+    async def transfer(
+        self, from_user_id: int, to_user_id: int, amount: int, chat_id: int = 0
+    ) -> TransactionResult:
+        """Transfer coins between users."""
+        if from_user_id == to_user_id:
+            return TransactionResult(False, "Нельзя перевести самому себе", error_code="SELF_TRANSFER")
+        
+        if amount <= 0:
+            return TransactionResult(False, "Сумма должна быть положительной", error_code="INVALID_AMOUNT")
+        
+        # Deduct from sender
+        deduct_result = await self.deduct_balance(from_user_id, amount, chat_id, f"transfer to {to_user_id}")
+        if not deduct_result.success:
+            return deduct_result
+        
+        # Add to receiver
+        add_result = await self.add_balance(to_user_id, amount, chat_id, f"transfer from {from_user_id}")
+        if not add_result.success:
+            # Rollback
+            await self.add_balance(from_user_id, amount, chat_id, "transfer rollback")
+            return TransactionResult(False, "Ошибка перевода", error_code="TRANSFER_ERROR")
+        
+        return TransactionResult(True, f"Переведено {amount} монет", deduct_result.new_balance)
+    
+    def get_shop_items(self) -> List[ShopItem]:
+        """Get all available shop items."""
+        return list(SHOP_ITEMS.values())
+    
+    def get_shop_item(self, item_type: ItemType) -> Optional[ShopItem]:
+        """Get specific shop item."""
+        return SHOP_ITEMS.get(item_type)
+    
+    async def purchase_item(
+        self, user_id: int, item_type: ItemType, chat_id: int = 0
+    ) -> TransactionResult:
+        """Purchase an item from the shop."""
+        item = self.get_shop_item(item_type)
+        if not item:
+            return TransactionResult(False, "Предмет не найден", error_code="ITEM_NOT_FOUND")
+        
+        # Deduct balance
+        result = await self.deduct_balance(user_id, item.price, chat_id, f"purchase {item.name}")
+        if not result.success:
+            return result
+        
+        # Add item to inventory (would need inventory table)
+        # For now, just return success
+        logger.info(f"User {user_id} purchased {item.name} for {item.price}")
+        return TransactionResult(
+            True, 
+            f"Куплено: {item.emoji} {item.name} за {item.price} монет",
+            result.new_balance
+        )
+
+
+# Global instance
+economy_service = EconomyService()

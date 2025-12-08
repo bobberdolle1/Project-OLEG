@@ -335,10 +335,10 @@ async def handle_links(msg: Message):
     """
     Обрабатывает сообщения с ссылками и добавляет задачи в очередь.
     """
-    from app.config import settings
+    from app.handlers.owner_panel import is_feature_enabled
     
-    # Проверяем, включена ли функция
-    if not settings.content_download_enabled:
+    # Проверяем, включена ли функция (runtime toggle)
+    if not is_feature_enabled("content_download"):
         return
     
     text = msg.text or msg.caption or ""

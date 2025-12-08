@@ -94,10 +94,11 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     dp.tasks.append(random_task)
     logger.info("Фоновая задача для случайных сообщений запущена")
 
+    # Воркеры запускаются всегда, проверка включения происходит в хендлере
     logger.info("Запуск воркеров загрузки контента...")
     from app.services.content_downloader import downloader
     await downloader.start_workers()
-    logger.info("Воркеры загрузки контента запущены")
+    logger.info(f"Воркеры загрузки контента запущены (функция {'включена' if settings.content_download_enabled else 'выключена по умолчанию'})")
 
     # Инициализация Whisper для распознавания голосовых
     if settings.voice_recognition_enabled:

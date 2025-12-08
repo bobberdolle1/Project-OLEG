@@ -23,6 +23,7 @@ from app.handlers.challenges import router as challenges_router
 from app.handlers.tips import router as tips_router
 from app.handlers.blackjack import router as blackjack_router
 from app.handlers.broadcast import router as broadcast_router
+from app.handlers.owner_panel import router as owner_panel_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers import antiraid
@@ -33,6 +34,7 @@ from app.middleware.mode_filter import ModeFilterMiddleware
 from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
 from app.middleware.blacklist_filter import BlacklistMiddleware
 from app.middleware.anti_click import AntiClickMiddleware
+from app.middleware.feature_toggle import FeatureToggleMiddleware
 from app.jobs.scheduler import setup_scheduler
 
 # Логгер будет инициализирован в main()
@@ -150,6 +152,7 @@ def build_dp() -> Dispatcher:
     dp.message.middleware(SpamFilterMiddleware())
     dp.message.middleware(SpamControlMiddleware())  # Middleware для защиты от "дрючки"
     dp.message.middleware(ToxicityAnalysisMiddleware())
+    dp.message.middleware(FeatureToggleMiddleware())  # Проверка включенных функций
     
     # Rate limiting (should be one of the first middlewares)
     from app.middleware.rate_limit import RateLimitMiddleware
@@ -190,6 +193,7 @@ def build_dp() -> Dispatcher:
         private_admin_router,  # Роутер для админ-панели в ЛС
         admin_dashboard_router,  # Роутер для расширенной админ-панели владельца (Requirements 7.x)
         broadcast_router,  # Broadcast wizard for admin announcements (Requirements 13.x)
+        owner_panel_router,  # Панель владельца бота (/owner)
         chat_join_router,  # Роутер для обработки событий добавления в чат
         topic_listener_router,  # Роутер для глобального слушателя топиков (RAG) - должен быть последним
     )

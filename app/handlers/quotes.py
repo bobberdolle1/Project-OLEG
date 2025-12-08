@@ -12,7 +12,7 @@ from io import BytesIO
 from typing import List, Optional
 
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 
@@ -189,8 +189,13 @@ async def _generate_single_message_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
+        # Подготавливаем изображение для отправки
+        image_io.seek(0)
+        image_data = image_io.read()
+        photo_file = BufferedInputFile(image_data, filename="quote.webp")
+        
         # Отправляем изображение как фото и сохраняем ID отправленного сообщения
-        sent_msg = await msg.answer_photo(photo=image_io, caption="💬 Цитата создана")
+        sent_msg = await msg.answer_photo(photo=photo_file, caption="💬 Цитата создана")
         
         # Сохраняем цитату в базу данных (Requirement 7.6)
         # Property 19: Quote persistence
@@ -288,8 +293,13 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         # Создаем изображение цепочки цитат (Requirement 7.3, 7.5)
         image_io = await create_quote_chain_image(messages)
         
+        # Подготавливаем изображение для отправки
+        image_io.seek(0)
+        image_data = image_io.read()
+        photo_file = BufferedInputFile(image_data, filename="quote_chain.webp")
+        
         caption = f"💬 Цитата ({len(messages)} сообщ.)"
-        sent_msg = await msg.answer_photo(photo=image_io, caption=caption)
+        sent_msg = await msg.answer_photo(photo=photo_file, caption=caption)
         
         # Сохраняем цитату в базу данных (Requirement 7.6)
         # Property 19: Quote persistence
@@ -355,8 +365,13 @@ async def _generate_roast_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
+        # Подготавливаем изображение для отправки
+        image_io.seek(0)
+        image_data = image_io.read()
+        photo_file = BufferedInputFile(image_data, filename="quote_roast.webp")
+        
         # Отправляем изображение как фото и сохраняем ID отправленного сообщения
-        sent_msg = await msg.answer_photo(photo=image_io, caption="🔥 Режим прожарки активирован")
+        sent_msg = await msg.answer_photo(photo=photo_file, caption="🔥 Режим прожарки активирован")
         
         # Сохраняем цитату в базу данных (Requirement 7.6)
         # Property 19: Quote persistence

@@ -93,14 +93,64 @@ class QuoteGeneratorService:
         self._load_fonts()
     
     def _load_fonts(self):
-        """Load fonts for rendering."""
-        try:
-            self.text_font = ImageFont.truetype("DejaVuSans.ttf", 18)
-            self.username_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 14)
-            self.comment_font = ImageFont.truetype("DejaVuSans-Oblique.ttf", 16)
-            self.timestamp_font = ImageFont.truetype("DejaVuSans.ttf", 10)
-        except OSError:
-            logger.warning("Custom fonts not found, using default fonts")
+        """Load fonts for rendering with Unicode/Cyrillic support."""
+        # Font search paths - prioritize project fonts, then system fonts
+        font_search_paths = [
+            # Project fonts directory
+            "fonts/",
+            # Linux common paths
+            "/usr/share/fonts/truetype/dejavu/",
+            "/usr/share/fonts/TTF/",
+            # macOS paths
+            "/Library/Fonts/",
+            "/System/Library/Fonts/",
+            # Windows paths
+            "C:/Windows/Fonts/",
+        ]
+        
+        # Font candidates with Unicode/Cyrillic support
+        font_candidates = [
+            ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf"),
+            ("Arial Unicode.ttf", "Arial Unicode.ttf", "Arial Unicode.ttf"),
+            ("Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf"),
+            ("NotoSans-Regular.ttf", "NotoSans-Bold.ttf", "NotoSans-Italic.ttf"),
+            ("FreeSans.ttf", "FreeSansBold.ttf", "FreeSansOblique.ttf"),
+        ]
+        
+        def find_font(font_name: str) -> Optional[str]:
+            """Try to find font in search paths."""
+            import os
+            # Try direct path first
+            if os.path.exists(font_name):
+                return font_name
+            # Search in paths
+            for path in font_search_paths:
+                full_path = os.path.join(path, font_name)
+                if os.path.exists(full_path):
+                    return full_path
+            return None
+        
+        fonts_loaded = False
+        for regular, bold, italic in font_candidates:
+            regular_path = find_font(regular)
+            bold_path = find_font(bold)
+            italic_path = find_font(italic)
+            
+            if regular_path:
+                try:
+                    self.text_font = ImageFont.truetype(regular_path, 18)
+                    self.username_font = ImageFont.truetype(bold_path or regular_path, 14)
+                    self.comment_font = ImageFont.truetype(italic_path or regular_path, 16)
+                    self.timestamp_font = ImageFont.truetype(regular_path, 10)
+                    logger.info(f"Loaded fonts from: {regular_path}")
+                    fonts_loaded = True
+                    break
+                except OSError as e:
+                    logger.debug(f"Failed to load font {regular}: {e}")
+                    continue
+        
+        if not fonts_loaded:
+            logger.warning("No Unicode fonts found, using default (may not support Cyrillic)")
             self.text_font = ImageFont.load_default()
             self.username_font = ImageFont.load_default()
             self.comment_font = ImageFont.load_default()

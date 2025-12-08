@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, extract, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -83,6 +83,11 @@ class DailySummary:
         moderation_actions: Count of moderation actions
         top_messages: List of top messages (by reactions)
         has_activity: Whether there was any activity
+        toxicity_score: Average toxicity score (0-100)
+        toxicity_incidents: Number of toxicity incidents
+        hot_topics: List of hot topics with message links
+        peak_hour: Hour with most activity
+        top_chatters: List of most active users
     """
     chat_id: int
     date: datetime
@@ -92,6 +97,12 @@ class DailySummary:
     moderation_actions: int = 0
     top_messages: List[Dict[str, Any]] = field(default_factory=list)
     has_activity: bool = False
+    # New fields for enhanced dailies
+    toxicity_score: float = 0.0
+    toxicity_incidents: int = 0
+    hot_topics: List[Dict[str, Any]] = field(default_factory=list)
+    peak_hour: Optional[int] = None
+    top_chatters: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -354,6 +365,12 @@ class DailiesService:
         THEN the Dailies System SHALL send a #dailysummary message
         with a digest of yesterday's events.
         
+        Enhanced with:
+        - Toxicity thermometer (average toxicity score)
+        - Hot topics with message links
+        - Peak activity hour
+        - Top chatters
+        
         Args:
             chat_id: Telegram chat ID
             session: Optional database session
@@ -361,7 +378,7 @@ class DailiesService:
         Returns:
             DailySummary if there was activity, None otherwise
         """
-        from app.database.models import MessageLog, User, Warning
+        from app.database.models import MessageLog, User, Warning, ToxicityLog
         from app.database.session import get_session
         from app.utils import utc_now
         
@@ -428,6 +445,69 @@ class DailiesService:
             )
             moderation_actions = moderation_result.scalar() or 0
             
+            # ===== NEW: Toxicity thermometer =====
+            toxicity_result = await session.execute(
+                select(
+                    func.avg(ToxicityLog.score),
+                    func.count(ToxicityLog.id)
+                ).filter(
+                    ToxicityLog.chat_id == chat_id,
+                    ToxicityLog.created_at >= yesterday_start,
+                    ToxicityLog.created_at < yesterday_end
+                )
+            )
+            toxicity_row = toxicity_result.one()
+            toxicity_score = float(toxicity_row[0] or 0)
+            toxicity_incidents = toxicity_row[1] or 0
+            
+            # ===== NEW: Peak activity hour =====
+            peak_hour_result = await session.execute(
+                select(
+                    extract('hour', MessageLog.created_at).label('hour'),
+                    func.count(MessageLog.id).label('cnt')
+                ).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= yesterday_start,
+                    MessageLog.created_at < yesterday_end
+                ).group_by(
+                    extract('hour', MessageLog.created_at)
+                ).order_by(
+                    desc('cnt')
+                ).limit(1)
+            )
+            peak_row = peak_hour_result.first()
+            peak_hour = int(peak_row[0]) if peak_row else None
+            
+            # ===== NEW: Top chatters =====
+            top_chatters_result = await session.execute(
+                select(
+                    MessageLog.username,
+                    MessageLog.user_id,
+                    func.count(MessageLog.id).label('msg_count')
+                ).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= yesterday_start,
+                    MessageLog.created_at < yesterday_end
+                ).group_by(
+                    MessageLog.user_id, MessageLog.username
+                ).order_by(
+                    desc('msg_count')
+                ).limit(5)
+            )
+            top_chatters = [
+                {
+                    "username": row.username or f"User {row.user_id}",
+                    "user_id": row.user_id,
+                    "count": row.msg_count
+                }
+                for row in top_chatters_result.all()
+            ]
+            
+            # ===== NEW: Hot topics (extract from messages) =====
+            hot_topics = await self._extract_hot_topics(
+                chat_id, yesterday_start, yesterday_end, session
+            )
+            
             return DailySummary(
                 chat_id=chat_id,
                 date=yesterday_start,
@@ -435,7 +515,12 @@ class DailiesService:
                 active_users=active_users,
                 new_members=new_members,
                 moderation_actions=moderation_actions,
-                has_activity=True
+                has_activity=True,
+                toxicity_score=toxicity_score,
+                toxicity_incidents=toxicity_incidents,
+                hot_topics=hot_topics,
+                peak_hour=peak_hour,
+                top_chatters=top_chatters
             )
             
         except Exception as e:
@@ -445,6 +530,125 @@ class DailiesService:
         finally:
             if close_session:
                 await session.close()
+    
+    async def _extract_hot_topics(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        session: AsyncSession
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract hot topics from messages using keyword clustering.
+        
+        Finds the most discussed topics by analyzing message content
+        and returns them with links to representative messages.
+        
+        Args:
+            chat_id: Telegram chat ID
+            start_time: Start of time range
+            end_time: End of time range
+            session: Database session
+            
+        Returns:
+            List of hot topics with message links
+        """
+        from app.database.models import MessageLog
+        from collections import Counter
+        import re
+        
+        try:
+            # Get messages with text
+            messages_result = await session.execute(
+                select(MessageLog).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time,
+                    MessageLog.text.isnot(None)
+                ).order_by(MessageLog.created_at.desc()).limit(500)
+            )
+            messages = messages_result.scalars().all()
+            
+            if not messages:
+                return []
+            
+            # Extract keywords (words 4+ chars, excluding common words)
+            stop_words = {
+                'это', 'как', 'что', 'для', 'все', 'они', 'его', 'она', 'так',
+                'уже', 'или', 'если', 'есть', 'было', 'быть', 'был', 'была',
+                'были', 'будет', 'будут', 'очень', 'просто', 'можно', 'нужно',
+                'там', 'тут', 'здесь', 'когда', 'потом', 'тоже', 'только',
+                'ещё', 'еще', 'вот', 'чтобы', 'этот', 'этого', 'этом', 'этой',
+                'который', 'которая', 'которое', 'которые', 'него', 'неё',
+                'http', 'https', 'www', 'com', 'org', 'net'
+            }
+            
+            word_messages: Dict[str, List[MessageLog]] = {}
+            word_counts: Counter = Counter()
+            
+            for msg in messages:
+                if not msg.text:
+                    continue
+                # Extract words
+                words = re.findall(r'[а-яёa-z]{4,}', msg.text.lower())
+                seen_words = set()
+                for word in words:
+                    if word not in stop_words and word not in seen_words:
+                        seen_words.add(word)
+                        word_counts[word] += 1
+                        if word not in word_messages:
+                            word_messages[word] = []
+                        if len(word_messages[word]) < 3:
+                            word_messages[word].append(msg)
+            
+            # Get top 5 keywords as topics
+            hot_topics = []
+            for word, count in word_counts.most_common(5):
+                if count < 3:  # Skip topics mentioned less than 3 times
+                    continue
+                    
+                # Get representative message for link
+                representative_msg = word_messages[word][0] if word_messages[word] else None
+                
+                topic = {
+                    "keyword": word.capitalize(),
+                    "mentions": count,
+                    "message_id": representative_msg.message_id if representative_msg else None,
+                    "chat_id": chat_id
+                }
+                hot_topics.append(topic)
+            
+            return hot_topics
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract hot topics: {e}")
+            return []
+    
+    def _get_toxicity_emoji(self, score: float) -> str:
+        """Get toxicity thermometer emoji based on score."""
+        if score < 20:
+            return "🟢"  # Green - very chill
+        elif score < 40:
+            return "🟡"  # Yellow - mild
+        elif score < 60:
+            return "🟠"  # Orange - warming up
+        elif score < 80:
+            return "🔴"  # Red - hot
+        else:
+            return "🔥"  # Fire - toxic
+    
+    def _get_toxicity_label(self, score: float) -> str:
+        """Get toxicity label based on score."""
+        if score < 20:
+            return "Чилл 😎"
+        elif score < 40:
+            return "Спокойно"
+        elif score < 60:
+            return "Бурно"
+        elif score < 80:
+            return "Горячо 🌶️"
+        else:
+            return "Токсично ☢️"
     
     def should_skip_summary(self, summary: Optional[DailySummary]) -> bool:
         """
@@ -471,6 +675,8 @@ class DailiesService:
         Requirement 13.1: Send a #dailysummary message with a digest
         of yesterday's events.
         
+        Enhanced with toxicity thermometer, hot topics, and more stats.
+        
         Args:
             summary: DailySummary to format
             
@@ -482,15 +688,75 @@ class DailiesService:
         lines = [
             f"📊 #dailysummary за {date_str}",
             "",
+            "━━━━━━━━━━━━━━━━━━━━",
+            "📈 СТАТИСТИКА",
+            "━━━━━━━━━━━━━━━━━━━━",
             f"💬 Сообщений: {summary.message_count}",
-            f"👥 Активных пользователей: {summary.active_users}",
+            f"👥 Активных: {summary.active_users}",
         ]
         
+        if summary.peak_hour is not None:
+            lines.append(f"⏰ Пик активности: {summary.peak_hour}:00")
+        
         if summary.new_members > 0:
-            lines.append(f"🆕 Новых участников: {summary.new_members}")
+            lines.append(f"🆕 Новичков: {summary.new_members}")
         
         if summary.moderation_actions > 0:
-            lines.append(f"⚠️ Модерационных действий: {summary.moderation_actions}")
+            lines.append(f"⚠️ Модерация: {summary.moderation_actions}")
+        
+        # Toxicity thermometer
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append("🌡️ ТЕРМОМЕТР ТОКСИЧНОСТИ")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        
+        toxicity_emoji = self._get_toxicity_emoji(summary.toxicity_score)
+        toxicity_label = self._get_toxicity_label(summary.toxicity_score)
+        
+        # Visual thermometer bar
+        filled = int(summary.toxicity_score / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        
+        lines.append(f"{toxicity_emoji} [{bar}] {summary.toxicity_score:.0f}%")
+        lines.append(f"Вайб: {toxicity_label}")
+        
+        if summary.toxicity_incidents > 0:
+            lines.append(f"🚨 Инцидентов: {summary.toxicity_incidents}")
+        
+        # Top chatters
+        if summary.top_chatters:
+            lines.append("")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            lines.append("🏆 ТОП БОЛТУНОВ")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            for i, chatter in enumerate(summary.top_chatters[:5]):
+                medal = medals[i] if i < len(medals) else f"{i+1}."
+                lines.append(f"{medal} {chatter['username']}: {chatter['count']} сообщ.")
+        
+        # Hot topics with links
+        if summary.hot_topics:
+            lines.append("")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            lines.append("🔥 ГОРЯЧИЕ ТЕМЫ")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            for topic in summary.hot_topics[:5]:
+                keyword = topic['keyword']
+                mentions = topic['mentions']
+                msg_id = topic.get('message_id')
+                
+                if msg_id and summary.chat_id:
+                    # Create message link (works for supergroups)
+                    # Format: https://t.me/c/CHAT_ID/MESSAGE_ID
+                    # For supergroups, chat_id is negative, we need to remove -100 prefix
+                    chat_id_str = str(abs(summary.chat_id))
+                    if chat_id_str.startswith("100"):
+                        chat_id_str = chat_id_str[3:]
+                    link = f"https://t.me/c/{chat_id_str}/{msg_id}"
+                    # Make the keyword itself clickable
+                    lines.append(f'• <a href="{link}">{keyword}</a> ({mentions}x)')
+                else:
+                    lines.append(f"• {keyword} ({mentions}x)")
         
         lines.append("")
         lines.append("Хорошего дня! ☀️")

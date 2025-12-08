@@ -629,6 +629,7 @@ async def job_dailies_morning_summary(bot: Bot):
                         await bot.send_message(
                             chat_id=chat.id,
                             text=message,
+                            parse_mode="HTML",
                             disable_web_page_preview=True
                         )
                         await asyncio.sleep(0.5)  # Rate limiting
@@ -673,6 +674,7 @@ async def job_dailies_evening_quote_and_stats(bot: Bot):
                         await bot.send_message(
                             chat_id=chat.id,
                             text=message,
+                            parse_mode="HTML",
                             disable_web_page_preview=True
                         )
                         await asyncio.sleep(0.5)  # Rate limiting

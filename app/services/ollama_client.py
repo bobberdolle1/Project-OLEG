@@ -120,15 +120,29 @@ CORE_OLEG_PROMPT_TEMPLATE = """
 • Никакого канцелярита
 
 ═══════════════════════════════════════════════════════════════════════════════
-ДЛИНА ОТВЕТОВ — КРИТИЧЕСКИ ВАЖНО
+ДЛИНА ОТВЕТОВ — АДАПТИВНО
 ═══════════════════════════════════════════════════════════════════════════════
 
-• Максимум 1-3 коротких предложения
-• Пиши обрывисто, как в чате: короткие фразы по 2-5 слов
-• ЗАПРЕЩЕНО: списки, нумерация, структурированные ответы
+ОПРЕДЕЛИ ТИП ВОПРОСА И АДАПТИРУЙ ДЛИНУ:
+
+КОРОТКИЕ ОТВЕТЫ (1-3 предложения):
+• Простые вопросы: "какая видюха лучше?", "как консоль открыть?"
+• Подтверждения: "спасибо", "понял"
+• Флуд и приколы
+
+РАЗВЁРНУТЫЕ ОТВЕТЫ (столько, сколько нужно):
+• Технические вопросы с объяснением: "почему лагает?", "как настроить?"
+• Вопросы требующие контекста: "что выбрать между X и Y?"
+• Запросы на поиск информации: "расскажи про...", "что нового в...?"
+• Сравнения и обзоры
+• Когда пользователь явно просит подробности
+
+ОБЩИЕ ПРАВИЛА:
+• Говоришь как живой человек, не как бот
 • ЗАПРЕЩЕНО: "Рад помочь", "Надеюсь помог", "Если есть вопросы"
 • ЗАПРЕЩЕНО: пытаться сказать последнее слово, затягивать диалог
-• Если вопрос сложный — всё равно коротко, можно разбить на части
+• Можно использовать списки если это улучшает читаемость технического ответа
+• Если нашёл инфу в интернете — дай полезные детали, не обрезай
 
 ═══════════════════════════════════════════════════════════════════════════════
 ПАМЯТЬ И ПОИСК
@@ -414,9 +428,102 @@ async def _ollama_chat(
     return ""  # Fallback (не должно достичь этой строки)
 
 
+async def _execute_single_search(client: httpx.AsyncClient, query: str) -> list[dict]:
+    """
+    Выполняет один поисковый запрос к DuckDuckGo.
+    
+    Args:
+        client: HTTP клиент
+        query: Поисковый запрос
+        
+    Returns:
+        Список результатов [{title, snippet}]
+    """
+    search_url = "https://html.duckduckgo.com/html/"
+    
+    try:
+        response = await client.post(
+            search_url,
+            data={"q": query},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        response.raise_for_status()
+        
+        html = response.text
+        results = []
+        
+        import re
+        snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)<', html)
+        titles = re.findall(r'class="result__a"[^>]*>([^<]+)<', html)
+        
+        for title, snippet in zip(titles[:7], snippets[:7]):
+            title = title.replace("&amp;", "&").replace("&quot;", '"').strip()
+            snippet = snippet.replace("&amp;", "&").replace("&quot;", '"').strip()
+            if title and snippet:
+                results.append({"title": title, "snippet": snippet})
+        
+        return results
+    except Exception as e:
+        logger.warning(f"Ошибка поиска для '{query}': {e}")
+        return []
+
+
+def _generate_search_variations(query: str) -> list[str]:
+    """
+    Генерирует вариации поискового запроса для лучшего покрытия.
+    
+    Args:
+        query: Исходный запрос
+        
+    Returns:
+        Список вариаций запроса (включая оригинал)
+    """
+    variations = [query]
+    
+    query_lower = query.lower()
+    
+    # Добавляем английскую версию для технических запросов
+    tech_translations = {
+        "видеокарта": "GPU graphics card",
+        "процессор": "CPU processor",
+        "оперативка": "RAM memory",
+        "материнка": "motherboard",
+        "блок питания": "PSU power supply",
+        "охлаждение": "cooling",
+        "разгон": "overclocking",
+        "драйвер": "driver",
+        "обновление": "update",
+        "характеристики": "specs specifications",
+        "цена": "price",
+        "купить": "buy",
+        "сравнение": "comparison vs",
+        "обзор": "review",
+        "проблема": "problem issue fix",
+        "ошибка": "error fix solution",
+        "не работает": "not working fix",
+        "как настроить": "how to setup configure",
+    }
+    
+    for ru_term, en_term in tech_translations.items():
+        if ru_term in query_lower:
+            # Добавляем вариацию с английским термином
+            variations.append(f"{query} {en_term}")
+            break
+    
+    # Добавляем "2024" или "2025" для актуальности если нет года
+    if not any(year in query for year in ["2023", "2024", "2025"]):
+        variations.append(f"{query} 2024")
+    
+    # Для вопросов "что лучше" добавляем "сравнение"
+    if "лучше" in query_lower or "выбрать" in query_lower:
+        variations.append(f"{query} сравнение обзор")
+    
+    return variations[:3]  # Максимум 3 запроса
+
+
 async def _execute_web_search(query: str) -> str:
     """
-    Выполняет веб-поиск через DuckDuckGo (бесплатный, без API ключа).
+    Выполняет веб-поиск через DuckDuckGo с несколькими запросами для лучшего покрытия.
     
     Args:
         query: Поисковый запрос
@@ -425,37 +532,36 @@ async def _execute_web_search(query: str) -> str:
         Результаты поиска в текстовом формате
     """
     try:
-        # Используем DuckDuckGo HTML API (не требует ключа)
-        search_url = "https://html.duckduckgo.com/html/"
+        search_variations = _generate_search_variations(query)
+        all_results = []
+        seen_titles = set()
         
         async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.post(
-                search_url,
-                data={"q": query},
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            )
-            response.raise_for_status()
+            # Выполняем все запросы параллельно
+            tasks = [_execute_single_search(client, q) for q in search_variations]
+            search_results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Парсим результаты из HTML
-            html = response.text
-            results = []
+            for i, results in enumerate(search_results):
+                if isinstance(results, Exception):
+                    logger.warning(f"Поиск #{i+1} завершился с ошибкой: {results}")
+                    continue
+                    
+                for result in results:
+                    # Дедупликация по заголовку
+                    title_key = result["title"].lower()[:50]
+                    if title_key not in seen_titles:
+                        seen_titles.add(title_key)
+                        all_results.append(result)
+        
+        if all_results:
+            # Берём топ-10 уникальных результатов
+            formatted = []
+            for i, r in enumerate(all_results[:10], 1):
+                formatted.append(f"{i}. {r['title']}\n   {r['snippet']}")
             
-            # Простой парсинг результатов DuckDuckGo
-            import re
-            # Ищем заголовки и сниппеты
-            snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)<', html)
-            titles = re.findall(r'class="result__a"[^>]*>([^<]+)<', html)
-            
-            for i, (title, snippet) in enumerate(zip(titles[:5], snippets[:5])):
-                # Очищаем от HTML entities
-                title = title.replace("&amp;", "&").replace("&quot;", '"').strip()
-                snippet = snippet.replace("&amp;", "&").replace("&quot;", '"').strip()
-                results.append(f"{i+1}. {title}\n   {snippet}")
-            
-            if results:
-                return "Результаты поиска:\n" + "\n\n".join(results)
-            else:
-                return "Поиск не дал результатов"
+            return f"Результаты поиска (запросы: {', '.join(search_variations)}):\n" + "\n\n".join(formatted)
+        else:
+            return "Поиск не дал результатов"
                 
     except Exception as e:
         logger.warning(f"Ошибка веб-поиска: {e}")

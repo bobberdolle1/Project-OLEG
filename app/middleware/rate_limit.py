@@ -1,6 +1,7 @@
 """Rate limiting middleware to prevent spam and abuse."""
 
 import logging
+import re
 import time
 from typing import Callable, Awaitable, Dict, Any
 from collections import defaultdict, deque
@@ -10,6 +11,56 @@ from aiogram.types import Message
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def is_direct_bot_request(event: Message) -> bool:
+    """
+    Проверяет, является ли сообщение прямым обращением к боту.
+    
+    Rate limit применяется только для прямых обращений:
+    - Команды (начинаются с /)
+    - Упоминание бота (@botname)
+    - Упоминание "олег" в тексте
+    - Реплай на сообщение бота
+    - Личные сообщения
+    
+    Для рандомных ответов и ответов на вопросы (когда бот сам решает ответить)
+    rate limit НЕ применяется.
+    """
+    # Личные сообщения — всегда прямое обращение
+    if event.chat.type == "private":
+        return True
+    
+    text = event.text or ""
+    
+    # Команды — прямое обращение
+    if text.startswith('/'):
+        return True
+    
+    # Реплай на сообщение бота — прямое обращение
+    if event.reply_to_message:
+        if (
+            event.reply_to_message.from_user
+            and event.reply_to_message.from_user.id == event.bot.id
+        ):
+            return True
+    
+    # Упоминание бота через @ — прямое обращение
+    if event.entities and text and event.bot._me:
+        bot_username = event.bot._me.username
+        if bot_username and ("@" + bot_username) in text:
+            return True
+    
+    # Упоминание "олег" в тексте — прямое обращение
+    text_lower = text.lower()
+    oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
+    for trigger in oleg_triggers:
+        if re.search(rf'\b{trigger}\b', text_lower):
+            return True
+    
+    # Всё остальное (вопросы с ?, рандомные ответы) — НЕ прямое обращение
+    # Бот сам решает отвечать, пользователь не спамит
+    return False
 
 
 class RateLimiter:
@@ -159,6 +210,11 @@ class RateLimitMiddleware(BaseMiddleware):
         
         # Skip rate limiting for bot owner
         if settings.owner_id and user_id == settings.owner_id:
+            return await handler(event, data)
+        
+        # Skip rate limiting for non-direct requests (random responses, questions)
+        # Rate limit only applies when user explicitly addresses the bot
+        if not is_direct_bot_request(event):
             return await handler(event, data)
         
         # Check rate limit

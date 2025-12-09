@@ -648,112 +648,33 @@ async def _send_text_profile(msg: Message, user, game_stat, wallet, league, elo,
 
 @router.message(F.text.startswith("/pvp"))
 async def cmd_pvp(msg: Message):
-    async_session = get_session()
-    await ensure_user(msg.from_user)
-    # Identify opponent: reply user preferred
-    opponent_id = None
-    opponent_name = None
-    if msg.reply_to_message and msg.reply_to_message.from_user:
-        opponent_id = msg.reply_to_message.from_user.id
-        opponent_name = msg.reply_to_message.from_user.username or str(opponent_id)
-    else:
-        parts = (msg.text or "").split()
-        if len(parts) >= 2 and parts[1].startswith("@"):
-            opponent_name = parts[1][1:]
-    if not opponent_id and not opponent_name:
-        return await msg.reply("Кого бить-то? Ответь реплаем на сообщение соперника или укажи @ник.")
-    async with async_session() as session:
-        # load attacker and opponent stats
-        res_att = await session.execute(select(GameStat).where(GameStat.tg_user_id == msg.from_user.id))
-        att = res_att.scalars().first()
-        if not att:
-            return await msg.reply("Ты пустой. Сначала /grow, потом разборки.")
-        if not opponent_id and opponent_name:
-            # find by username in GameStat
-            res_op_user = await session.execute(select(GameStat).where(GameStat.username == opponent_name))
-            opp = res_op_user.scalars().first()
-        else:
-            res_op = await session.execute(select(GameStat).where(GameStat.tg_user_id == opponent_id))
-            opp = res_op.scalars().first()
-        if not opp:
-            return await msg.reply("Соперник не найден или ещё не играл. Позови его в /grow.")
-        # compute duel
-        a_score = att.size_cm + random.randint(-5, 5)
-        o_score = opp.size_cm + random.randint(-5, 5)
-        if a_score == o_score:
-            # tie breaker
-            a_score += random.randint(0, 1)
-        if a_score > o_score:
-            winner, loser = att, opp
-            winner_name = msg.from_user.username or str(att.tg_user_id)
-            loser_name = opp.username or str(opp.tg_user_id)
-        else:
-            winner, loser = opp, att
-            winner_name = opp.username or str(opp.tg_user_id)
-            loser_name = msg.from_user.username or str(att.tg_user_id)
-        steal_pct = random.randint(10, 30)
-        steal_amt = max(1, (loser.size_cm * steal_pct) // 100)
-        loser.size_cm = max(0, loser.size_cm - steal_amt)
-        winner.size_cm += steal_amt
-        # Increment pvp_wins for the winner
-        winner.pvp_wins += 1
-        winner.reputation += 5
-        loser.reputation -= 2
-        await session.commit()
-        
-        # Get the User object for the winner
-        winner_user_res = await session.execute(select(User).where(User.id == winner.user_id))
-        winner_user = winner_user_res.scalars().first()
-
-        new_achievements = await check_and_award_achievements(session, msg.bot, winner_user, winner, "pvp_win")
-        for achievement in new_achievements:
-            await msg.answer(f"🎉 Новое достижение для {winner_user.username or str(winner_user.tg_user_id)}: {achievement.name}!")
-        
-        updated_quests = await check_and_update_quests(session, winner_user, "pvp_win")
-        for quest in updated_quests:
-            await msg.answer(f"✅ {winner_user.username or str(winner_user.tg_user_id)} выполнил квест: {quest.name}! Награда: {quest.reward_amount} {quest.reward_type}!")
-
-        # Update tournament score for PvP win (Requirement 10.1)
-        try:
-            await tournament_service.update_score(
-                user_id=winner.tg_user_id,
-                discipline=TournamentDiscipline.PVP,
-                delta=1,  # 1 point per win
-                username=winner_name
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update tournament score: {e}")
-
-        # Update ELO ratings after PvP match (Requirement 11.6)
-        try:
-            winner_status, loser_status = await league_service.update_elo(
-                winner_id=winner.tg_user_id,
-                loser_id=loser.tg_user_id,
-                session=session
-            )
-            
-            # Update GameStat ELO fields for consistency
-            winner.elo_rating = winner_status.elo
-            winner.league = winner_status.league.name.lower()
-            loser.elo_rating = loser_status.elo
-            loser.league = loser_status.league.name.lower()
-            await session.commit()
-            
-            # Format ELO change info
-            elo_info = (
-                f"\n📊 ELO: {winner_name} +{winner_status.elo - (winner_status.elo - 16)} → {winner_status.elo} "
-                f"| {loser_name} {loser_status.elo - (loser_status.elo + 16)} → {loser_status.elo}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update ELO: {e}")
-            elo_info = ""
-        
-        await msg.reply(
-            f"⚔️ Дуэль: {winner_name} vs {loser_name}\n"
-            f"🏆 Победил {winner_name} и забрал {steal_amt} см ({steal_pct}%){elo_info}\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"📋 /grow · /top · /casino · /profile"
-        )
+    """
+    Redirect /pvp to /challenge for proper consent-based PvP.
+    
+    Old /pvp worked without opponent consent which was unfair.
+    Now redirects to /challenge which requires acceptance.
+    """
+    # Parse arguments to pass to challenge
+    parts = (msg.text or "").split()
+    
+    # Build help message
+    help_text = (
+        "⚔️ <b>PvP Дуэли</b>\n\n"
+        "Используй /challenge для честных дуэлей:\n\n"
+        "• <code>/challenge @username</code> — вызов игрока (ждёт согласия)\n"
+        "• <code>/challenge @username 100</code> — вызов со ставкой\n"
+        "• <code>/challenge</code> — бой с Олегом (ИИ)\n\n"
+        "Соперник должен принять вызов кнопкой ✅\n"
+        "Таймаут: 5 минут"
+    )
+    
+    # If user specified opponent, suggest the command
+    if len(parts) >= 2:
+        opponent = parts[1]
+        bet = parts[2] if len(parts) >= 3 else ""
+        help_text += f"\n\n💡 Попробуй: <code>/challenge {opponent} {bet}</code>"
+    
+    await msg.reply(help_text, parse_mode="HTML")
 
 
 SLOTS = ["🍒", "🍋", "🔧", "🧰", "🎮", "🔥"]

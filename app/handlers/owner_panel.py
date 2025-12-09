@@ -673,6 +673,7 @@ async def cb_owner_emergency(callback: CallbackQuery):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔴 Выключить все функции", callback_data="owner_em_disable_all")
     kb.button(text="🟢 Включить все функции", callback_data="owner_em_enable_all")
+    kb.button(text="🗑 ВАЙП ПАМЯТИ И БД", callback_data="owner_wipe_confirm")
     kb.button(text="🔄 Перезапуск бота", callback_data="owner_em_restart")
     kb.button(text="🔙 Назад", callback_data="owner_main")
     kb.adjust(1)
@@ -770,6 +771,151 @@ async def cb_owner_restart_confirm(callback: CallbackQuery):
     
     import sys
     sys.exit(0)
+
+
+# ============================================================================
+# ВАЙП ПАМЯТИ И БАЗЫ ДАННЫХ
+# ============================================================================
+
+@router.callback_query(F.data == "owner_wipe_confirm")
+async def cb_owner_wipe_confirm(callback: CallbackQuery):
+    """Подтверждение вайпа."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ ДА, УДАЛИТЬ ВСЁ", callback_data="owner_wipe_execute")
+    kb.button(text="❌ Отмена", callback_data="owner_emergency")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🗑 <b>ВАЙП ПАМЯТИ И БАЗЫ ДАННЫХ</b>\n\n"
+        "⚠️ <b>ВНИМАНИЕ!</b> Это действие:\n"
+        "• Удалит ВСЮ память бота (ChromaDB)\n"
+        "• Очистит ВСЕ таблицы базы данных\n"
+        "• Удалит всех пользователей, чаты, статистику\n"
+        "• Удалит все цитаты, достижения, квесты\n\n"
+        "❗ <b>ЭТО ДЕЙСТВИЕ НЕОБРАТИМО!</b>\n\n"
+        "Ты уверен?",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_execute")
+async def cb_owner_wipe_execute(callback: CallbackQuery):
+    """Выполнение вайпа."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await callback.message.edit_text("🗑 <b>Выполняется вайп...</b>\n\n⏳ Подождите...")
+    
+    results = []
+    
+    # 1. Очистка ChromaDB (память)
+    try:
+        from app.services.vector_db import vector_db
+        if vector_db.client:
+            # Получаем все коллекции и удаляем их
+            collections = vector_db.client.list_collections()
+            for col in collections:
+                vector_db.client.delete_collection(col.name)
+            results.append(f"✅ ChromaDB: удалено {len(collections)} коллекций")
+        else:
+            results.append("⚠️ ChromaDB: не инициализирована")
+    except Exception as e:
+        results.append(f"❌ ChromaDB: {str(e)[:50]}")
+    
+    # 2. Очистка базы данных
+    try:
+        from app.database.session import get_session
+        from app.database.models import (
+            User, MessageLog, GameStat, Wallet, Achievement, UserAchievement,
+            TradeOffer, Auction, Bid, Quest, UserQuest, Guild, GuildMember,
+            TeamWar, TeamWarParticipant, DuoTeam, DuoStat, GlobalStats,
+            UserQuestionHistory, SpamPattern, Warning, ToxicityConfig, ToxicityLog,
+            Quote, ModerationConfig, Chat, Admin, Blacklist, PrivateChat,
+            PendingVerification, GameChallenge, UserBalance, CitadelConfig,
+            UserReputation, ReputationHistory, Tournament, TournamentScore,
+            UserElo, NotificationConfig, StickerPack
+        )
+        from sqlalchemy import delete
+        
+        async with get_session()() as session:
+            # Порядок важен из-за foreign keys
+            tables_to_clear = [
+                (TournamentScore, "TournamentScore"),
+                (Tournament, "Tournament"),
+                (ReputationHistory, "ReputationHistory"),
+                (UserReputation, "UserReputation"),
+                (NotificationConfig, "NotificationConfig"),
+                (CitadelConfig, "CitadelConfig"),
+                (UserBalance, "UserBalance"),
+                (GameChallenge, "GameChallenge"),
+                (PendingVerification, "PendingVerification"),
+                (PrivateChat, "PrivateChat"),
+                (Blacklist, "Blacklist"),
+                (Admin, "Admin"),
+                (ModerationConfig, "ModerationConfig"),
+                (Quote, "Quote"),
+                (ToxicityLog, "ToxicityLog"),
+                (ToxicityConfig, "ToxicityConfig"),
+                (Warning, "Warning"),
+                (SpamPattern, "SpamPattern"),
+                (UserQuestionHistory, "UserQuestionHistory"),
+                (GlobalStats, "GlobalStats"),
+                (DuoStat, "DuoStat"),
+                (DuoTeam, "DuoTeam"),
+                (TeamWarParticipant, "TeamWarParticipant"),
+                (TeamWar, "TeamWar"),
+                (GuildMember, "GuildMember"),
+                (Guild, "Guild"),
+                (UserQuest, "UserQuest"),
+                (Quest, "Quest"),
+                (Bid, "Bid"),
+                (Auction, "Auction"),
+                (TradeOffer, "TradeOffer"),
+                (UserAchievement, "UserAchievement"),
+                (Achievement, "Achievement"),
+                (Wallet, "Wallet"),
+                (GameStat, "GameStat"),
+                (MessageLog, "MessageLog"),
+                (StickerPack, "StickerPack"),
+                (Chat, "Chat"),
+                (User, "User"),
+                (UserElo, "UserElo"),
+            ]
+            
+            deleted_count = 0
+            for model, name in tables_to_clear:
+                try:
+                    result = await session.execute(delete(model))
+                    deleted_count += result.rowcount
+                except Exception as e:
+                    logger.warning(f"Ошибка при очистке {name}: {e}")
+            
+            await session.commit()
+            results.append(f"✅ База данных: очищено {len(tables_to_clear)} таблиц")
+            
+    except Exception as e:
+        results.append(f"❌ База данных: {str(e)[:50]}")
+        logger.error(f"Ошибка при вайпе БД: {e}")
+    
+    logger.warning(f"WIPE executed by owner {callback.from_user.id}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    
+    await callback.message.edit_text(
+        "🗑 <b>ВАЙП ЗАВЕРШЁН</b>\n\n"
+        "<b>Результаты:</b>\n" +
+        "\n".join(results) +
+        "\n\n✅ Бот готов к работе с чистого листа!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Вайп выполнен!", show_alert=True)
 
 
 # ============================================================================

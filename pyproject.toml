@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.13"
+python = "^3.10"
 aiogram = "*"
 python-dotenv = "*"
 SQLAlchemy = "*"
@@ -61,7 +61,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.black]
 line-length = 100
 target-version = ['py311', 'py312', 'py313']
-include = '\.pyi?$'$'
+include = '\.pyi?$'
 
 [tool.isort]
 profile = "black"

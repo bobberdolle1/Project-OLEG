@@ -781,3 +781,65 @@ class GameHistory(Base):
     won: Mapped[bool] = mapped_column(Boolean, default=False)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON with game-specific details
     played_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
+
+
+# ============================================================================
+# INVENTORY & FISHING SYSTEM v7.5.1
+# ============================================================================
+
+
+class UserInventory(Base):
+    """
+    User inventory for items from lootboxes and shop.
+    
+    Stores items like fishing rods, lucky charms, shields, etc.
+    """
+    __tablename__ = "user_inventory"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    item_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    item_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    equipped: Mapped[bool] = mapped_column(Boolean, default=False)
+    metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON for item-specific data
+    acquired_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', 'item_type', name='uq_user_chat_item'),
+    )
+
+
+class FishingStats(Base):
+    """
+    Fishing statistics per user.
+    
+    Tracks fish caught by rarity, total earnings, equipped rod, etc.
+    """
+    __tablename__ = "fishing_stats"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    
+    # Fish caught by rarity
+    trash_caught: Mapped[int] = mapped_column(Integer, default=0)
+    common_caught: Mapped[int] = mapped_column(Integer, default=0)
+    uncommon_caught: Mapped[int] = mapped_column(Integer, default=0)
+    rare_caught: Mapped[int] = mapped_column(Integer, default=0)
+    epic_caught: Mapped[int] = mapped_column(Integer, default=0)
+    legendary_caught: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Totals
+    total_casts: Mapped[int] = mapped_column(Integer, default=0)
+    total_earnings: Mapped[int] = mapped_column(Integer, default=0)
+    biggest_catch_value: Mapped[int] = mapped_column(Integer, default=0)
+    biggest_catch_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    
+    # Equipped rod (item_type from inventory)
+    equipped_rod: Mapped[str] = mapped_column(String(64), default="basic_rod")
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_fishing'),
+    )

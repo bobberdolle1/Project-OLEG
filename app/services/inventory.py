@@ -1,0 +1,357 @@
+"""Inventory Service - Manages user items from lootboxes and shop.
+
+v7.5.1 - Full inventory system with item effects.
+"""
+
+import logging
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, List, Dict, Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.session import get_session
+from app.database.models import UserInventory
+
+logger = logging.getLogger(__name__)
+
+
+class ItemType(str, Enum):
+    """Item types available in the game."""
+    # Fishing rods
+    BASIC_ROD = "basic_rod"
+    SILVER_ROD = "silver_rod"
+    GOLDEN_ROD = "golden_rod"
+    LEGENDARY_ROD = "legendary_rod"
+    
+    # Consumables
+    LUCKY_CHARM = "lucky_charm"
+    ENERGY_DRINK = "energy_drink"
+    
+    # Protection
+    SHIELD = "shield"
+    
+    # Status
+    VIP_STATUS = "vip_status"
+
+
+@dataclass
+class ItemInfo:
+    """Information about an item type."""
+    item_type: str
+    name: str
+    emoji: str
+    description: str
+    price: int  # Shop price (0 = not buyable)
+    effect: Dict[str, Any]  # Item effects
+    stackable: bool = True
+    max_stack: int = 99
+
+
+# Item catalog with all available items
+ITEM_CATALOG: Dict[str, ItemInfo] = {
+    # Fishing Rods (equippable, not stackable)
+    ItemType.BASIC_ROD: ItemInfo(
+        item_type=ItemType.BASIC_ROD,
+        name="Базовая удочка",
+        emoji="🎣",
+        description="Стандартная удочка для начинающих рыбаков.",
+        price=0,  # Free starter
+        effect={"rod_bonus": 0.0},
+        stackable=False,
+    ),
+    ItemType.SILVER_ROD: ItemInfo(
+        item_type=ItemType.SILVER_ROD,
+        name="Серебряная удочка",
+        emoji="🥈",
+        description="Улучшенная удочка. +10% к редким рыбам.",
+        price=500,
+        effect={"rod_bonus": 0.1},
+        stackable=False,
+    ),
+    ItemType.GOLDEN_ROD: ItemInfo(
+        item_type=ItemType.GOLDEN_ROD,
+        name="Золотая удочка",
+        emoji="🥇",
+        description="Премиум удочка. +25% к редким рыбам.",
+        price=2000,
+        effect={"rod_bonus": 0.25},
+        stackable=False,
+    ),
+    ItemType.LEGENDARY_ROD: ItemInfo(
+        item_type=ItemType.LEGENDARY_ROD,
+        name="Легендарная удочка",
+        emoji="👑",
+        description="Легендарная удочка мастера. +50% к редким рыбам!",
+        price=10000,
+        effect={"rod_bonus": 0.5},
+        stackable=False,
+    ),
+    
+    # Consumables
+    ItemType.LUCKY_CHARM: ItemInfo(
+        item_type=ItemType.LUCKY_CHARM,
+        name="Талисман удачи",
+        emoji="🍀",
+        description="Увеличивает шанс выигрыша на 10% в следующей игре.",
+        price=100,
+        effect={"luck_bonus": 0.1, "uses": 1},
+        stackable=True,
+    ),
+    ItemType.ENERGY_DRINK: ItemInfo(
+        item_type=ItemType.ENERGY_DRINK,
+        name="Энергетик",
+        emoji="🥤",
+        description="Сбрасывает кулдаун рыбалки.",
+        price=50,
+        effect={"reset_fishing_cooldown": True, "uses": 1},
+        stackable=True,
+    ),
+    
+    # Protection
+    ItemType.SHIELD: ItemInfo(
+        item_type=ItemType.SHIELD,
+        name="Щит",
+        emoji="🛡️",
+        description="Защищает от потери монет в следующей проигрышной игре.",
+        price=200,
+        effect={"loss_protection": True, "uses": 1},
+        stackable=True,
+    ),
+    
+    # Status
+    ItemType.VIP_STATUS: ItemInfo(
+        item_type=ItemType.VIP_STATUS,
+        name="VIP статус",
+        emoji="👑",
+        description="VIP статус на 24 часа. +20% к выигрышам.",
+        price=1000,
+        effect={"win_bonus": 0.2, "duration_hours": 24},
+        stackable=True,
+    ),
+}
+
+
+@dataclass
+class InventoryResult:
+    """Result of inventory operation."""
+    success: bool
+    message: str
+    item: Optional[ItemInfo] = None
+    quantity: int = 0
+
+
+class InventoryService:
+    """Service for managing user inventory."""
+    
+    async def get_inventory(self, user_id: int, chat_id: int) -> List[UserInventory]:
+        """Get all items in user's inventory."""
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id
+                )
+            )
+            return list(result.scalars().all())
+    
+    async def get_item(self, user_id: int, chat_id: int, item_type: str) -> Optional[UserInventory]:
+        """Get specific item from inventory."""
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type
+                )
+            )
+            return result.scalars().first()
+    
+    async def add_item(
+        self, user_id: int, chat_id: int, item_type: str, quantity: int = 1
+    ) -> InventoryResult:
+        """Add item to user's inventory."""
+        if item_type not in ITEM_CATALOG:
+            return InventoryResult(False, f"Неизвестный предмет: {item_type}")
+        
+        item_info = ITEM_CATALOG[item_type]
+        
+        async_session = get_session()
+        async with async_session() as session:
+            # Check if item already exists
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type
+                )
+            )
+            existing = result.scalars().first()
+            
+            if existing:
+                if item_info.stackable:
+                    existing.quantity = min(existing.quantity + quantity, item_info.max_stack)
+                    await session.commit()
+                    return InventoryResult(
+                        True, 
+                        f"Добавлено {item_info.emoji} {item_info.name} x{quantity}",
+                        item_info,
+                        existing.quantity
+                    )
+                else:
+                    return InventoryResult(
+                        False, 
+                        f"У тебя уже есть {item_info.emoji} {item_info.name}",
+                        item_info,
+                        1
+                    )
+            else:
+                new_item = UserInventory(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    item_type=item_type,
+                    item_name=item_info.name,
+                    quantity=quantity,
+                    equipped=False
+                )
+                session.add(new_item)
+                await session.commit()
+                return InventoryResult(
+                    True,
+                    f"Получен {item_info.emoji} {item_info.name}!",
+                    item_info,
+                    quantity
+                )
+    
+    async def remove_item(
+        self, user_id: int, chat_id: int, item_type: str, quantity: int = 1
+    ) -> InventoryResult:
+        """Remove item from inventory."""
+        if item_type not in ITEM_CATALOG:
+            return InventoryResult(False, f"Неизвестный предмет: {item_type}")
+        
+        item_info = ITEM_CATALOG[item_type]
+        
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type
+                )
+            )
+            existing = result.scalars().first()
+            
+            if not existing or existing.quantity < quantity:
+                return InventoryResult(
+                    False,
+                    f"Недостаточно {item_info.emoji} {item_info.name}",
+                    item_info,
+                    existing.quantity if existing else 0
+                )
+            
+            existing.quantity -= quantity
+            if existing.quantity <= 0:
+                await session.delete(existing)
+            
+            await session.commit()
+            return InventoryResult(
+                True,
+                f"Использован {item_info.emoji} {item_info.name}",
+                item_info,
+                max(0, existing.quantity - quantity)
+            )
+    
+    async def equip_item(
+        self, user_id: int, chat_id: int, item_type: str
+    ) -> InventoryResult:
+        """Equip an item (for rods, etc.)."""
+        if item_type not in ITEM_CATALOG:
+            return InventoryResult(False, f"Неизвестный предмет: {item_type}")
+        
+        item_info = ITEM_CATALOG[item_type]
+        
+        async_session = get_session()
+        async with async_session() as session:
+            # Check if user has the item
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type
+                )
+            )
+            item = result.scalars().first()
+            
+            if not item:
+                return InventoryResult(False, f"У тебя нет {item_info.emoji} {item_info.name}")
+            
+            # Unequip all items of same category (e.g., all rods)
+            if item_type.endswith("_rod"):
+                rod_types = [ItemType.BASIC_ROD, ItemType.SILVER_ROD, 
+                            ItemType.GOLDEN_ROD, ItemType.LEGENDARY_ROD]
+                for rod in rod_types:
+                    res = await session.execute(
+                        select(UserInventory).where(
+                            UserInventory.user_id == user_id,
+                            UserInventory.chat_id == chat_id,
+                            UserInventory.item_type == rod
+                        )
+                    )
+                    rod_item = res.scalars().first()
+                    if rod_item:
+                        rod_item.equipped = False
+            
+            item.equipped = True
+            await session.commit()
+            
+            return InventoryResult(
+                True,
+                f"Экипирован {item_info.emoji} {item_info.name}!",
+                item_info,
+                item.quantity
+            )
+    
+    async def get_equipped_rod(self, user_id: int, chat_id: int) -> ItemInfo:
+        """Get currently equipped fishing rod."""
+        async_session = get_session()
+        async with async_session() as session:
+            rod_types = [ItemType.LEGENDARY_ROD, ItemType.GOLDEN_ROD, 
+                        ItemType.SILVER_ROD, ItemType.BASIC_ROD]
+            
+            for rod_type in rod_types:
+                result = await session.execute(
+                    select(UserInventory).where(
+                        UserInventory.user_id == user_id,
+                        UserInventory.chat_id == chat_id,
+                        UserInventory.item_type == rod_type,
+                        UserInventory.equipped == True
+                    )
+                )
+                rod = result.scalars().first()
+                if rod:
+                    return ITEM_CATALOG[rod_type]
+        
+        # Default to basic rod
+        return ITEM_CATALOG[ItemType.BASIC_ROD]
+    
+    async def has_item(self, user_id: int, chat_id: int, item_type: str) -> bool:
+        """Check if user has an item."""
+        item = await self.get_item(user_id, chat_id, item_type)
+        return item is not None and item.quantity > 0
+    
+    def get_item_info(self, item_type: str) -> Optional[ItemInfo]:
+        """Get item info from catalog."""
+        return ITEM_CATALOG.get(item_type)
+    
+    def get_shop_items(self) -> List[ItemInfo]:
+        """Get all items available in shop."""
+        return [item for item in ITEM_CATALOG.values() if item.price > 0]
+
+
+# Global instance
+inventory_service = InventoryService()

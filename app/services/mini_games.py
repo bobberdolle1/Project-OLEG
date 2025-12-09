@@ -111,6 +111,11 @@ class FishingGame:
         self._random = random_func or random.random
         self._cooldowns: Dict[int, datetime] = {}
     
+    def reset_cooldown(self, user_id: int) -> None:
+        """Reset fishing cooldown for user (used by energy drink)."""
+        if user_id in self._cooldowns:
+            del self._cooldowns[user_id]
+    
     def _select_rarity(self, rod_bonus: float = 0.0) -> FishRarity:
         """Select fish rarity based on probabilities."""
         roll = self._random()
@@ -318,7 +323,15 @@ class DiceGame:
         return " ".join(emojis) + f" = {sum(rolls)}"
     
     def play_vs_bot(self, user_id: int, bet: int) -> DiceResult:
-        """Play dice against the bot."""
+        """Play dice against the bot.
+        
+        Returns winnings as net change to balance:
+        - Win: +bet (profit)
+        - Lose: -bet (loss)
+        - Draw: 0 (no change)
+        
+        Handler should deduct bet first, then apply winnings.
+        """
         if bet <= 0:
             return DiceResult(False, "Ставка должна быть положительной", error_code="INVALID_BET")
         
@@ -331,21 +344,24 @@ class DiceGame:
         bot_str = self._format_roll(bot_rolls)
         
         if player_total > bot_total:
-            winnings = bet
+            # Win: get bet back + profit (total 2x bet)
+            winnings = bet * 2  # Return bet + win bet
             msg = (f"🎲 Твой бросок: {player_str}\n"
                    f"🤖 Бот: {bot_str}\n\n"
-                   f"🎉 Победа! +{winnings} монет")
+                   f"🎉 Победа! +{bet} монет")
             return DiceResult(True, msg, player_total, bot_total, True, winnings)
         elif player_total < bot_total:
+            # Lose: lose bet
             msg = (f"🎲 Твой бросок: {player_str}\n"
                    f"🤖 Бот: {bot_str}\n\n"
                    f"😢 Проигрыш. -{bet} монет")
-            return DiceResult(True, msg, player_total, bot_total, False, -bet)
+            return DiceResult(True, msg, player_total, bot_total, False, 0)
         else:
+            # Draw: get bet back
             msg = (f"🎲 Твой бросок: {player_str}\n"
                    f"🤖 Бот: {bot_str}\n\n"
                    f"🤝 Ничья! Ставка возвращена.")
-            return DiceResult(True, msg, player_total, bot_total, False, 0)
+            return DiceResult(True, msg, player_total, bot_total, False, bet)
 
 
 # ============================================================================
@@ -493,7 +509,13 @@ class WarGame:
         return Card(suit, rank, value)
     
     def play(self, user_id: int, bet: int) -> WarResult:
-        """Play a round of war."""
+        """Play a round of war.
+        
+        Returns winnings to add after bet is deducted:
+        - Win: bet * 2 (get bet back + profit)
+        - Lose: 0 (bet already lost)
+        - Draw: bet (get bet back)
+        """
         if bet <= 0:
             return WarResult(False, "Ставка должна быть положительной", error_code="INVALID_BET")
         
@@ -501,22 +523,22 @@ class WarGame:
         bot_card = self._draw_card()
         
         if player_card.value > bot_card.value:
-            winnings = bet
+            winnings = bet * 2  # Return bet + win bet
             msg = (f"🃏 Твоя карта: {player_card}\n"
                    f"🤖 Карта бота: {bot_card}\n\n"
-                   f"🎉 Победа! +{winnings} монет")
+                   f"🎉 Победа! +{bet} монет")
             return WarResult(True, msg, player_card, bot_card, True, False, winnings)
         elif player_card.value < bot_card.value:
             msg = (f"🃏 Твоя карта: {player_card}\n"
                    f"🤖 Карта бота: {bot_card}\n\n"
                    f"😢 Проигрыш. -{bet} монет")
-            return WarResult(True, msg, player_card, bot_card, False, False, -bet)
+            return WarResult(True, msg, player_card, bot_card, False, False, 0)
         else:
-            # War! Double or nothing
+            # War! Draw - return bet
             msg = (f"🃏 Твоя карта: {player_card}\n"
                    f"🤖 Карта бота: {bot_card}\n\n"
                    f"⚔️ ВОЙНА! Ничья — ставка возвращена.")
-            return WarResult(True, msg, player_card, bot_card, False, True, 0)
+            return WarResult(True, msg, player_card, bot_card, False, True, bet)
 
 
 # ============================================================================
@@ -561,7 +583,15 @@ class WheelGame:
         self._random = random_func or random.random
     
     def spin(self, user_id: int, bet: int) -> WheelResult:
-        """Spin the wheel."""
+        """Spin the wheel.
+        
+        Returns winnings to add after bet is deducted:
+        - Multiplier applied to bet, then returned
+        - x0 (bankrupt): 0 (lose all)
+        - x0.5: bet/2 (lose half)
+        - x1: bet (break even)
+        - x2+: bet * multiplier (profit)
+        """
         if bet <= 0:
             return WheelResult(False, "Ставка должна быть положительной", error_code="INVALID_BET")
         
@@ -575,19 +605,21 @@ class WheelGame:
                 selected = segment
                 break
         
-        winnings = int(bet * selected.multiplier) - bet
+        # Winnings = what to add back after bet deducted
+        winnings = int(bet * selected.multiplier)
+        profit = winnings - bet
         
         if selected.multiplier == 0:
             msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n💀 Потерял всё: -{bet} монет"
         elif selected.multiplier < 1:
-            loss = bet - int(bet * selected.multiplier)
+            loss = bet - winnings
             msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n😢 -{loss} монет"
         elif selected.multiplier == 1:
             msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n🔄 Ставка возвращена"
         elif selected.multiplier >= 10:
-            msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n🎉🎉🎉 ДЖЕКПОТ! +{winnings} монет!"
+            msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n🎉🎉🎉 ДЖЕКПОТ! +{profit} монет!"
         else:
-            msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n💰 +{winnings} монет"
+            msg = f"🎡 Колесо крутится...\n\n{selected.emoji} {selected.name}!\n\n💰 +{profit} монет"
         
         return WheelResult(True, msg, selected, winnings)
 

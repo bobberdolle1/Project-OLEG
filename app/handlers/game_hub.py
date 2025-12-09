@@ -60,8 +60,8 @@ class GameHubUI:
     BUTTONS_PAGE_3 = [
         ("🐔 Петухи", "game:cockfight"),
         ("🏪 Магазин", "game:shop"),
-        ("📊 Топ Элиты", "game:top"),
-        ("🏆 Турниры", "game:tournaments"),
+        ("🎒 Инвентарь", "game:inventory"),
+        ("📊 Топ", "game:top"),
     ]
     
     @classmethod
@@ -165,9 +165,9 @@ class GameHubUI:
             "guess": ("🔮 Угадай число", "/guess", "Угадай число от 1 до 100 за 7 попыток!"),
             "loot": ("📦 Лутбоксы", "/loot", "Открывай коробки и получай награды!"),
             "cockfight": ("🐔 Петушиные бои", "/cockfight", "Выбери петуха и сделай ставку!"),
-            "shop": ("🏪 Магазин", "/shop", "Покупай предметы за монеты!"),
-            "top": ("📊 Топ Элиты", "/top", "/top — Топ по размеру\n/top_rep — Топ по репутации"),
-            "tournaments": ("🏆 Турниры", "/tournament", "/tournament — Текущий турнир\n/tournament_top — Таблица лидеров"),
+            "shop": ("🏪 Магазин", "/shop", "Покупай удочки и расходники!"),
+            "inventory": ("🎒 Инвентарь", "/inventory", "Твои предметы и экипировка"),
+            "top": ("📊 Топ", "/top", "/top — Топ по размеру\n/top_rep — Топ по репутации"),
         }
         
         if game_type in game_commands:

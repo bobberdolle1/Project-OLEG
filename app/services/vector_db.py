@@ -100,15 +100,19 @@ class VectorDB:
     
     def get_or_create_collection(self, name: str):
         """Получает или создает коллекцию."""
-        if name not in self.collections:
+        try:
+            # Всегда используем get_or_create для надёжности
+            self.collections[name] = self.client.get_or_create_collection(name)
+            return self.collections[name]
+        except Exception as e:
+            logger.error(f"Ошибка при получении коллекции {name}: {e}")
+            # Пробуем пересоздать
             try:
-                # Пробуем получить существующую коллекцию
-                self.collections[name] = self.client.get_collection(name)
-            except:
-                # Если коллекции нет, создаем новую
                 self.collections[name] = self.client.create_collection(name)
-        
-        return self.collections[name]
+                return self.collections[name]
+            except Exception as e2:
+                logger.error(f"Не удалось создать коллекцию {name}: {e2}")
+                raise
     
     def add_fact(self, collection_name: str, fact_text: str, metadata: Dict = None, doc_id: str = None):
         """

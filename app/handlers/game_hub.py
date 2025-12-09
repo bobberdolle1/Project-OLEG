@@ -159,8 +159,8 @@ class GameHubUI:
         from app.handlers import mini_games, games, blackjack, challenges, shop as shop_handler
         
         # Create a fake message object for handlers that expect Message
-        fake_message = callback.message
-        fake_message.from_user = callback.from_user
+        # Use model_copy() since aiogram 3.x Message objects are frozen (Pydantic v2)
+        fake_message = callback.message.model_copy(update={"from_user": callback.from_user})
         
         try:
             if game_type == "roulette":

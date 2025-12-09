@@ -898,18 +898,19 @@ async def search_memory_db(query: str) -> str:
         )
 
 
-def _extract_json_from_response(response: str) -> str:
+def _extract_json_from_response(response: str, expect_array: bool = True) -> str:
     """
     Извлекает JSON из ответа LLM, убирая markdown-обёртки и лишний текст.
     
     Args:
         response: Сырой ответ от LLM
+        expect_array: Ожидаем массив (True) или объект (False)
         
     Returns:
         Очищенная JSON-строка
     """
     if not response:
-        return "[]"
+        return "[]" if expect_array else "{}"
     
     text = response.strip()
     
@@ -925,13 +926,85 @@ def _extract_json_from_response(response: str) -> str:
         if end > start:
             text = text[start:end].strip()
     
-    # Ищем JSON массив в тексте
-    bracket_start = text.find("[")
-    bracket_end = text.rfind("]")
-    if bracket_start != -1 and bracket_end > bracket_start:
-        text = text[bracket_start:bracket_end + 1]
+    if expect_array:
+        # Ищем JSON массив в тексте
+        bracket_start = text.find("[")
+        bracket_end = text.rfind("]")
+        if bracket_start != -1 and bracket_end > bracket_start:
+            text = text[bracket_start:bracket_end + 1]
+        return text if text else "[]"
+    else:
+        # Ищем JSON объект в тексте
+        brace_start = text.find("{")
+        brace_end = text.rfind("}")
+        if brace_start != -1 and brace_end > brace_start:
+            text = text[brace_start:brace_end + 1]
+        return text if text else "{}"
+
+
+async def _parse_json_with_retry(
+    response: str,
+    retry_messages: list[dict],
+    expect_array: bool = True,
+    max_retries: int = 1
+) -> dict | list | None:
+    """
+    Парсит JSON из ответа LLM с возможностью retry при ошибке.
     
-    return text if text else "[]"
+    При неудачном парсинге отправляет модели ошибку и просит исправить JSON.
+    
+    Args:
+        response: Сырой ответ от LLM
+        retry_messages: Базовые сообщения для retry-запроса (system + user)
+        expect_array: Ожидаем массив (True) или объект (False)
+        max_retries: Максимальное количество повторных попыток
+        
+    Returns:
+        Распарсенный JSON или None при неудаче
+    """
+    json_str = _extract_json_from_response(response, expect_array)
+    
+    for attempt in range(max_retries + 1):
+        try:
+            result = json.loads(json_str)
+            # Проверяем тип
+            if expect_array and not isinstance(result, list):
+                raise ValueError(f"Expected array, got {type(result)}")
+            if not expect_array and not isinstance(result, dict):
+                raise ValueError(f"Expected object, got {type(result)}")
+            return result
+        except (json.JSONDecodeError, ValueError) as e:
+            if attempt >= max_retries:
+                logger.warning(f"JSON parsing failed after {max_retries + 1} attempts: {e}")
+                return [] if expect_array else None
+            
+            # Retry: просим модель исправить JSON
+            logger.debug(f"JSON parse error (attempt {attempt + 1}): {e}, retrying...")
+            
+            retry_prompt = f"""Твой предыдущий ответ содержит невалидный JSON:
+{json_str[:500]}
+
+Ошибка: {str(e)}
+
+Исправь и верни ТОЛЬКО валидный JSON {'массив' if expect_array else 'объект'}, без пояснений."""
+            
+            messages = retry_messages.copy()
+            messages.append({"role": "assistant", "content": response})
+            messages.append({"role": "user", "content": retry_prompt})
+            
+            try:
+                retry_response = await _ollama_chat(
+                    messages, 
+                    temperature=0.0, 
+                    use_cache=False,
+                    model=settings.ollama_memory_model
+                )
+                json_str = _extract_json_from_response(retry_response, expect_array)
+            except Exception as retry_error:
+                logger.warning(f"Retry request failed: {retry_error}")
+                return [] if expect_array else None
+    
+    return [] if expect_array else None
 
 
 FACT_EXTRACTION_SYSTEM_PROMPT = """Ты — система извлечения фактов для памяти бота Олег.
@@ -1010,22 +1083,27 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
 Извлеки факты и верни JSON массив."""
 
     try:
-        response = await _ollama_chat([
+        base_messages = [
             {"role": "system", "content": FACT_EXTRACTION_SYSTEM_PROMPT},
             {"role": "user", "content": extraction_prompt}
-        ], temperature=0.1, use_cache=False, model=settings.ollama_memory_model)
+        ]
+        
+        response = await _ollama_chat(
+            base_messages, 
+            temperature=0.1, 
+            use_cache=False, 
+            model=settings.ollama_memory_model
+        )
 
-        # Извлекаем и парсим JSON
-        json_str = _extract_json_from_response(response)
+        # Парсим JSON с retry при ошибке
+        facts = await _parse_json_with_retry(
+            response=response,
+            retry_messages=base_messages,
+            expect_array=True,
+            max_retries=1
+        )
         
-        if not json_str or json_str == "[]":
-            return []
-        
-        facts = json.loads(json_str)
-        
-        # Проверяем что это список
-        if not isinstance(facts, list):
-            logger.warning(f"LLM вернул не массив: {type(facts)}")
+        if not facts:
             return []
 
         # Добавим метаданные к фактам
@@ -1051,9 +1129,6 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
                 })
 
         return processed_facts
-    except json.JSONDecodeError as e:
-        logger.warning(f"Не удалось распарсить JSON от LLM: {e}")
-        return []
     except Exception as e:
         logger.error(f"Ошибка при извлечении фактов: {e}")
         return []
@@ -1662,14 +1737,23 @@ async def analyze_toxicity(text: str) -> dict | None:
         "Your response must be only the JSON object, with no other text or explanations. "
         "Example: {\"is_toxic\": true, \"category\": \"insult\", \"score\": 0.92}"
     )
-    messages = [
+    base_messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": text},
     ]
 
     try:
-        response_text = await _ollama_chat(messages, temperature=0.0, use_cache=True)
-        return json.loads(response_text)
-    except (json.JSONDecodeError, Exception) as e:
+        response_text = await _ollama_chat(base_messages, temperature=0.0, use_cache=True)
+        
+        # Парсим JSON с retry при ошибке
+        result = await _parse_json_with_retry(
+            response=response_text,
+            retry_messages=base_messages,
+            expect_array=False,
+            max_retries=1
+        )
+        
+        return result
+    except Exception as e:
         logger.error(f"Failed to analyze toxicity: {e}")
         return None

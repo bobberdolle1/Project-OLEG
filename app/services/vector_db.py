@@ -541,6 +541,91 @@ class VectorDB:
             logger.error(f"Ошибка при удалении фактов пользователя {user_id}: {e}")
             return 0
 
+    def delete_low_importance_facts(
+        self,
+        collection_name: str,
+        chat_id: int,
+        max_importance: int = 4
+    ) -> int:
+        """
+        Удаляет факты с низким приоритетом (importance <= max_importance).
+        
+        Полезно для периодической очистки памяти от малозначимых фактов.
+        
+        Args:
+            collection_name: Название коллекции
+            chat_id: ID чата
+            max_importance: Максимальный importance для удаления (включительно)
+            
+        Returns:
+            Количество удаленных фактов
+        """
+        if not self.client:
+            raise Exception("ChromaDB не инициализирована")
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        try:
+            # Получаем все факты чата
+            results = collection.get(where={"chat_id": chat_id})
+            
+            if not results['ids']:
+                return 0
+            
+            ids_to_delete = []
+            
+            for i, doc_id in enumerate(results['ids']):
+                metadata = results['metadatas'][i] if results['metadatas'] else {}
+                importance = metadata.get('importance', 5)
+                
+                # Удаляем факты с низким приоритетом
+                if isinstance(importance, (int, float)) and importance <= max_importance:
+                    ids_to_delete.append(doc_id)
+            
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                logger.info(f"Удалено {len(ids_to_delete)} низкоприоритетных фактов (importance <= {max_importance}) для чата {chat_id}")
+            
+            return len(ids_to_delete)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при удалении низкоприоритетных фактов чата {chat_id}: {e}")
+            return 0
+
+    def cleanup_memory(
+        self,
+        collection_name: str,
+        chat_id: int,
+        older_than_days: int = 90,
+        low_importance_threshold: int = 4
+    ) -> dict:
+        """
+        Комплексная очистка памяти: удаляет старые и низкоприоритетные факты.
+        
+        Рекомендуется запускать периодически (например, раз в неделю).
+        
+        Args:
+            collection_name: Название коллекции
+            chat_id: ID чата
+            older_than_days: Удалять факты старше этого количества дней
+            low_importance_threshold: Удалять факты с importance <= этого значения
+            
+        Returns:
+            Словарь с количеством удалённых фактов по категориям
+        """
+        old_deleted = self.delete_old_facts(collection_name, chat_id, older_than_days)
+        low_importance_deleted = self.delete_low_importance_facts(collection_name, chat_id, low_importance_threshold)
+        
+        total = old_deleted + low_importance_deleted
+        if total > 0:
+            logger.info(f"Очистка памяти чата {chat_id}: удалено {old_deleted} старых + {low_importance_deleted} низкоприоритетных = {total} фактов")
+        
+        return {
+            "old_facts_deleted": old_deleted,
+            "low_importance_deleted": low_importance_deleted,
+            "total_deleted": total
+        }
+
 
 # Глобальный экземпляр векторной БД
 vector_db = VectorDB()

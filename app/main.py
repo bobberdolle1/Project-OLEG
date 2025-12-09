@@ -157,6 +157,10 @@ def build_dp() -> Dispatcher:
     dp.include_routers(
         health_router,  # Health check должен быть первым для быстрого ответа
         help.router,  # Help должен быть вторым для приоритета
+        private_admin_router,  # Роутер для админ-панели в ЛС (до qna!)
+        owner_panel_router,  # Панель владельца бота /owner (до qna!)
+        broadcast_router,  # Broadcast wizard for admin announcements (Requirements 13.x)
+        admin_dashboard_router,  # Роутер для расширенной админ-панели владельца (Requirements 7.x)
         game_hub_router,  # Game Hub UI (Requirements 1.x) - before games for /games priority
         challenges_router,  # PvP challenges with consent (Requirements 8.x)
         blackjack_router,  # Blackjack game (Requirements 9.x)
@@ -184,10 +188,6 @@ def build_dp() -> Dispatcher:
         random_responses.router,  # Роутер для рандомных ответов
         reactions_router,  # Роутер для обработки реакций
         content_downloader_router,  # Роутер для скачивания контента
-        private_admin_router,  # Роутер для админ-панели в ЛС
-        admin_dashboard_router,  # Роутер для расширенной админ-панели владельца (Requirements 7.x)
-        broadcast_router,  # Broadcast wizard for admin announcements (Requirements 13.x)
-        owner_panel_router,  # Панель владельца бота (/owner)
         chat_join_router,  # Роутер для обработки событий добавления в чат
         topic_listener_router,  # Роутер для глобального слушателя топиков (RAG) - должен быть последним
     )

@@ -31,6 +31,7 @@ GROUP_COMMANDS = [
 
 
 # Commands visible in private chats - admin panel, personal commands
+# Note: /owner is intentionally hidden (anonymous command for bot owner only)
 PRIVATE_COMMANDS = [
     BotCommand(command="help", description="Справка по командам"),
     BotCommand(command="start", description="Приветствие"),

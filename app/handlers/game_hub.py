@@ -158,9 +158,35 @@ class GameHubUI:
         # Lazy imports to avoid circular dependencies
         from app.handlers import mini_games, games, blackjack, challenges, shop as shop_handler
         
+        # Map game types to their command text for proper parsing
+        GAME_COMMANDS = {
+            "roulette": "/roulette",
+            "dice": "/dice",
+            "grow": "/grow",
+            "pve": "/challenge",
+            "blackjack": "/bj",
+            "casino": "/casino",
+            "fish": "/fish",
+            "crash": "/crash",
+            "wheel": "/wheel",
+            "war": "/war",
+            "guess": "/guess",
+            "loot": "/loot",
+            "cockfight": "/cockfight",
+            "shop": "/shop",
+            "inventory": "/inventory",
+            "top": "/top",
+            "balance": "/balance",
+        }
+        
         # Create a fake message object for handlers that expect Message
         # Use model_copy() since aiogram 3.x Message objects are frozen (Pydantic v2)
-        fake_message = callback.message.model_copy(update={"from_user": callback.from_user})
+        # Also set the text to the appropriate command for proper parsing
+        command_text = GAME_COMMANDS.get(game_type, f"/{game_type}")
+        fake_message = callback.message.model_copy(update={
+            "from_user": callback.from_user,
+            "text": command_text
+        })
         
         try:
             if game_type == "roulette":

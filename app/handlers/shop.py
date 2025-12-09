@@ -10,7 +10,7 @@ from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import UserBalance
+from app.database.models import UserBalance, UserInventory
 from app.services.economy import economy_service, SHOP_ITEMS, ItemType, Rarity
 
 logger = logging.getLogger(__name__)
@@ -218,7 +218,33 @@ async def callback_shop(callback: CallbackQuery):
         # Deduct balance
         new_balance = await update_user_balance(user_id, chat_id, -item.price)
         
-        # TODO: Add item to inventory
+        # Add item to inventory
+        async_session = get_session()
+        async with async_session() as session:
+            # Check if item already exists in inventory
+            res = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type_str
+                )
+            )
+            existing = res.scalars().first()
+            
+            if existing:
+                existing.quantity += 1
+            else:
+                new_item = UserInventory(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    item_type=item_type_str,
+                    item_name=item.name,
+                    quantity=1,
+                    equipped=False
+                )
+                session.add(new_item)
+            
+            await session.commit()
         
         text = (
             f"🏪 <b>ПОКУПКА УСПЕШНА!</b>\n\n"

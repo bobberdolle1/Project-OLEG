@@ -25,15 +25,32 @@ class ItemType(str, Enum):
     GOLDEN_ROD = "golden_rod"
     LEGENDARY_ROD = "legendary_rod"
     
+    # Shop fishing rods (from economy.py)
+    FISHING_ROD_BASIC = "fishing_rod_basic"
+    FISHING_ROD_PRO = "fishing_rod_pro"
+    FISHING_ROD_GOLDEN = "fishing_rod_golden"
+    
     # Consumables
     LUCKY_CHARM = "lucky_charm"
     ENERGY_DRINK = "energy_drink"
+    DOUBLE_XP = "double_xp"
     
     # Protection
     SHIELD = "shield"
     
     # Status
     VIP_STATUS = "vip_status"
+    
+    # Lootboxes
+    LOOTBOX_COMMON = "lootbox_common"
+    LOOTBOX_RARE = "lootbox_rare"
+    LOOTBOX_EPIC = "lootbox_epic"
+    LOOTBOX_LEGENDARY = "lootbox_legendary"
+    
+    # Roosters
+    ROOSTER_COMMON = "rooster_common"
+    ROOSTER_RARE = "rooster_rare"
+    ROOSTER_EPIC = "rooster_epic"
 
 
 @dataclass
@@ -128,6 +145,113 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         description="VIP статус на 24 часа. +20% к выигрышам.",
         price=1000,
         effect={"win_bonus": 0.2, "duration_hours": 24},
+        stackable=True,
+    ),
+    
+    # Shop fishing rods
+    ItemType.FISHING_ROD_BASIC: ItemInfo(
+        item_type=ItemType.FISHING_ROD_BASIC,
+        name="Удочка новичка",
+        emoji="🎣",
+        description="Базовая удочка для рыбалки.",
+        price=100,
+        effect={"rod_bonus": 0.0},
+        stackable=False,
+    ),
+    ItemType.FISHING_ROD_PRO: ItemInfo(
+        item_type=ItemType.FISHING_ROD_PRO,
+        name="Про удочка",
+        emoji="🎣",
+        description="+20% к редкой рыбе.",
+        price=500,
+        effect={"rod_bonus": 0.2},
+        stackable=False,
+    ),
+    ItemType.FISHING_ROD_GOLDEN: ItemInfo(
+        item_type=ItemType.FISHING_ROD_GOLDEN,
+        name="Золотая удочка",
+        emoji="🎣",
+        description="+50% к редкой рыбе.",
+        price=2000,
+        effect={"rod_bonus": 0.5},
+        stackable=False,
+    ),
+    
+    # Double XP
+    ItemType.DOUBLE_XP: ItemInfo(
+        item_type=ItemType.DOUBLE_XP,
+        name="Энергетик x2",
+        emoji="⚡",
+        description="Двойной опыт на 1 час.",
+        price=300,
+        effect={"xp_bonus": 2.0, "duration_hours": 1},
+        stackable=True,
+    ),
+    
+    # Lootboxes
+    ItemType.LOOTBOX_COMMON: ItemInfo(
+        item_type=ItemType.LOOTBOX_COMMON,
+        name="Обычный лутбокс",
+        emoji="📦",
+        description="Шанс на редкие предметы.",
+        price=50,
+        effect={"lootbox_tier": "common"},
+        stackable=True,
+    ),
+    ItemType.LOOTBOX_RARE: ItemInfo(
+        item_type=ItemType.LOOTBOX_RARE,
+        name="Редкий лутбокс",
+        emoji="📦",
+        description="Повышенный шанс на эпики.",
+        price=150,
+        effect={"lootbox_tier": "rare"},
+        stackable=True,
+    ),
+    ItemType.LOOTBOX_EPIC: ItemInfo(
+        item_type=ItemType.LOOTBOX_EPIC,
+        name="Эпический лутбокс",
+        emoji="📦",
+        description="Гарантированный эпик+.",
+        price=400,
+        effect={"lootbox_tier": "epic"},
+        stackable=True,
+    ),
+    ItemType.LOOTBOX_LEGENDARY: ItemInfo(
+        item_type=ItemType.LOOTBOX_LEGENDARY,
+        name="Легендарный лутбокс",
+        emoji="📦",
+        description="Шанс на легендарку!",
+        price=1000,
+        effect={"lootbox_tier": "legendary"},
+        stackable=True,
+    ),
+    
+    # Roosters
+    ItemType.ROOSTER_COMMON: ItemInfo(
+        item_type=ItemType.ROOSTER_COMMON,
+        name="Обычный петух",
+        emoji="🐔",
+        description="Базовый боец.",
+        price=200,
+        effect={"rooster_tier": "common"},
+        stackable=True,
+    ),
+    ItemType.ROOSTER_RARE: ItemInfo(
+        item_type=ItemType.ROOSTER_RARE,
+        name="Редкий петух",
+        emoji="🐓",
+        description="Сильный боец.",
+        price=600,
+        effect={"rooster_tier": "rare"},
+        stackable=True,
+    ),
+    ItemType.ROOSTER_EPIC: ItemInfo(
+        item_type=ItemType.ROOSTER_EPIC,
+        name="Эпический петух",
+        emoji="🦃",
+        description="Элитный боец.",
+        price=1500,
+        effect={"rooster_tier": "epic"},
         stackable=True,
     ),
 }

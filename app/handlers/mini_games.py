@@ -1195,59 +1195,8 @@ async def cmd_transfer(message: Message):
 
 
 # ============================================================================
-# INVENTORY & SHOP COMMANDS
+# INVENTORY COMMAND
 # ============================================================================
-
-SHOP_PREFIX = "shop:"
-
-
-def get_shop_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Create shop keyboard with all purchasable items."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎣 Удочки", callback_data=f"{SHOP_PREFIX}{user_id}:rods")],
-        [InlineKeyboardButton(text="🧪 Расходники", callback_data=f"{SHOP_PREFIX}{user_id}:consumables")],
-        [InlineKeyboardButton(text="🎒 Мой инвентарь", callback_data=f"{SHOP_PREFIX}{user_id}:inventory")],
-    ])
-
-
-def get_shop_rods_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Create rod shop keyboard."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🥈 Серебряная удочка (500)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:silver_rod")],
-        [InlineKeyboardButton(text="🥇 Золотая удочка (2000)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:golden_rod")],
-        [InlineKeyboardButton(text="👑 Легендарная удочка (10000)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:legendary_rod")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{SHOP_PREFIX}{user_id}:back")],
-    ])
-
-
-def get_shop_consumables_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Create consumables shop keyboard."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🥤 Энергетик (50)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:energy_drink")],
-        [InlineKeyboardButton(text="🍀 Талисман удачи (100)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:lucky_charm")],
-        [InlineKeyboardButton(text="🛡️ Щит (200)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:shield")],
-        [InlineKeyboardButton(text="👑 VIP статус (1000)", callback_data=f"{SHOP_PREFIX}{user_id}:buy:vip_status")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{SHOP_PREFIX}{user_id}:back")],
-    ])
-
-
-@router.message(Command("shop"))
-async def cmd_shop(message: Message):
-    """Open the shop."""
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    balance = await get_user_balance(user_id, chat_id)
-    
-    text = (
-        "🏪 <b>МАГАЗИН</b>\n\n"
-        "Покупай предметы за монеты!\n\n"
-        "🎣 <b>Удочки</b> — улучшают шанс редкой рыбы\n"
-        "🧪 <b>Расходники</b> — бонусы для игр\n\n"
-        f"💰 Баланс: {balance} монет"
-    )
-    
-    await message.reply(text, reply_markup=get_shop_keyboard(user_id), parse_mode="HTML")
-
 
 @router.message(Command("inventory"))
 async def cmd_inventory(message: Message):
@@ -1270,156 +1219,43 @@ async def cmd_inventory(message: Message):
         # Group items by category
         rods = []
         consumables = []
+        lootboxes = []
+        roosters = []
+        other = []
         
         for item in items:
             item_info = ITEM_CATALOG.get(item.item_type)
             if item_info:
-                if item.item_type.endswith("_rod"):
+                if item.item_type.endswith("_rod") or item.item_type.startswith("fishing_rod"):
                     equipped = " ✅" if item.equipped else ""
                     rods.append(f"  {item_info.emoji} {item_info.name}{equipped}")
-                else:
+                elif item.item_type.startswith("lootbox"):
+                    lootboxes.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
+                elif item.item_type.startswith("rooster"):
+                    roosters.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
+                elif item.item_type in ["lucky_charm", "energy_drink", "shield", "vip_status", "double_xp"]:
                     consumables.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
+                else:
+                    other.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
+            else:
+                # Item not in catalog - show raw data
+                other.append(f"  📦 {item.item_name} x{item.quantity}")
         
         if rods:
             text += "<b>🎣 Удочки:</b>\n" + "\n".join(rods) + "\n\n"
+        if lootboxes:
+            text += "<b>📦 Лутбоксы:</b>\n" + "\n".join(lootboxes) + "\n\n"
+        if roosters:
+            text += "<b>🐔 Петухи:</b>\n" + "\n".join(roosters) + "\n\n"
         if consumables:
             text += "<b>🧪 Расходники:</b>\n" + "\n".join(consumables) + "\n\n"
+        if other:
+            text += "<b>📋 Прочее:</b>\n" + "\n".join(other) + "\n\n"
         
         text += f"💰 Баланс: {balance} монет\n\n"
-        text += "<i>Используй /fish для рыбалки</i>"
+        text += "<i>Используй /loot для открытия лутбоксов</i>"
     
     await message.reply(text, parse_mode="HTML")
-
-
-@router.callback_query(F.data.startswith(SHOP_PREFIX))
-async def callback_shop(callback: CallbackQuery):
-    """Handle shop callbacks."""
-    parts = callback.data.split(":")
-    if len(parts) < 3:
-        return await callback.answer("Ошибка")
-    
-    _, owner_id, action = parts[:3]
-    user_id = callback.from_user.id
-    chat_id = callback.message.chat.id
-    
-    if int(owner_id) != user_id:
-        return await callback.answer("Это не твой магазин!", show_alert=True)
-    
-    balance = await get_user_balance(user_id, chat_id)
-    
-    if action == "rods":
-        text = (
-            "🎣 <b>УДОЧКИ</b>\n\n"
-            "🥈 <b>Серебряная</b> — 500 монет\n"
-            "   +10% к редким рыбам\n\n"
-            "🥇 <b>Золотая</b> — 2000 монет\n"
-            "   +25% к редким рыбам\n\n"
-            "👑 <b>Легендарная</b> — 10000 монет\n"
-            "   +50% к редким рыбам!\n\n"
-            f"💰 Баланс: {balance} монет"
-        )
-        await callback.message.edit_text(text, reply_markup=get_shop_rods_keyboard(user_id), parse_mode="HTML")
-        await callback.answer()
-    
-    elif action == "consumables":
-        text = (
-            "🧪 <b>РАСХОДНИКИ</b>\n\n"
-            "🥤 <b>Энергетик</b> — 50 монет\n"
-            "   Сбрасывает кулдаун рыбалки\n\n"
-            "🍀 <b>Талисман удачи</b> — 100 монет\n"
-            "   +10% к выигрышу в следующей игре\n\n"
-            "🛡️ <b>Щит</b> — 200 монет\n"
-            "   Защита от потери в следующей игре\n\n"
-            "👑 <b>VIP статус</b> — 1000 монет\n"
-            "   +20% к выигрышам на 24 часа\n\n"
-            f"💰 Баланс: {balance} монет"
-        )
-        await callback.message.edit_text(text, reply_markup=get_shop_consumables_keyboard(user_id), parse_mode="HTML")
-        await callback.answer()
-    
-    elif action == "inventory":
-        items = await inventory_service.get_inventory(user_id, chat_id)
-        
-        if not items:
-            text = (
-                "🎒 <b>ИНВЕНТАРЬ</b>\n\n"
-                "Пусто! Покупай предметы в магазине.\n\n"
-                f"💰 Баланс: {balance} монет"
-            )
-        else:
-            text = "🎒 <b>ИНВЕНТАРЬ</b>\n\n"
-            
-            rods = []
-            consumables = []
-            for item in items:
-                item_info = ITEM_CATALOG.get(item.item_type)
-                if item_info:
-                    if item.item_type.endswith("_rod"):
-                        equipped = " ✅" if item.equipped else ""
-                        rods.append(f"  {item_info.emoji} {item_info.name}{equipped}")
-                    else:
-                        consumables.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
-            
-            if rods:
-                text += "<b>🎣 Удочки:</b>\n" + "\n".join(rods) + "\n\n"
-            if consumables:
-                text += "<b>🧪 Расходники:</b>\n" + "\n".join(consumables) + "\n\n"
-            
-            text += f"💰 Баланс: {balance} монет"
-        
-        await callback.message.edit_text(text, reply_markup=get_shop_keyboard(user_id), parse_mode="HTML")
-        await callback.answer()
-    
-    elif action == "buy":
-        item_type = parts[3] if len(parts) > 3 else None
-        if not item_type or item_type not in ITEM_CATALOG:
-            return await callback.answer("Неизвестный предмет", show_alert=True)
-        
-        item_info = ITEM_CATALOG[item_type]
-        
-        if balance < item_info.price:
-            return await callback.answer(
-                f"Недостаточно монет! Нужно {item_info.price}, у тебя {balance}",
-                show_alert=True
-            )
-        
-        # Check if already owned (for non-stackable items)
-        if not item_info.stackable:
-            if await inventory_service.has_item(user_id, chat_id, item_type):
-                return await callback.answer(
-                    f"У тебя уже есть {item_info.emoji} {item_info.name}!",
-                    show_alert=True
-                )
-        
-        # Deduct money and add item
-        await update_user_balance(user_id, chat_id, -item_info.price)
-        result = await inventory_service.add_item(user_id, chat_id, item_type)
-        
-        # Auto-equip if it's a rod
-        if item_type.endswith("_rod"):
-            await inventory_service.equip_item(user_id, chat_id, item_type)
-            await fishing_stats_service.update_equipped_rod(user_id, chat_id, item_type)
-        
-        new_balance = await get_user_balance(user_id, chat_id)
-        
-        await callback.message.edit_text(
-            f"✅ Куплено {item_info.emoji} {item_info.name}!\n\n"
-            f"💰 Баланс: {new_balance} монет",
-            reply_markup=get_shop_keyboard(user_id),
-            parse_mode="HTML"
-        )
-        await callback.answer(f"🎉 {item_info.name}!")
-    
-    elif action == "back":
-        text = (
-            "🏪 <b>МАГАЗИН</b>\n\n"
-            "Покупай предметы за монеты!\n\n"
-            "🎣 <b>Удочки</b> — улучшают шанс редкой рыбы\n"
-            "🧪 <b>Расходники</b> — бонусы для игр\n\n"
-            f"💰 Баланс: {balance} монет"
-        )
-        await callback.message.edit_text(text, reply_markup=get_shop_keyboard(user_id), parse_mode="HTML")
-        await callback.answer()
 
 
 # ============================================================================

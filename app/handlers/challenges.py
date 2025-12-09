@@ -874,24 +874,6 @@ async def handle_duel_end(
     logger.info(f"Duel ended: winner={winner_id}, bet={duel_state.bet}")
 
 
-@router.message(Command("balance"))
-async def cmd_balance(msg: Message):
-    """Command /balance - Show current balance."""
-    if not msg.from_user:
-        return
-    
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
-    
-    balance = await ensure_user_balance(user_id, chat_id)
-    
-    await msg.reply(
-        f"💰 Твой баланс: {balance} очков\n\n"
-        f"Используй /challenge @user [ставка] для PvP дуэли\n"
-        f"Или /challenge для боя с Олегом"
-    )
-
-
 @router.message(Command("cancel_challenge"))
 async def cmd_cancel_challenge(msg: Message):
     """Command /cancel_challenge - Cancel your pending challenge."""

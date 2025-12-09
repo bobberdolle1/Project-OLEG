@@ -152,37 +152,63 @@ class GameHubUI:
             )
             return
         
-        # Route to appropriate game
-        game_commands = {
-            "roulette": ("🔫 Русская рулетка", "/roulette", "Крути барабан командой /roulette\nИли /roulette [ставка] для игры на монеты"),
-            "dice": ("🎲 Кости", "/dice", "Бросай кости командой /dice\nВыбери ставку и играй против бота!"),
-            "grow": ("🥒 Пиписомер", "/grow", "Выращивай свою гордость командой /grow\nКулдаун: 12-24 часа"),
-            "duel": ("⚔️ PvP Дуэль", "/challenge", "Вызови соперника: /challenge @username [ставка]\nСоперник должен принять вызов!"),
-            "pve": ("🤖 Бой с Олегом", "/challenge", "Сразись с Олегом!\nПросто напиши /challenge без аргументов"),
-            "blackjack": ("🃏 Блэкджек", "/bj", "Играй в блэкджек командой /bj [ставка]"),
-            "casino": ("🎰 Казино", "/casino", "Крути слоты командой /casino [ставка]"),
-            "fish": ("🎣 Рыбалка", "/fish", "Лови рыбу и продавай за монеты!\nПокупай удочки в /shop"),
-            "crash": ("🚀 Краш", "/crash", "Множитель растёт — успей забрать до краша!"),
-            "wheel": ("🎡 Колесо Фортуны", "/wheel", "Крути колесо и испытай удачу!"),
-            "war": ("🃏 Война", "/war", "Простая карточная игра — у кого карта старше!"),
-            "guess": ("🔮 Угадай число", "/guess", "Угадай число от 1 до 100 за 7 попыток!"),
-            "loot": ("📦 Лутбоксы", "/loot", "Открывай коробки и получай награды!\nПредметы идут в инвентарь"),
-            "cockfight": ("🐔 Петушиные бои", "/cockfight", "Выбери петуха и сделай ставку!"),
-            "shop": ("🏪 Магазин", "/shop", "Покупай удочки и расходники!"),
-            "inventory": ("🎒 Инвентарь", "/inventory", "Твои предметы и экипировка"),
-            "top": ("📊 Топ", "/top", "/top — Топ по размеру\n/top_rep — Топ по репутации"),
-            "balance": ("💰 Баланс", "/balance", "Проверь свой баланс монет"),
-        }
+        # Route to appropriate game - launch directly!
+        await callback.answer()
         
-        if game_type in game_commands:
-            title, cmd, desc = game_commands[game_type]
-            await callback.answer(f"Используй {cmd}!")
-            await callback.message.answer(
-                f"<b>{title}</b>\n\n{desc}",
-                parse_mode="HTML"
-            )
-        else:
-            await callback.answer("Неизвестная игра", show_alert=True)
+        # Lazy imports to avoid circular dependencies
+        from app.handlers import mini_games, games, blackjack, challenges, shop as shop_handler
+        
+        # Create a fake message object for handlers that expect Message
+        fake_message = callback.message
+        fake_message.from_user = callback.from_user
+        
+        try:
+            if game_type == "roulette":
+                await games.cmd_roulette(fake_message)
+            elif game_type == "dice":
+                await mini_games.cmd_dice(fake_message)
+            elif game_type == "grow":
+                await games.cmd_grow(fake_message)
+            elif game_type == "duel":
+                await callback.message.answer(
+                    "⚔️ <b>PvP Дуэль</b>\n\n"
+                    "Вызови соперника: /challenge @username [ставка]\n"
+                    "Или /challenge для боя с Олегом!",
+                    parse_mode="HTML"
+                )
+            elif game_type == "pve":
+                await challenges.cmd_challenge(fake_message)
+            elif game_type == "blackjack":
+                await blackjack.cmd_blackjack(fake_message)
+            elif game_type == "casino":
+                await games.cmd_casino(fake_message)
+            elif game_type == "fish":
+                await mini_games.cmd_fish(fake_message)
+            elif game_type == "crash":
+                await mini_games.cmd_crash(fake_message)
+            elif game_type == "wheel":
+                await mini_games.cmd_wheel(fake_message)
+            elif game_type == "war":
+                await mini_games.cmd_war(fake_message)
+            elif game_type == "guess":
+                await mini_games.cmd_guess(fake_message)
+            elif game_type == "loot":
+                await mini_games.cmd_loot(fake_message)
+            elif game_type == "cockfight":
+                await mini_games.cmd_cockfight(fake_message)
+            elif game_type == "shop":
+                await shop_handler.cmd_shop(fake_message)
+            elif game_type == "inventory":
+                await mini_games.cmd_inventory(fake_message)
+            elif game_type == "top":
+                await games.cmd_top(fake_message)
+            elif game_type == "balance":
+                await mini_games.cmd_balance(fake_message)
+            else:
+                await callback.message.answer("Неизвестная игра")
+        except Exception as e:
+            logger.error(f"Error launching game {game_type}: {e}")
+            await callback.message.answer(f"Ошибка запуска игры: {e}")
         
         logger.info(f"Game hub button '{game_type}' clicked by user {user_id}")
 

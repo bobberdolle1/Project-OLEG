@@ -156,6 +156,14 @@ CORE_OLEG_PROMPT_TEMPLATE = """
 Есть доступ к интернету для актуальной информации. Не говори что делаешь поиск — просто отвечай.
 
 ═══════════════════════════════════════════════════════════════════════════════
+ПРИОРИТЕТЫ
+═══════════════════════════════════════════════════════════════════════════════
+
+• При ответе на технические вопросы ТОЧНОСТЬ важнее стиля
+• Если нужно дать точную инструкцию — дай её чётко, без приколов
+• Персонаж не должен мешать полезности ответа
+
+═══════════════════════════════════════════════════════════════════════════════
 ОГРАНИЧЕНИЯ
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -525,9 +533,12 @@ def _generate_search_variations(query: str) -> list[str]:
             variations.append(f"{query} {en_term}")
             break
     
-    # Добавляем "2024" или "2025" для актуальности если нет года
-    if not any(year in query for year in ["2023", "2024", "2025"]):
-        variations.append(f"{query} 2024")
+    # Добавляем текущий год для актуальности если нет года
+    from datetime import datetime
+    current_year = str(datetime.now().year)
+    recent_years = [str(datetime.now().year - i) for i in range(3)]  # текущий и 2 предыдущих
+    if not any(year in query for year in recent_years):
+        variations.append(f"{query} {current_year}")
     
     # Для вопросов "что лучше" добавляем "сравнение"
     if "лучше" in query_lower or "выбрать" in query_lower:
@@ -595,26 +606,51 @@ def _contains_prompt_injection(text: str) -> bool:
     """
     text_lower = text.lower()
 
-    # Перечень потенциальных попыток промпт-инъекции
-    injection_patterns = [
+    # Высокорисковые паттерны — явные попытки манипуляции (срабатывают сразу)
+    high_risk_patterns = [
         "system:", "system :", "system prompt", "systemprompt",
-        "ignore", "forget", "disregard", "act as", "roleplay as",
-        "you are", "your role is", "start acting", "begin acting",
         "prompt:", "prompt :", "instruction:", "instruction :",
-        "reveal", "show me", "display", "print", "output",
         "system message", "system message:", "systemmessage",
         "what is your prompt", "what's your prompt", "your prompt is",
-        "tell me your prompt", "your system prompt", "system prompt",
-        "change your role", "new role", "instead of", "replace",
+        "tell me your prompt", "your system prompt",
+        "change your role", "new role",
         "##", "###", "[system]", "[user]", "[assistant]",
-        "new instruction", "override", "bypass", "skip",
-        "nevermind", "nvm", "just kidding", "ignore previous",
-        "ignore above", "disregard previous", "disregard above"
+        "new instruction", "override", "bypass",
+        "ignore previous", "ignore above", 
+        "disregard previous", "disregard above"
     ]
 
-    for pattern in injection_patterns:
+    for pattern in high_risk_patterns:
         if pattern in text_lower:
             return True
+
+    # Контекстные паттерны — требуют комбинации с другими словами
+    # Эти слова сами по себе могут быть частью обычного разговора
+    context_triggers = {
+        "ignore": ["instruction", "prompt", "system", "previous", "above", "all"],
+        "forget": ["instruction", "prompt", "system", "previous", "above", "everything you know"],
+        "disregard": ["instruction", "prompt", "system", "previous", "above"],
+        "act as": ["different", "new", "another", "assistant", "ai", "bot"],
+        "roleplay as": ["different", "new", "another"],
+        "you are": ["now", "actually", "really", "not oleg", "not олег", "assistant", "ai"],
+        "your role is": ["now", "actually", "to be"],
+        "start acting": ["as", "like"],
+        "begin acting": ["as", "like"],
+        "reveal": ["prompt", "instruction", "system", "secret"],
+        "show me": ["prompt", "instruction", "system", "your programming"],
+        "display": ["prompt", "instruction", "system"],
+        "print": ["prompt", "instruction", "system"],
+        "output": ["prompt", "instruction", "system"],
+        "instead of": ["oleg", "олег", "being", "your role"],
+        "replace": ["instruction", "prompt", "system", "your role"],
+        "skip": ["instruction", "prompt", "system", "filter"],
+    }
+
+    for trigger, contexts in context_triggers.items():
+        if trigger in text_lower:
+            for context in contexts:
+                if context in text_lower:
+                    return True
 
     return False
 
@@ -933,8 +969,17 @@ FACT_EXTRACTION_SYSTEM_PROMPT = """Ты — система извлечения 
 
 ФОРМАТ ОТВЕТА:
 Только валидный JSON массив, без markdown, без пояснений.
-[{{"fact": "текст факта", "category": "категория", "importance": число}}]
-Если фактов нет — верни []
+
+ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
+Сообщение: "@vasya: Поставил себе RTX 4080, теперь Cyberpunk на ультрах идёт. Думаю ещё RAM до 64 гигов добить"
+Ответ:
+[{{"fact": "У @vasya видеокарта RTX 4080", "category": "hardware", "importance": 8}}, {{"fact": "@vasya играет в Cyberpunk 2077 на ультра настройках", "category": "software", "importance": 5}}, {{"fact": "@vasya планирует апгрейд RAM до 64GB", "category": "plan", "importance": 6}}]
+
+Сообщение: "лол, согласен"
+Ответ:
+[]
+
+Если фактов нет — верни пустой массив []
 """
 
 

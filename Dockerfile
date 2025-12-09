@@ -1,5 +1,5 @@
 # Multi-stage build для уменьшения размера
-FROM python:3.11-slim as builder
+FROM python:3.13-slim as builder
 
 WORKDIR /app
 
@@ -25,7 +25,7 @@ RUN pip install --upgrade pip && \
     -r requirements.prod.txt
 
 # Финальный образ
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 

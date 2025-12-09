@@ -699,50 +699,6 @@ class SilentBan(Base):
 # ============================================================================
 
 
-class UserInventory(Base):
-    """
-    User inventory for storing purchased items (v7.5).
-    
-    Stores items purchased from the shop or won in games.
-    Items can be consumable (one-time use) or permanent.
-    """
-    __tablename__ = "user_inventory"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    item_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    quantity: Mapped[int] = mapped_column(Integer, default=1)
-    acquired_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    
-    __table_args__ = (
-        UniqueConstraint('user_id', 'chat_id', 'item_type', name='uq_user_chat_item'),
-    )
-
-
-class FishingStats(Base):
-    """
-    Fishing statistics per user (v7.5).
-    
-    Tracks fishing progress, catches, and equipped rod.
-    """
-    __tablename__ = "fishing_stats"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    total_catches: Mapped[int] = mapped_column(Integer, default=0)
-    legendary_catches: Mapped[int] = mapped_column(Integer, default=0)
-    total_earnings: Mapped[int] = mapped_column(Integer, default=0)
-    equipped_rod: Mapped[str] = mapped_column(String(64), default="basic")
-    last_cast: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    
-    __table_args__ = (
-        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_fishing'),
-    )
-
-
 class CockfightStats(Base):
     """
     Cockfight statistics per user (v7.5).
@@ -803,7 +759,7 @@ class UserInventory(Base):
     item_name: Mapped[str] = mapped_column(String(128), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     equipped: Mapped[bool] = mapped_column(Boolean, default=False)
-    metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON for item-specific data
+    item_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON for item-specific data
     acquired_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     
     __table_args__ = (

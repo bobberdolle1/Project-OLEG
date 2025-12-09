@@ -110,9 +110,9 @@ async def _should_reply(msg: Message) -> bool:
                 f"is_forum={msg.chat.is_forum}"
             )
             
-            # Проверяем active_topic_id — если установлен, бот отвечает только в этом топике
-            # Если не установлен (None) — бот отвечает во всех топиках
-            if chat and chat.active_topic_id is not None:
+            # Проверяем active_topic_id — если установлен (не None и не 0), бот отвечает только в этом топике
+            # Если не установлен (None) или 0 — бот отвечает во всех топиках (по умолчанию)
+            if chat and chat.active_topic_id:  # None и 0 оба falsy — бот везде
                 if msg_topic_id != chat.active_topic_id:
                     logger.debug(
                         f"Skipping message in topic {msg_topic_id}, "

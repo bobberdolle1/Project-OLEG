@@ -11,9 +11,9 @@ from datetime import datetime
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, UserQuestionHistory
+from app.database.models import User, UserQuestionHistory, MessageLog
 from app.handlers.games import ensure_user # For getting user object
-from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context
+from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context, generate_private_reply
 from app.services.recommendations import generate_recommendation
 from app.services.tts import tts_service
 from app.services.golden_fund import golden_fund_service
@@ -23,6 +23,36 @@ from app.utils import utc_now
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+async def _log_bot_response(chat_id: int, message_id: int, text: str, bot_username: str | None = "oleg_bot"):
+    """
+    Логирует ответ бота в базу данных для сохранения истории диалога.
+    
+    Args:
+        chat_id: ID чата
+        message_id: ID сообщения
+        text: Текст ответа
+        bot_username: Username бота
+    """
+    async_session = get_session()
+    try:
+        async with async_session() as session:
+            ml = MessageLog(
+                chat_id=chat_id,
+                message_id=message_id,
+                user_id=0,  # 0 для бота
+                username=bot_username,
+                text=text,
+                has_link=False,
+                links=None,
+                created_at=utc_now(),
+            )
+            session.add(ml)
+            await session.commit()
+            logger.debug(f"Logged bot response to chat {chat_id}")
+    except Exception as e:
+        logger.warning(f"Failed to log bot response: {e}")
 
 
 
@@ -345,15 +375,14 @@ async def general_qna(msg: Message):
         if golden_quote_sent:
             return
 
-        # Если в личных сообщениях, учитываем поведение пользователя
+        # Если в личных сообщениях, используем историю диалога для контекста
         if msg.chat.type == "private":
-            # Здесь в реальной реализации нужно анализировать поведение пользователя
-            # и адаптировать стиль ответа соответственно
-            # Use text_with_context to include reply context for AI
+            # Генерируем ответ с учётом истории диалога в ЛС
             # **Validates: Requirements 14.4**
-            reply = await generate_reply(
+            reply = await generate_private_reply(
                 user_text=text_with_context,
                 username=msg.from_user.username,
+                user_id=msg.from_user.id,
                 chat_context=games_context
             )
         else:
@@ -385,14 +414,25 @@ async def general_qna(msg: Message):
                 logger.warning(f"Auto-voice failed, falling back to text: {e}")
         
         # Send text response if voice wasn't sent
+        sent_message = None
         if not voice_sent:
             try:
-                await msg.reply(reply, disable_web_page_preview=True)
+                sent_message = await msg.reply(reply, disable_web_page_preview=True)
             except TelegramBadRequest as e:
                 if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
                     logger.warning(f"Cannot reply - topic/message deleted: {e}")
                     return
                 raise
+        
+        # Логируем ответ бота в ЛС для сохранения истории диалога
+        if msg.chat.type == "private" and sent_message:
+            bot_username = msg.bot._me.username if msg.bot._me else "oleg_bot"
+            await _log_bot_response(
+                chat_id=msg.chat.id,
+                message_id=sent_message.message_id,
+                text=reply,
+                bot_username=bot_username
+            )
 
         # В случае высокой токсичности, бот может "наехать" на самых токсичных пользователей
         if chat_toxicity > 70 and msg.chat.type != "private":
@@ -462,15 +502,28 @@ async def cmd_myhistory(msg: Message):
 async def cmd_reset_context(msg: Message):
     """
     Сброс контекста в личных сообщениях.
+    Удаляет историю диалога для текущего пользователя.
     """
     if msg.chat.type != 'private':
         await msg.reply("Эту команду можно использовать только в личных сообщениях.")
         return
 
-    # В реальной реализации нужно очистить историю сообщений для этого пользователя
-    # В текущем виде система не хранит контекст в нужном формате, поэтому
-    # просто сообщим пользователю о сбросе
-    await msg.reply("Контекст диалога сброшен. Олег теперь не помнит, что ты тролль.")
+    async_session = get_session()
+    try:
+        async with async_session() as session:
+            from sqlalchemy import delete
+            # Удаляем историю сообщений в ЛС (chat_id == user_id для личных чатов)
+            result = await session.execute(
+                delete(MessageLog).where(MessageLog.chat_id == msg.from_user.id)
+            )
+            deleted_count = result.rowcount
+            await session.commit()
+            logger.info(f"Reset context for user {msg.from_user.id}: deleted {deleted_count} messages")
+        
+        await msg.reply("Контекст диалога сброшен. Олег теперь не помнит, что ты тролль.")
+    except Exception as e:
+        logger.error(f"Failed to reset context for user {msg.from_user.id}: {e}")
+        await msg.reply("Не удалось сбросить контекст. Попробуй позже.")
 
 
 # Обработчик голосовых перенесён в app/handlers/voice.py

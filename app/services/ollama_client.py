@@ -604,7 +604,64 @@ def _contains_prompt_injection(text: str) -> bool:
     return False
 
 
-async def generate_text_reply(user_text: str, username: str | None, chat_context: str | None = None) -> str:
+async def _get_private_chat_history(user_id: int, limit: int = 10) -> list[dict]:
+    """
+    Получить историю диалога в личных сообщениях.
+    
+    Args:
+        user_id: ID пользователя (в ЛС chat_id == user_id)
+        limit: Максимальное количество сообщений для контекста
+        
+    Returns:
+        Список сообщений в формате [{"role": "user"/"assistant", "content": "..."}]
+    """
+    async_session = get_session()
+    history = []
+    
+    try:
+        async with async_session() as session:
+            # Получаем последние сообщения из ЛС (chat_id == user_id для личных чатов)
+            result = await session.execute(
+                select(MessageLog)
+                .where(MessageLog.chat_id == user_id)
+                .order_by(MessageLog.created_at.desc())
+                .limit(limit * 2)  # Берём больше, т.к. часть — сообщения бота
+            )
+            messages = result.scalars().all()
+            
+            # Переворачиваем чтобы получить хронологический порядок
+            messages = list(reversed(messages))
+            
+            for msg in messages:
+                if msg.text:
+                    # Определяем роль: user_id == 0 — это ответ бота
+                    # Также проверяем username на наличие "oleg" для обратной совместимости
+                    is_bot_message = (
+                        msg.user_id == 0 or 
+                        (msg.username and 'oleg' in msg.username.lower())
+                    )
+                    
+                    if is_bot_message:
+                        history.append({
+                            "role": "assistant",
+                            "content": msg.text
+                        })
+                    else:
+                        history.append({
+                            "role": "user", 
+                            "content": f"{msg.username or 'пользователь'}: {msg.text}"
+                        })
+            
+            logger.debug(f"Загружено {len(history)} сообщений из истории ЛС для user_id={user_id}")
+            
+    except Exception as e:
+        logger.warning(f"Ошибка при загрузке истории ЛС: {e}")
+    
+    return history[-limit:] if len(history) > limit else history
+
+
+async def generate_text_reply(user_text: str, username: str | None, chat_context: str | None = None,
+                              conversation_history: list[dict] | None = None) -> str:
     """
     Сгенерировать текстовый ответ от Олега на сообщение пользователя.
 
@@ -612,6 +669,7 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
         user_text: Текст сообщения пользователя
         username: Никнейм пользователя
         chat_context: Контекст чата (название, описание)
+        conversation_history: История диалога для контекста (опционально)
 
     Returns:
         Ответ от Олега или сообщение об ошибке
@@ -630,8 +688,15 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"{display_name}: {user_text}"},
     ]
+    
+    # Добавляем историю диалога если есть
+    if conversation_history:
+        messages.extend(conversation_history)
+    
+    # Добавляем текущее сообщение
+    messages.append({"role": "user", "content": f"{display_name}: {user_text}"})
+    
     try:
         # Используем основную модель для текстовых ответов с поддержкой веб-поиска
         return await _ollama_chat(messages, model=settings.ollama_base_model, enable_tools=True)
@@ -647,6 +712,33 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     except Exception as e:
         logger.error(f"Unexpected error in generate_text_reply: {e}")
         return "Что-то пошло не так. Попробуй ещё раз или обратись к админу."
+
+
+async def generate_private_reply(user_text: str, username: str | None, user_id: int,
+                                  chat_context: str | None = None) -> str:
+    """
+    Генерирует ответ для личных сообщений с учётом истории диалога.
+    
+    Args:
+        user_text: Текст сообщения пользователя
+        username: Никнейм пользователя
+        user_id: ID пользователя (для получения истории)
+        chat_context: Дополнительный контекст
+        
+    Returns:
+        Ответ от Олега
+    """
+    # Получаем историю диалога
+    history = await _get_private_chat_history(user_id, limit=10)
+    
+    logger.debug(f"Генерация ответа в ЛС для user_id={user_id} с {len(history)} сообщениями в истории")
+    
+    return await generate_text_reply(
+        user_text=user_text,
+        username=username,
+        chat_context=chat_context,
+        conversation_history=history
+    )
 
 
 VISION_ANALYSIS_SYSTEM_PROMPT = """Ты — Олег, технический эксперт с острым глазом.

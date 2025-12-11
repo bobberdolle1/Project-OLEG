@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, UserQuestionHistory, MessageLog
+from app.database.models import User, UserQuestionHistory, MessageLog, Chat
 from app.handlers.games import ensure_user # For getting user object
 from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context, generate_private_reply, is_ollama_available
 from app.services.recommendations import generate_recommendation
@@ -64,8 +64,6 @@ async def cmd_start(msg: Message):
 
 
 import random as _random
-from sqlalchemy import select as _select
-from app.database.models import Chat as _Chat
 from app.services.auto_reply import auto_reply_system, ChatSettings as AutoReplySettings
 
 
@@ -79,7 +77,7 @@ async def _should_reply(msg: Message) -> bool:
     - Бот упомянут в сообщении (@botname)
     - Упоминание "олег" в тексте
     - Сообщение содержит вопрос (?)
-    - Авто-ответ сработал по вероятности (15-40%)
+    - Авто-ответ сработал по вероятности
 
     Args:
         msg: Сообщение Telegram
@@ -96,6 +94,46 @@ async def _should_reply(msg: Message) -> bool:
     # В личных сообщениях всегда отвечаем
     if msg.chat.type == "private":
         return True
+
+    # Получаем ID топика сообщения
+    msg_topic_id = getattr(msg, 'message_thread_id', None)
+    
+    # Для групповых чатов проверяем ограничение по топику
+    # Эта проверка должна быть В НАЧАЛЕ, до всех остальных проверок
+    chat = None
+    auto_reply_chance = 1.0  # По умолчанию авто-ответ включен
+    
+    try:
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(select(Chat).filter_by(id=msg.chat.id))
+            chat = result.scalars().first()
+            
+            if chat:
+                auto_reply_chance = chat.auto_reply_chance
+                
+                # Логируем для отладки топиков
+                logger.debug(
+                    f"[TOPIC DEBUG] chat_id={msg.chat.id}, msg_topic_id={msg_topic_id}, "
+                    f"chat_active_topic_id={chat.active_topic_id}, "
+                    f"is_forum={msg.chat.is_forum}, auto_reply_chance={auto_reply_chance}"
+                )
+                
+                # Проверяем active_topic_id — если установлен (не None и не 0), 
+                # бот отвечает ТОЛЬКО в этом топике
+                # Если не установлен (None) или 0 — бот отвечает ВО ВСЕХ топиках
+                if chat.active_topic_id:  # None и 0 оба falsy — бот везде
+                    if msg_topic_id != chat.active_topic_id:
+                        logger.debug(
+                            f"Skipping message in topic {msg_topic_id}, "
+                            f"bot active only in topic {chat.active_topic_id}"
+                        )
+                        return False
+            else:
+                logger.debug(f"[TOPIC DEBUG] Chat {msg.chat.id} not found in DB, allowing reply")
+    except Exception as e:
+        logger.warning(f"Ошибка при проверке настроек чата: {e}")
+        # При ошибке разрешаем ответ
 
     # Проверка: это ответ на сообщение бота?
     if msg.reply_to_message:
@@ -134,55 +172,15 @@ async def _should_reply(msg: Message) -> bool:
 
     # Проверка: авто-ответ через AutoReplySystem
     # Бот активно участвует в чате как настоящий участник
-    try:
-        async_session = get_session()
-        async with async_session() as session:
-            result = await session.execute(_select(_Chat).filter_by(id=msg.chat.id))
-            chat = result.scalars().first()
-            
-            # Получаем ID топика сообщения
-            msg_topic_id = getattr(msg, 'message_thread_id', None)
-            
-            # Логируем для отладки топиков
+    if msg.text and auto_reply_chance > 0:
+        chat_settings = AutoReplySettings(auto_reply_chance=auto_reply_chance)
+        
+        if auto_reply_system.should_reply(msg.text, chat_settings):
             logger.debug(
-                f"[TOPIC DEBUG] chat_id={msg.chat.id}, msg_topic_id={msg_topic_id}, "
-                f"chat_active_topic_id={chat.active_topic_id if chat else 'no_chat'}, "
-                f"is_forum={msg.chat.is_forum}"
+                f"Auto-reply triggered for chat {msg.chat.id}, "
+                f"topic {msg_topic_id}, chance={auto_reply_chance}"
             )
-            
-            # Проверяем active_topic_id — если установлен (не None и не 0), бот отвечает только в этом топике
-            # Если не установлен (None) или 0 — бот отвечает во всех топиках (по умолчанию)
-            if chat and chat.active_topic_id:  # None и 0 оба falsy — бот везде
-                if msg_topic_id != chat.active_topic_id:
-                    logger.debug(
-                        f"Skipping message in topic {msg_topic_id}, "
-                        f"bot active only in topic {chat.active_topic_id}"
-                    )
-                    return False
-            
-            if msg.text:
-                # Получаем настройки чата или используем дефолтные
-                auto_reply_chance = 1.0  # По умолчанию авто-ответ включен
-                if chat:
-                    auto_reply_chance = chat.auto_reply_chance
-                
-                # Если авто-ответ не отключен (chance > 0)
-                if auto_reply_chance > 0:
-                    chat_settings = AutoReplySettings(auto_reply_chance=auto_reply_chance)
-                    
-                    if auto_reply_system.should_reply(msg.text, chat_settings):
-                        logger.debug(
-                            f"Auto-reply triggered for chat {msg.chat.id}, "
-                            f"topic {msg_topic_id}, chance={auto_reply_chance}"
-                        )
-                        return True
-    except Exception as e:
-        logger.debug(f"Ошибка при проверке авто-ответа: {e}")
-        # При ошибке всё равно пробуем авто-ответ с базовым шансом
-        if msg.text:
-            chat_settings = AutoReplySettings(auto_reply_chance=1.0)
-            if auto_reply_system.should_reply(msg.text, chat_settings):
-                return True
+            return True
 
     return False
 

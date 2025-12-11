@@ -399,7 +399,8 @@ async def general_qna(msg: Message):
                 user_text=text_with_context,
                 username=msg.from_user.username,
                 chat_id=msg.chat.id,
-                chat_context=games_context
+                chat_context=games_context,
+                topic_id=topic_id  # Передаём ID топика для корректной работы памяти
             )
 
         # Check if we should auto-voice this response (0.1% chance)

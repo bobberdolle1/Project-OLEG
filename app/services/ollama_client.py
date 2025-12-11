@@ -1101,7 +1101,7 @@ FACT_EXTRACTION_SYSTEM_PROMPT = """Ты — система извлечения 
 """
 
 
-async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = None) -> List[Dict]:
+async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = None, topic_id: int = None) -> List[Dict]:
     """
     Извлекает факты из сообщения с помощью LLM.
 
@@ -1109,6 +1109,7 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
         text: Текст сообщения
         chat_id: ID чата
         user_info: Информация о пользователе (имя, ID и т.д.)
+        topic_id: ID топика в форуме (опционально)
 
     Returns:
         Список словарей с извлеченными фактами
@@ -1161,6 +1162,10 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
                     'importance': fact_item.get('importance', 5),
                     'category': fact_item.get('category', 'general')
                 }
+                
+                # Добавляем topic_id если есть
+                if topic_id is not None:
+                    metadata['topic_id'] = topic_id
 
                 # Добавляем user_info как плоские поля (ChromaDB не поддерживает вложенные dict)
                 if user_info:
@@ -1179,7 +1184,7 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
         return []
 
 
-async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = None):
+async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = None, topic_id: int = None):
     """
     Сохраняет факт в векторную базу данных.
 
@@ -1187,6 +1192,7 @@ async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = No
         fact_text: Текст факта
         chat_id: ID чата
         metadata: Дополнительные метаданные
+        topic_id: ID топика в форуме (опционально)
     """
     try:
         if not metadata:
@@ -1194,6 +1200,10 @@ async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = No
 
         metadata['chat_id'] = chat_id
         metadata['stored_at'] = datetime.now().isoformat()
+        
+        # Добавляем topic_id если есть
+        if topic_id is not None:
+            metadata['topic_id'] = topic_id
 
         # Сохраняем факт в коллекцию для этого чата
         collection_name = f"chat_{chat_id}_facts"
@@ -1202,12 +1212,12 @@ async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = No
             fact_text=fact_text,
             metadata=metadata
         )
-        logger.debug(f"Факт сохранен для чата {chat_id}: {fact_text[:100]}...")
+        logger.debug(f"Факт сохранен для чата {chat_id} (topic={topic_id}): {fact_text[:100]}...")
     except Exception as e:
         logger.error(f"Ошибка при сохранении факта в память: {e}")
 
 
-async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 3) -> List[str]:
+async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 3, topic_id: int = None) -> List[str]:
     """
     Извлекает контекст из памяти Олега, релевантный запросу.
 
@@ -1215,24 +1225,32 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
         query: Запрос пользователя
         chat_id: ID чата
         n_results: Количество результатов для возврата
+        topic_id: ID топика в форуме (опционально, для фильтрации)
 
     Returns:
         Список релевантных фактов
     """
     try:
         collection_name = f"chat_{chat_id}_facts"
-        # Используем модель glm-4.6:cloud для поиска в базе знаний
+        
+        # Формируем фильтр по топику если указан
+        where_filter = None
+        if topic_id is not None:
+            where_filter = {"topic_id": topic_id}
+        
+        # Используем модель для поиска в базе знаний
         facts = vector_db.search_facts(
             collection_name=collection_name,
             query=query,
             n_results=n_results,
-            model=settings.ollama_memory_model  # Используем модель для поиска в памяти
+            model=settings.ollama_memory_model,
+            where=where_filter
         )
 
         # Извлекаем только тексты фактов
         context_facts = [fact['text'] for fact in facts if 'text' in fact]
 
-        logger.debug(f"Извлечено {len(context_facts)} фактов из памяти для чата {chat_id}")
+        logger.debug(f"Извлечено {len(context_facts)} фактов из памяти для чата {chat_id} (topic={topic_id})")
         return context_facts
     except Exception as e:
         logger.error(f"Ошибка при извлечении контекста из памяти: {e}")
@@ -1240,7 +1258,8 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
 
 
 async def generate_reply_with_context(user_text: str, username: str | None,
-                                   chat_id: int, chat_context: str | None = None) -> str:
+                                   chat_id: int, chat_context: str | None = None,
+                                   topic_id: int = None) -> str:
     """
     Генерирует ответ с учетом контекста из памяти.
 
@@ -1249,17 +1268,18 @@ async def generate_reply_with_context(user_text: str, username: str | None,
         username: Имя пользователя
         chat_id: ID чата
         chat_context: Контекст чата (название, описание)
+        topic_id: ID топика в форуме (опционально)
     """
-    # Извлекаем контекст из памяти
-    context_facts = await retrieve_context_for_query(user_text, chat_id)
+    # Извлекаем контекст из памяти (с учётом топика если указан)
+    context_facts = await retrieve_context_for_query(user_text, chat_id, topic_id=topic_id)
 
     # Извлекаем новые факты из сообщения (асинхронно, не блокируя ответ)
     user_info = {"username": username} if username else {}
-    new_facts = await extract_facts_from_message(user_text, chat_id, user_info)
+    new_facts = await extract_facts_from_message(user_text, chat_id, user_info, topic_id=topic_id)
 
     # Сохраняем новые факты
     for fact in new_facts:
-        await store_fact_to_memory(fact['text'], chat_id, fact['metadata'])
+        await store_fact_to_memory(fact['text'], chat_id, fact['metadata'], topic_id=topic_id)
 
     # Формируем расширенный контекст чата с памятью
     memory_context = ""

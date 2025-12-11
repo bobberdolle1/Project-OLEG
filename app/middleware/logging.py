@@ -48,6 +48,7 @@ class MessageLoggerMiddleware(BaseMiddleware):
                     text=text,
                     has_link=bool(links),
                     links="\n".join(links) if links else None,
+                    topic_id=getattr(event, 'message_thread_id', None),  # ID топика в форуме
                     created_at=utc_now(),
                 )
                 session.add(ml)

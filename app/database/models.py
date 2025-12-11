@@ -42,6 +42,7 @@ class MessageLog(Base):
     text: Mapped[Optional[str]] = mapped_column(Text)
     has_link: Mapped[bool] = mapped_column(Boolean, default=False)
     links: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # '\n' separated
+    topic_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)  # ID топика в форуме
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
 
 

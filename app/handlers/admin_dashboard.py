@@ -136,18 +136,11 @@ class AdminDashboard:
         async with get_session()() as session:
             chat = await session.get(Chat, chat_id)
             auto_reply_pct = int((chat.auto_reply_chance or 0) * 100) if chat else 0
-            active_topic = chat.active_topic_id if chat else None
-        
-        topic_text = f"#{active_topic}" if active_topic else "Везде"
         
         keyboard = InlineKeyboardBuilder()
         keyboard.button(
             text=f"🎲 Автоответ: {auto_reply_pct}%", 
             callback_data=f"adm_autoreply_{chat_id}"
-        )
-        keyboard.button(
-            text=f"📍 Топик: {topic_text}", 
-            callback_data=f"adm_topic_{chat_id}"
         )
         keyboard.button(text="🔙 Назад", callback_data=f"adm_chat_{chat_id}")
         
@@ -696,87 +689,6 @@ async def cb_set_autoreply(callback: CallbackQuery):
         "Настройки поведения бота:",
         reply_markup=keyboard.as_markup()
     )
-
-
-@router.callback_query(F.data.startswith("adm_topic_"))
-async def cb_topic_menu(callback: CallbackQuery):
-    """Show topic configuration. Requirements: 7.4"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    
-    async with get_session()() as session:
-        chat = await session.get(Chat, chat_id)
-        active_topic = chat.active_topic_id if chat else None
-    
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="🌐 Везде (все топики)", callback_data=f"adm_settopic_{chat_id}_0")
-    keyboard.button(text="📝 Ввести ID топика", callback_data=f"adm_settopic_input_{chat_id}")
-    keyboard.button(text="🔙 Назад", callback_data=f"adm_beh_{chat_id}")
-    keyboard.adjust(1)
-    
-    current = f"#{active_topic}" if active_topic else "Везде"
-    
-    await callback.message.edit_text(
-        f"📍 <b>Активный топик</b>\n\n"
-        f"Текущий: {current}\n\n"
-        f"Бот будет отвечать только в выбранном топике.\n"
-        f"'Везде' = бот активен во всех топиках.",
-        reply_markup=keyboard.as_markup()
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("adm_settopic_") & ~F.data.contains("input"))
-async def cb_set_topic(callback: CallbackQuery):
-    """Set active topic. Requirements: 7.4"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    chat_id = int(parts[2])
-    topic_id = int(parts[3]) if parts[3] != '0' else None
-    
-    async with get_session()() as session:
-        chat = await session.get(Chat, chat_id)
-        if chat:
-            chat.active_topic_id = topic_id
-            await session.commit()
-    
-    topic_text = f"#{topic_id}" if topic_id else "Везде"
-    await callback.answer(f"Активный топик: {topic_text}", show_alert=True)
-    
-    # Return to behavior menu
-    keyboard = await dashboard.build_behavior_menu(chat_id)
-    await callback.message.edit_text(
-        "⚙️ <b>Поведение</b>\n\n"
-        "Настройки поведения бота:",
-        reply_markup=keyboard.as_markup()
-    )
-
-
-@router.callback_query(F.data.startswith("adm_settopic_input_"))
-async def cb_topic_input_prompt(callback: CallbackQuery, state: FSMContext):
-    """Prompt for topic ID input. Requirements: 7.4"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[3])
-    
-    # For simplicity, we'll use a simple approach - ask user to type topic ID
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="🔙 Отмена", callback_data=f"adm_topic_{chat_id}")
-    
-    await callback.message.edit_text(
-        "Введи ID топика (число).\n\n"
-        "Чтобы узнать ID, перешли сообщение из нужного топика.",
-        reply_markup=keyboard.as_markup()
-    )
-    await callback.answer()
 
 
 # ============================================================================

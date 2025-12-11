@@ -95,12 +95,10 @@ async def _should_reply(msg: Message) -> bool:
     if msg.chat.type == "private":
         return True
 
-    # Получаем ID топика сообщения
+    # Получаем ID топика сообщения для логирования
     msg_topic_id = getattr(msg, 'message_thread_id', None)
     
-    # Для групповых чатов проверяем ограничение по топику
-    # Эта проверка должна быть В НАЧАЛЕ, до всех остальных проверок
-    chat = None
+    # Получаем настройки чата
     auto_reply_chance = 1.0  # По умолчанию авто-ответ включен
     
     try:
@@ -111,29 +109,12 @@ async def _should_reply(msg: Message) -> bool:
             
             if chat:
                 auto_reply_chance = chat.auto_reply_chance
-                
-                # Логируем для отладки топиков
                 logger.debug(
-                    f"[TOPIC DEBUG] chat_id={msg.chat.id}, msg_topic_id={msg_topic_id}, "
-                    f"chat_active_topic_id={chat.active_topic_id}, "
+                    f"[TOPIC DEBUG] chat_id={msg.chat.id}, topic_id={msg_topic_id}, "
                     f"is_forum={msg.chat.is_forum}, auto_reply_chance={auto_reply_chance}"
                 )
-                
-                # Проверяем active_topic_id — если установлен (не None и не 0), 
-                # бот отвечает ТОЛЬКО в этом топике
-                # Если не установлен (None) или 0 — бот отвечает ВО ВСЕХ топиках
-                if chat.active_topic_id:  # None и 0 оба falsy — бот везде
-                    if msg_topic_id != chat.active_topic_id:
-                        logger.debug(
-                            f"Skipping message in topic {msg_topic_id}, "
-                            f"bot active only in topic {chat.active_topic_id}"
-                        )
-                        return False
-            else:
-                logger.debug(f"[TOPIC DEBUG] Chat {msg.chat.id} not found in DB, allowing reply")
     except Exception as e:
         logger.warning(f"Ошибка при проверке настроек чата: {e}")
-        # При ошибке разрешаем ответ
 
     # Проверка: это ответ на сообщение бота?
     if msg.reply_to_message:

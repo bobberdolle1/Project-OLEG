@@ -14,6 +14,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 from app.services.vision_pipeline import vision_pipeline
+from app.services.ollama_client import is_ollama_available
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,11 @@ async def should_process_image(msg: Message) -> tuple[bool, bool]:
         
     **Validates: Requirements 1.1, 1.2, 1.3, 1.4**
     """
+    # Проверяем доступность Ollama перед обработкой
+    if not await is_ollama_available():
+        logger.debug(f"Image processing: skipping - Ollama not available")
+        return False, False
+    
     # Проверяем caption на упоминание бота
     caption = msg.caption or ""
     if _contains_bot_mention(caption, msg.bot):

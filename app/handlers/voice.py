@@ -21,7 +21,7 @@ from app.services.tts import tts_service
 from app.services.tts_edge import edge_tts_service
 from app.services.alive_ui import alive_ui_service
 from app.services.voice_recognition import transcribe_voice_message, transcribe_video_note, is_available as stt_available
-from app.services.ollama_client import generate_reply_with_context
+from app.services.ollama_client import generate_reply_with_context, is_ollama_available
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,11 @@ async def handle_voice_message(msg: Message):
     """
     if not stt_available():
         logger.warning("STT not available, skipping voice message")
+        return
+    
+    # Проверяем доступность Ollama перед обработкой
+    if not await is_ollama_available():
+        logger.debug("Skipping voice message - Ollama not available")
         return
     
     logger.info(f"Voice message from @{msg.from_user.username or msg.from_user.id}")
@@ -81,6 +86,11 @@ async def handle_video_note(msg: Message):
     """
     if not stt_available():
         logger.warning("STT not available, skipping video note")
+        return
+    
+    # Проверяем доступность Ollama перед обработкой
+    if not await is_ollama_available():
+        logger.debug("Skipping video note - Ollama not available")
         return
     
     logger.info(f"Video note from @{msg.from_user.username or msg.from_user.id}")

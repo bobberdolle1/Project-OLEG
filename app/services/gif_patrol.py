@@ -88,19 +88,22 @@ Your response must be exactly one word from the list above."""
     
     def extract_frames(self, gif_data: bytes) -> List[bytes]:
         """
-        Извлекает 3 кадра из GIF (начало, середина, конец).
+        Извлекает 3 кадра из GIF или MP4 анимации (начало, середина, конец).
+        
+        Telegram часто конвертирует GIF в MP4 для экономии трафика,
+        поэтому поддерживаем оба формата.
         
         Args:
-            gif_data: Байты GIF-файла
+            gif_data: Байты GIF или MP4 файла
             
         Returns:
             Список из 3 кадров в формате PNG bytes
             
         Raises:
-            ValueError: Если данные не являются валидным GIF
+            ValueError: Если данные не являются валидным GIF/MP4
         """
+        # Сначала пробуем открыть как GIF через PIL
         try:
-            # Открываем GIF
             gif = Image.open(io.BytesIO(gif_data))
             
             # Проверяем, что это анимированный GIF
@@ -116,13 +119,10 @@ Your response must be exactly one word from the list above."""
             
             # Определяем индексы кадров для извлечения
             if total_frames == 1:
-                # Один кадр - дублируем
                 frame_indices = [0, 0, 0]
             elif total_frames == 2:
-                # Два кадра - начало, начало, конец
                 frame_indices = [0, 0, 1]
             else:
-                # Три и более - начало, середина, конец
                 frame_indices = [
                     0,                          # Начало
                     total_frames // 2,          # Середина
@@ -132,7 +132,6 @@ Your response must be exactly one word from the list above."""
             frames = []
             for idx in frame_indices:
                 gif.seek(idx)
-                # Конвертируем в RGB если нужно
                 frame = gif.convert('RGB')
                 frame_bytes = self._frame_to_bytes(frame)
                 frames.append(frame_bytes)
@@ -140,9 +139,57 @@ Your response must be exactly one word from the list above."""
             logger.info(f"Extracted {len(frames)} frames from GIF with {total_frames} total frames")
             return frames
             
+        except Exception as pil_error:
+            logger.debug(f"PIL failed to open as GIF: {pil_error}, trying as MP4...")
+        
+        # Если PIL не смог открыть - пробуем как MP4 через imageio
+        try:
+            import imageio.v3 as iio
+            
+            # Читаем все кадры из MP4
+            frames_array = iio.imread(io.BytesIO(gif_data), plugin="pyav")
+            total_frames = len(frames_array)
+            
+            if total_frames == 0:
+                raise ValueError("MP4 has no frames")
+            
+            # Определяем индексы кадров
+            if total_frames == 1:
+                frame_indices = [0, 0, 0]
+            elif total_frames == 2:
+                frame_indices = [0, 0, 1]
+            else:
+                frame_indices = [
+                    0,
+                    total_frames // 2,
+                    total_frames - 1
+                ]
+            
+            frames = []
+            for idx in frame_indices:
+                # Конвертируем numpy array в PIL Image
+                frame_img = Image.fromarray(frames_array[idx])
+                if frame_img.mode != 'RGB':
+                    frame_img = frame_img.convert('RGB')
+                frame_bytes = self._frame_to_bytes(frame_img)
+                frames.append(frame_bytes)
+            
+            logger.info(f"Extracted {len(frames)} frames from MP4 with {total_frames} total frames")
+            return frames
+            
+        except ImportError:
+            logger.warning("imageio not available for MP4 processing, returning first frame only")
+            # Fallback: пробуем извлечь хотя бы первый кадр через PIL
+            try:
+                # Некоторые MP4 могут быть прочитаны PIL как статичное изображение
+                img = Image.open(io.BytesIO(gif_data))
+                frame_bytes = self._frame_to_bytes(img.convert('RGB'))
+                return [frame_bytes, frame_bytes, frame_bytes]
+            except Exception:
+                raise ValueError("Cannot extract frames: imageio not installed and PIL failed")
         except Exception as e:
-            logger.error(f"Error extracting frames from GIF: {e}")
-            raise ValueError(f"Failed to extract frames: {e}")
+            logger.error(f"Error extracting frames from MP4: {e}")
+            raise ValueError(f"Failed to extract frames from GIF/MP4: {e}")
     
     def _frame_to_bytes(self, frame: Image.Image) -> bytes:
         """Конвертирует PIL Image в PNG bytes."""

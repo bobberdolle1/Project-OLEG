@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.database.session import get_session
 from app.database.models import User, UserQuestionHistory, MessageLog
 from app.handlers.games import ensure_user # For getting user object
-from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context, generate_private_reply
+from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context, generate_private_reply, is_ollama_available
 from app.services.recommendations import generate_recommendation
 from app.services.tts import tts_service
 from app.services.golden_fund import golden_fund_service
@@ -87,6 +87,12 @@ async def _should_reply(msg: Message) -> bool:
     Returns:
         True, если нужно ответить
     """
+    # Проверяем доступность Ollama перед любым ответом
+    # Это предотвращает спам ошибками когда сервер недоступен
+    if not await is_ollama_available():
+        logger.debug(f"Skipping reply - Ollama not available")
+        return False
+    
     # В личных сообщениях всегда отвечаем
     if msg.chat.type == "private":
         return True

@@ -22,6 +22,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 from app.services.gif_patrol import gif_patrol_service, GIFAnalysisResult
 from app.services.alive_ui import alive_ui_service
+from app.services.ollama_client import is_ollama_available
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,11 @@ async def should_process_gif(msg: Message) -> tuple[bool, bool]:
     Returns:
         Tuple (should_process, is_auto_reply)
     """
+    # Проверяем доступность Ollama перед обработкой
+    if not await is_ollama_available():
+        logger.debug(f"GIF processing: skipping - Ollama not available")
+        return False, False
+    
     # Проверяем caption на упоминание бота
     caption = msg.caption or ""
     if _contains_bot_mention(caption, msg.bot):
@@ -360,19 +366,19 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
         return
     
     # Извлекаем первый кадр для анализа
+    frame_bytes = None
     try:
         frames = gif_patrol_service.extract_frames(animation_bytes)
-        if not frames:
-            if not is_auto_reply:
-                await message.reply("Не удалось разобрать гифку 😕")
-            return
-        # Берём первый кадр
-        frame_bytes = frames[0]
+        if frames:
+            frame_bytes = frames[0]
     except Exception as e:
-        logger.error(f"Error extracting GIF frame: {e}")
-        if not is_auto_reply:
-            await message.reply("Гифка какая-то странная, не могу разобрать 😕")
-        return
+        logger.warning(f"Error extracting GIF frames: {e}")
+    
+    # Если не удалось извлечь кадры - пробуем использовать сырые байты
+    # (vision pipeline может сам справиться с некоторыми форматами)
+    if not frame_bytes:
+        logger.info("Using raw animation bytes for vision analysis")
+        frame_bytes = animation_bytes
     
     # Используем caption как user_query
     user_query = None

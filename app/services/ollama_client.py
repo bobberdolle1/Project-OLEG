@@ -17,6 +17,47 @@ from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
+# Глобальный флаг доступности Ollama (кэшируется на короткое время)
+_ollama_available: bool | None = None
+_ollama_check_time: float = 0
+_OLLAMA_CHECK_INTERVAL = 30  # Проверять доступность каждые 30 секунд
+
+
+async def is_ollama_available() -> bool:
+    """
+    Быстрая проверка доступности Ollama.
+    Кэширует результат на 30 секунд чтобы не спамить запросами.
+    
+    Returns:
+        True если Ollama доступен
+    """
+    global _ollama_available, _ollama_check_time
+    import time
+    
+    current_time = time.time()
+    
+    # Используем кэшированный результат если он свежий
+    if _ollama_available is not None and (current_time - _ollama_check_time) < _OLLAMA_CHECK_INTERVAL:
+        return _ollama_available
+    
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{settings.ollama_base_url}/api/tags")
+            _ollama_available = response.status_code == 200
+    except Exception:
+        _ollama_available = False
+    
+    _ollama_check_time = current_time
+    logger.debug(f"Ollama availability check: {_ollama_available}")
+    return _ollama_available
+
+
+def reset_ollama_availability_cache():
+    """Сбросить кэш доступности Ollama (например, после успешного запроса)."""
+    global _ollama_available, _ollama_check_time
+    _ollama_available = None
+    _ollama_check_time = 0
+
 
 def detect_loop_in_text(text: str, min_pattern_len: int = 20, max_repeats: int = 3) -> tuple[bool, str]:
     """
@@ -401,6 +442,10 @@ async def _ollama_chat(
                 
                 success = True
                 duration = time.time() - start_time
+                
+                # Сбрасываем кэш доступности после успешного запроса
+                global _ollama_available
+                _ollama_available = True
                 
                 # Track metrics
                 try:

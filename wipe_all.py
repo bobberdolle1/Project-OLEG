@@ -11,38 +11,67 @@ import asyncio
 import shutil
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Загружаем .env
+load_dotenv()
+
+
+def get_chromadb_path() -> Path:
+    """Получить путь к ChromaDB из переменных окружения."""
+    return Path(os.getenv("CHROMADB_PERSIST_DIR", "./data/chromadb"))
+
+
+def get_database_url() -> str:
+    """Получить URL базы данных из переменных окружения."""
+    return os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/bot.db")
 
 
 async def wipe_database():
     """Сбросить все таблицы в базе данных."""
     print("🗄️  Сброс базы данных...")
     
-    from app.database.session import get_session
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
     from sqlalchemy import text
     
-    async_session = get_session()
+    database_url = get_database_url()
+    engine = create_async_engine(database_url)
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     
     async with async_session() as session:
-        # Сбрасываем active_topic_id для всех чатов
-        await session.execute(text("UPDATE chats SET active_topic_id = NULL"))
+        try:
+            # Сбрасываем active_topic_id для всех чатов
+            await session.execute(text("UPDATE chats SET active_topic_id = NULL"))
+            print("   ✅ active_topic_id сброшен")
+        except Exception as e:
+            print(f"   ⚠️  Ошибка сброса active_topic_id: {e}")
         
-        # Очищаем таблицу сообщений
-        await session.execute(text("DELETE FROM messages"))
+        try:
+            # Очищаем таблицу сообщений
+            result = await session.execute(text("DELETE FROM messages"))
+            print(f"   ✅ Удалено сообщений: {result.rowcount}")
+        except Exception as e:
+            print(f"   ⚠️  Ошибка очистки messages: {e}")
         
-        # Очищаем историю вопросов
-        await session.execute(text("DELETE FROM user_question_history"))
+        try:
+            # Очищаем историю вопросов
+            result = await session.execute(text("DELETE FROM user_question_history"))
+            print(f"   ✅ Удалено записей истории: {result.rowcount}")
+        except Exception as e:
+            print(f"   ⚠️  Ошибка очистки user_question_history: {e}")
         
         await session.commit()
-        print("   ✅ База данных очищена")
+    
+    await engine.dispose()
+    print("   ✅ База данных очищена")
 
 
 def wipe_vector_memory():
     """Удалить векторную базу данных (ChromaDB)."""
     print("🧠 Сброс векторной памяти...")
     
-    from app.config import settings
-    
-    chromadb_path = Path(settings.chromadb_persist_dir)
+    chromadb_path = get_chromadb_path()
     
     if chromadb_path.exists():
         shutil.rmtree(chromadb_path)
@@ -55,17 +84,18 @@ def wipe_vector_memory():
     print(f"   ✅ Создана пустая директория: {chromadb_path}")
 
 
-async def main():
+async def main(skip_confirm: bool = False):
     print("=" * 50)
     print("🔥 ПОЛНЫЙ ВАЙП ДАННЫХ БОТА")
     print("=" * 50)
     print()
     
     # Подтверждение
-    confirm = input("Вы уверены? Это удалит ВСЕ данные! (yes/no): ")
-    if confirm.lower() != "yes":
-        print("❌ Отменено")
-        return
+    if not skip_confirm:
+        confirm = input("Вы уверены? Это удалит ВСЕ данные! (yes/no): ")
+        if confirm.lower() != "yes":
+            print("❌ Отменено")
+            return
     
     print()
     
@@ -84,4 +114,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+    skip = "--yes" in sys.argv or "-y" in sys.argv
+    asyncio.run(main(skip_confirm=skip))

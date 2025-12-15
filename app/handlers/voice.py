@@ -34,10 +34,20 @@ async def handle_voice_message(msg: Message):
     Handle incoming voice messages - transcribe and respond.
     
     Uses faster-whisper for speech recognition.
+    Only responds in private chats or when replying to bot's message.
     """
     if not stt_available():
         logger.warning("STT not available, skipping voice message")
         return
+    
+    # В группах отвечаем только если это реплай на сообщение бота
+    if msg.chat.type != "private":
+        if not msg.reply_to_message:
+            return
+        if not msg.reply_to_message.from_user:
+            return
+        if msg.reply_to_message.from_user.id != msg.bot.id:
+            return
     
     # Проверяем доступность Ollama перед обработкой
     if not await is_ollama_available():
@@ -83,10 +93,20 @@ async def handle_voice_message(msg: Message):
 async def handle_video_note(msg: Message):
     """
     Handle incoming video notes (circles) - extract audio, transcribe and respond.
+    Only responds in private chats or when replying to bot's message.
     """
     if not stt_available():
         logger.warning("STT not available, skipping video note")
         return
+    
+    # В группах отвечаем только если это реплай на сообщение бота
+    if msg.chat.type != "private":
+        if not msg.reply_to_message:
+            return
+        if not msg.reply_to_message.from_user:
+            return
+        if msg.reply_to_message.from_user.id != msg.bot.id:
+            return
     
     # Проверяем доступность Ollama перед обработкой
     if not await is_ollama_available():

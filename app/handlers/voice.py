@@ -16,6 +16,7 @@ import logging
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.exceptions import TelegramBadRequest
 
 from app.services.tts import tts_service
 from app.services.tts_edge import edge_tts_service
@@ -84,9 +85,13 @@ async def handle_voice_message(msg: Message):
             # Just show transcription if no response
             await msg.reply(f"🎤 <i>{text}</i>", parse_mode="HTML")
             
+    except TelegramBadRequest as e:
+        if "message to be replied not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Voice message was deleted before reply: {e}")
+            return
+        logger.error(f"Voice message handling failed: {e}")
     except Exception as e:
         logger.error(f"Voice message handling failed: {e}")
-        await msg.reply("🎤 Ошибка при обработке голосового сообщения")
 
 
 @router.message(F.video_note)
@@ -141,9 +146,13 @@ async def handle_video_note(msg: Message):
         else:
             await msg.reply(f"🎥 <i>{text}</i>", parse_mode="HTML")
             
+    except TelegramBadRequest as e:
+        if "message to be replied not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Video note was deleted before reply: {e}")
+            return
+        logger.error(f"Video note handling failed: {e}")
     except Exception as e:
         logger.error(f"Video note handling failed: {e}")
-        await msg.reply("🎥 Ошибка при обработке кружочка")
 
 
 @router.message(Command("say"))

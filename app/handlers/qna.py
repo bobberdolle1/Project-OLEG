@@ -88,7 +88,7 @@ async def _should_reply(msg: Message) -> bool:
     # Проверяем доступность Ollama перед любым ответом
     # Это предотвращает спам ошибками когда сервер недоступен
     if not await is_ollama_available():
-        logger.debug(f"Skipping reply - Ollama not available")
+        logger.warning(f"Skipping reply - Ollama not available (chat_id={msg.chat.id})")
         return False
     
     # В личных сообщениях всегда отвечаем

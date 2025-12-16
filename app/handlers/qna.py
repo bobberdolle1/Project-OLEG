@@ -467,12 +467,32 @@ async def general_qna(msg: Message):
         # Send text response if voice wasn't sent
         sent_message = None
         if not voice_sent:
+            # Детальная диагностика перед отправкой
             logger.info(
                 f"[QNA SEND] chat={msg.chat.id} | topic={topic_id} | "
-                f"forum={is_forum} | reply_to={msg.message_id} | len={len(reply)}"
+                f"forum={is_forum} | reply_to={msg.message_id} | len={len(reply)} | "
+                f"chat_type={msg.chat.type}"
             )
+            
+            # Для форумов проверяем что topic_id корректный
+            if is_forum and topic_id is None:
+                logger.warning(
+                    f"[QNA WARN] Форум без topic_id! chat={msg.chat.id}, "
+                    f"возможно General топик скрыт"
+                )
+            
             try:
-                sent_message = await msg.reply(reply, disable_web_page_preview=True)
+                # В форумах явно указываем message_thread_id для надёжности
+                if is_forum and topic_id:
+                    sent_message = await msg.bot.send_message(
+                        chat_id=msg.chat.id,
+                        text=reply,
+                        reply_to_message_id=msg.message_id,
+                        message_thread_id=topic_id,
+                        disable_web_page_preview=True
+                    )
+                else:
+                    sent_message = await msg.reply(reply, disable_web_page_preview=True)
                 logger.info(f"[QNA OK] Ответ отправлен в chat={msg.chat.id}, topic={topic_id}")
             except TelegramBadRequest as e:
                 error_msg = str(e).lower()

@@ -196,7 +196,12 @@ def build_dp() -> Dispatcher:
 
 async def main():
     """Главная функция бота."""
-    logger.info(f"Начало запуска бота. Модель: {settings.ollama_model}")
+    logger.info("=" * 60)
+    logger.info("ЗАПУСК БОТА ОЛЕГ")
+    logger.info("=" * 60)
+    logger.info(f"Модель: {settings.ollama_model}")
+    logger.info(f"Redis: {'включен' if settings.redis_enabled else 'выключен'}")
+    logger.info(f"Уровень логов: {settings.log_level}")
 
     if not settings.bot_token:
         logger.error("TELEGRAM_BOT_TOKEN не установлен!")
@@ -207,17 +212,27 @@ async def main():
 
     await on_startup(bot, dp)
 
-    logger.info("Бот начинает polling...")
+    logger.info("=" * 60)
+    logger.info("БОТ ГОТОВ К РАБОТЕ")
+    logger.info("=" * 60)
     try:
-        # Удаляем webhook и очищаем все накопившиеся обновления перед запуском
         await bot.delete_webhook(drop_pending_updates=True)
         logger.info("Webhook удален, pending updates очищены")
         
-        # skip_updates=True - игнорируем старые сообщения при запуске
+        bot_info = await bot.get_me()
+        logger.info(f"Бот: @{bot_info.username} (id: {bot_info.id})")
+        logger.info("Начинаем polling...")
+        
         await dp.start_polling(bot, skip_updates=True)
     except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем")
+        logger.info("Бот остановлен пользователем (Ctrl+C)")
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {type(e).__name__}: {e}")
+        raise
     finally:
+        logger.info("=" * 60)
+        logger.info("ОСТАНОВКА БОТА")
+        logger.info("=" * 60)
         logger.info("Остановка фоновых задач...")
         # Отменяем все задачи, которые мы сохранили в dp
         if hasattr(dp, 'tasks'):

@@ -343,25 +343,15 @@ async def _ollama_chat(
 ) -> str:
     """
     Отправить запрос к Ollama API и получить ответ от модели.
-
-    Args:
-        messages: Список сообщений (система, пользователь, ассистент)
-        temperature: Параметр температуры для генерации (0-1)
-        retry: Количество попыток повтора при ошибке
-        use_cache: Использовать ли кэш для этого запроса
-        model: Модель для использования (по умолчанию settings.ollama_model)
-        enable_tools: Включить инструменты (веб-поиск)
-
-    Returns:
-        Текст ответа от модели
-
-    Raises:
-        httpx.HTTPError: При критической ошибке Ollama
     """
     import time
     start_time = time.time()
     model_to_use = model or settings.ollama_model
     success = False
+    
+    # Получаем краткое содержание запроса для логов
+    user_msg = next((m.get("content", "")[:50] for m in messages if m.get("role") == "user"), "")
+    logger.info(f"[OLLAMA] Запрос к {model_to_use} | tools={enable_tools} | msg=\"{user_msg}...\"")
     
     if not settings.ollama_cache_enabled or not use_cache:
         logger.debug("Ollama cache disabled or bypassed for this request.")
@@ -451,6 +441,11 @@ async def _ollama_chat(
                 success = True
                 duration = time.time() - start_time
                 
+                logger.info(
+                    f"[OLLAMA OK] model={model_to_use} | time={duration:.2f}s | "
+                    f"response_len={len(content)}"
+                )
+                
                 # Сбрасываем кэш доступности после успешного запроса
                 global _ollama_available
                 _ollama_available = True
@@ -460,40 +455,39 @@ async def _ollama_chat(
                     from app.services.metrics import track_ollama_request
                     await track_ollama_request(model_to_use, duration, success)
                 except Exception:
-                    pass  # Don't fail on metrics error
+                    pass
                 
                 return content.strip()
         except httpx.TimeoutException as e:
+            duration = time.time() - start_time
             logger.warning(
-                f"Ollama timeout "
-                f"(попытка {attempt + 1}/{retry + 1}): {e}"
+                f"[OLLAMA TIMEOUT] model={model_to_use} | attempt={attempt + 1}/{retry + 1} | "
+                f"time={duration:.2f}s"
             )
             if attempt == retry:
-                logger.error(
-                    "Ollama timeout: server не ответил "
-                    "за установленное время"
-                )
+                logger.error(f"[OLLAMA FAIL] Timeout после {retry + 1} попыток")
                 raise
         except httpx.HTTPStatusError as e:
             logger.error(
-                f"Ollama HTTP error "
-                f"({e.response.status_code}): {e}"
+                f"[OLLAMA HTTP ERROR] model={model_to_use} | status={e.response.status_code}"
             )
             if attempt == retry:
                 raise
         except httpx.RequestError as e:
             logger.warning(
-                f"Ollama request error "
-                f"(попытка {attempt + 1}/{retry + 1}): {e}"
+                f"[OLLAMA REQUEST ERROR] model={model_to_use} | attempt={attempt + 1}/{retry + 1} | "
+                f"error={e}"
             )
             if attempt == retry:
-                logger.error(f"Ollama request failed: {e}")
+                logger.error(f"[OLLAMA FAIL] Request error: {e}")
                 raise
         except Exception as e:
-            logger.error(f"Ollama unexpected error: {e}")
+            duration = time.time() - start_time
+            logger.error(
+                f"[OLLAMA UNEXPECTED] model={model_to_use} | time={duration:.2f}s | "
+                f"error={type(e).__name__}: {e}"
+            )
             if attempt == retry:
-                # Track failed request
-                duration = time.time() - start_time
                 try:
                     from app.services.metrics import track_ollama_request
                     await track_ollama_request(model_to_use, duration, False)

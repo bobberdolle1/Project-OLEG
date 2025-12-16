@@ -70,36 +70,22 @@ from app.services.auto_reply import auto_reply_system, ChatSettings as AutoReply
 async def _should_reply(msg: Message) -> bool:
     """
     Проверить, должен ли бот ответить на сообщение.
-
-    Бот отвечает в следующих случаях:
-    - Это личное сообщение (private chat)
-    - Это ответ на сообщение бота (reply)
-    - Бот упомянут в сообщении (@botname)
-    - Упоминание "олег" в тексте
-    - Сообщение содержит вопрос (?)
-    - Авто-ответ сработал по вероятности
-
-    Args:
-        msg: Сообщение Telegram
-
-    Returns:
-        True, если нужно ответить
     """
-    # Проверяем доступность Ollama перед любым ответом
-    # Это предотвращает спам ошибками когда сервер недоступен
+    msg_topic_id = getattr(msg, 'message_thread_id', None)
+    is_forum = getattr(msg.chat, 'is_forum', False)
+    
+    # Проверяем доступность Ollama
     if not await is_ollama_available():
-        logger.warning(f"Skipping reply - Ollama not available (chat_id={msg.chat.id})")
+        logger.warning(f"[SHOULD_REPLY] NO - Ollama недоступен | chat={msg.chat.id}")
         return False
     
     # В личных сообщениях всегда отвечаем
     if msg.chat.type == "private":
+        logger.debug(f"[SHOULD_REPLY] YES - private chat")
         return True
 
-    # Получаем ID топика сообщения для логирования
-    msg_topic_id = getattr(msg, 'message_thread_id', None)
-    
     # Получаем настройки чата
-    auto_reply_chance = 1.0  # По умолчанию авто-ответ включен
+    auto_reply_chance = 1.0
     
     try:
         async_session = get_session()
@@ -110,11 +96,11 @@ async def _should_reply(msg: Message) -> bool:
             if chat:
                 auto_reply_chance = chat.auto_reply_chance
                 logger.debug(
-                    f"[TOPIC DEBUG] chat_id={msg.chat.id}, topic_id={msg_topic_id}, "
-                    f"is_forum={msg.chat.is_forum}, auto_reply_chance={auto_reply_chance}"
+                    f"[SHOULD_REPLY CHECK] chat={msg.chat.id} | topic={msg_topic_id} | "
+                    f"forum={is_forum} | auto_chance={auto_reply_chance}"
                 )
     except Exception as e:
-        logger.warning(f"Ошибка при проверке настроек чата: {e}")
+        logger.warning(f"[SHOULD_REPLY] Ошибка настроек чата: {e}")
 
     # Проверка: это ответ на сообщение бота?
     if msg.reply_to_message:
@@ -122,47 +108,42 @@ async def _should_reply(msg: Message) -> bool:
             msg.reply_to_message.from_user
             and msg.reply_to_message.from_user.id == msg.bot.id
         ):
+            logger.debug(f"[SHOULD_REPLY] YES - reply to bot")
             return True
 
     # Проверка: бот упомянут в тексте?
     if msg.entities and msg.text and msg.bot._me:
         bot_username = msg.bot._me.username
         if bot_username and ("@" + bot_username) in msg.text:
+            logger.debug(f"[SHOULD_REPLY] YES - bot mentioned @{bot_username}")
             return True
 
-    # Проверка: упоминание "олег" в тексте (без @)
+    # Проверка: упоминание "олег" в тексте
     if msg.text:
         text_lower = msg.text.lower()
-        # Проверяем слово "олег" как отдельное слово или в начале/конце
         oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
         for trigger in oleg_triggers:
-            # Проверяем что это отдельное слово, а не часть другого
             if re.search(rf'\b{trigger}\b', text_lower):
+                logger.debug(f"[SHOULD_REPLY] YES - trigger '{trigger}'")
                 return True
         
-        # Проверка: сообщение содержит вопрос — но только реальный вопрос!
+        # Проверка: реальный вопрос
         if "?" in msg.text:
-            # Фильтруем бессмысленные "вопросы" типа "как с помидором?"
             if _is_real_question(msg.text):
-                # Отвечаем на реальные вопросы с умеренной вероятностью (40%)
                 if _random.random() < 0.40:
-                    logger.debug(f"Replying to real question in chat {msg.chat.id}")
+                    logger.debug(f"[SHOULD_REPLY] YES - real question (40%)")
                     return True
             else:
-                logger.debug(f"Skipping non-real question: {msg.text[:50]}...")
+                logger.debug(f"[SHOULD_REPLY] SKIP - not real question: {msg.text[:30]}...")
 
-    # Проверка: авто-ответ через AutoReplySystem
-    # Бот активно участвует в чате как настоящий участник
+    # Авто-ответ
     if msg.text and auto_reply_chance > 0:
         chat_settings = AutoReplySettings(auto_reply_chance=auto_reply_chance)
-        
         if auto_reply_system.should_reply(msg.text, chat_settings):
-            logger.debug(
-                f"Auto-reply triggered for chat {msg.chat.id}, "
-                f"topic {msg_topic_id}, chance={auto_reply_chance}"
-            )
+            logger.debug(f"[SHOULD_REPLY] YES - auto-reply (chance={auto_reply_chance})")
             return True
 
+    logger.debug(f"[SHOULD_REPLY] NO - no conditions matched")
     return False
 
 
@@ -370,31 +351,30 @@ GAMES_AI_CONTEXT = """
 async def general_qna(msg: Message):
     """
     Общий обработчик Q&A.
-
-    Отвечает на вопросы пользователей, если бот упомянут
-    или это ответ на сообщение бота.
     """
-    # Пропускаем команды — они обрабатываются другими роутерами
     if msg.text and msg.text.startswith('/'):
         return
     
-    # Логируем информацию о топике для отладки
+    # Собираем информацию для логирования
     topic_id = getattr(msg, 'message_thread_id', None)
-    if topic_id:
-        logger.debug(f"Сообщение из топика {topic_id} в чате {msg.chat.id}: {msg.text[:50] if msg.text else 'empty'}...")
+    is_forum = getattr(msg.chat, 'is_forum', False)
+    user_tag = f"@{msg.from_user.username}" if msg.from_user.username else f"id:{msg.from_user.id}"
+    
+    # Логируем входящее сообщение
+    logger.info(
+        f"[QNA IN] chat={msg.chat.id} | type={msg.chat.type} | forum={is_forum} | "
+        f"topic={topic_id} | user={user_tag} | msg_id={msg.message_id} | "
+        f"text=\"{msg.text[:40] if msg.text else ''}...\""
+    )
     
     if not await _should_reply(msg):
         return
 
     text = msg.text or ""
     async_session = get_session()
-    user = await ensure_user(msg.from_user) # Ensure user exists and get the User object
+    user = await ensure_user(msg.from_user)
 
-    try:
-        logger.info(
-            f"Q&A от @{msg.from_user.username or msg.from_user.id}: "
-            f"{text[:50]}..."
-        )
+    logger.info(f"[QNA PROCESS] Обрабатываем от {user_tag}: \"{text[:50]}...\"")
 
         # Проверяем, спрашивает ли про игры — даём контекст ИИ
         games_context = GAMES_AI_CONTEXT if _is_games_help_request(text) else None
@@ -487,13 +467,35 @@ async def general_qna(msg: Message):
         # Send text response if voice wasn't sent
         sent_message = None
         if not voice_sent:
+            logger.info(
+                f"[QNA SEND] chat={msg.chat.id} | topic={topic_id} | "
+                f"forum={is_forum} | reply_to={msg.message_id} | len={len(reply)}"
+            )
             try:
                 sent_message = await msg.reply(reply, disable_web_page_preview=True)
+                logger.info(f"[QNA OK] Ответ отправлен в chat={msg.chat.id}, topic={topic_id}")
             except TelegramBadRequest as e:
-                if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
-                    logger.warning(f"Cannot reply - topic/message deleted: {e}")
-                    return
-                raise
+                error_msg = str(e).lower()
+                logger.error(
+                    f"[QNA ERROR] TelegramBadRequest: {e} | chat={msg.chat.id} | "
+                    f"topic={topic_id} | forum={is_forum}"
+                )
+                if "thread not found" in error_msg or "message to reply not found" in error_msg:
+                    # Пробуем отправить без reply_to
+                    logger.info(f"[QNA FALLBACK] Пробуем send_message: chat={msg.chat.id}, topic={topic_id}")
+                    try:
+                        sent_message = await msg.bot.send_message(
+                            chat_id=msg.chat.id,
+                            text=reply,
+                            message_thread_id=topic_id,
+                            disable_web_page_preview=True
+                        )
+                        logger.info(f"[QNA FALLBACK OK] send_message успешен")
+                    except TelegramBadRequest as fallback_err:
+                        logger.error(f"[QNA FALLBACK FAIL] {fallback_err}")
+                        return
+                else:
+                    raise
         
         # Логируем ответ бота в ЛС для сохранения истории диалога
         if msg.chat.type == "private" and sent_message:

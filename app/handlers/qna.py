@@ -491,37 +491,33 @@ async def general_qna(msg: Message):
             
             try:
                 if is_forum:
-                    if topic_id and topic_id < 1000:
-                        # Старый топик — пробуем прямой API вызов через httpx
-                        logger.info(f"[QNA] Старый топик (id={topic_id}), прямой API вызов")
-                        import httpx
-                        bot_token = msg.bot.token
-                        api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-                        payload = {
-                            "chat_id": msg.chat.id,
-                            "text": reply,
-                            "message_thread_id": topic_id,
-                            "disable_web_page_preview": True
-                        }
-                        async with httpx.AsyncClient() as client:
-                            resp = await client.post(api_url, json=payload)
-                            result = resp.json()
-                            logger.info(f"[QNA] Прямой API ответ: {result}")
-                            if result.get("ok"):
-                                sent_message = None  # Не парсим, просто логируем
-                            else:
-                                raise TelegramBadRequest(
-                                    method="sendMessage",
-                                    message=result.get("description", "Unknown error")
-                                )
-                    else:
-                        sent_message = await msg.bot.send_message(
-                            chat_id=msg.chat.id,
-                            text=reply,
-                            reply_to_message_id=msg.message_id,
-                            message_thread_id=topic_id,
-                            disable_web_page_preview=True
-                        )
+                    # Используем reply_parameters — работает для всех топиков включая старые
+                    logger.info(f"[QNA] Форум: отправка через reply_parameters (topic={topic_id})")
+                    import httpx
+                    bot_token = msg.bot.token
+                    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                    payload = {
+                        "chat_id": msg.chat.id,
+                        "text": reply,
+                        "reply_parameters": {
+                            "message_id": msg.message_id,
+                            "chat_id": msg.chat.id
+                        },
+                        "disable_web_page_preview": True
+                    }
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(api_url, json=payload)
+                        result = resp.json()
+                        if result.get("ok"):
+                            logger.info(f"[QNA OK] Ответ отправлен через reply_parameters")
+                            sent_message = None
+                        else:
+                            error_desc = result.get("description", "Unknown error")
+                            logger.error(f"[QNA ERROR] API error: {error_desc}")
+                            raise TelegramBadRequest(
+                                method="sendMessage",
+                                message=error_desc
+                            )
                 else:
                     sent_message = await msg.reply(reply, disable_web_page_preview=True)
                 logger.info(f"[QNA OK] Ответ отправлен в chat={msg.chat.id}, topic={topic_id}")

@@ -484,15 +484,30 @@ async def general_qna(msg: Message):
                     # Пробуем отправить без reply_to
                     logger.info(f"[QNA FALLBACK] Пробуем send_message: chat={msg.chat.id}, topic={topic_id}")
                     try:
+                        # Если topic_id есть — отправляем в этот топик
+                        # Если topic_id None и это форум — пробуем без thread_id (General)
+                        thread_id_to_use = topic_id if topic_id else None
                         sent_message = await msg.bot.send_message(
                             chat_id=msg.chat.id,
                             text=reply,
-                            message_thread_id=topic_id,
+                            message_thread_id=thread_id_to_use,
                             disable_web_page_preview=True
                         )
-                        logger.info(f"[QNA FALLBACK OK] send_message успешен")
+                        logger.info(f"[QNA FALLBACK OK] send_message успешен (thread={thread_id_to_use})")
                     except TelegramBadRequest as fallback_err:
                         logger.error(f"[QNA FALLBACK FAIL] {fallback_err}")
+                        # Последняя попытка — отправить в чат без указания топика
+                        if is_forum and topic_id:
+                            try:
+                                logger.info(f"[QNA FALLBACK2] Пробуем без thread_id")
+                                sent_message = await msg.bot.send_message(
+                                    chat_id=msg.chat.id,
+                                    text=reply,
+                                    disable_web_page_preview=True
+                                )
+                                logger.info(f"[QNA FALLBACK2 OK] Отправлено без thread_id")
+                            except TelegramBadRequest as final_err:
+                                logger.error(f"[QNA FALLBACK2 FAIL] {final_err}")
                         return
                 else:
                     raise

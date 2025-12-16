@@ -16,6 +16,7 @@ from app.database.models import User, GameChallenge, UserBalance
 from app.services.game_engine import game_engine, ChallengeStatus, GameType
 from app.services.state_manager import state_manager
 from app.services.duel_engine import DuelEngine, DuelState, DuelStatus, Zone, OLEG_USER_ID
+from app.handlers.games import ensure_user
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -267,6 +268,9 @@ async def cmd_challenge(msg: Message):
     chat_id = msg.chat.id
     challenger_name = msg.from_user.username or msg.from_user.first_name
     
+    # Save challenger to DB for future PvP lookups
+    await ensure_user(msg.from_user)
+    
     # Check if user is already playing (Requirements 2.2, 2.3)
     if await state_manager.is_playing(challenger_id, chat_id):
         session = await state_manager.get_session(challenger_id, chat_id)
@@ -282,8 +286,13 @@ async def cmd_challenge(msg: Message):
     
     # Check if replying to a message
     if msg.reply_to_message and msg.reply_to_message.from_user:
-        target_id = msg.reply_to_message.from_user.id
-        target_name = msg.reply_to_message.from_user.username or msg.reply_to_message.from_user.first_name
+        reply_user = msg.reply_to_message.from_user
+        # Skip if replying to bot or self
+        if not reply_user.is_bot and reply_user.id != challenger_id:
+            target_id = reply_user.id
+            target_name = reply_user.username or reply_user.first_name
+            # Save target user to DB for future PvP lookups
+            await ensure_user(reply_user)
     
     # Parse command arguments
     parts = (msg.text or "").split()
@@ -298,7 +307,9 @@ async def cmd_challenge(msg: Message):
                 pass
     
     # If we have a username but no ID, try to find the user
+    username_was_specified = False
     if target_name and not target_id:
+        username_was_specified = True
         async_session = get_session()
         async with async_session() as session:
             result = await session.execute(
@@ -310,6 +321,15 @@ async def cmd_challenge(msg: Message):
     
     # PvE mode: no target specified (Requirements 4.2, 4.4)
     if not target_id:
+        # If username was specified but not found, show error instead of PvE
+        if username_was_specified:
+            await msg.reply(
+                f"❌ Пользователь @{target_name} не найден.\n\n"
+                "💡 <b>Совет:</b> Ответь на сообщение соперника командой /challenge\n"
+                "Или просто /challenge для боя с Олегом.",
+                parse_mode="HTML"
+            )
+            return
         await start_pve_duel(msg, challenger_id, chat_id, challenger_name, bet_amount)
         return
     

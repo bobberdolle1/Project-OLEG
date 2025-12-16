@@ -183,10 +183,17 @@ class GameHubUI:
         # Use model_copy() since aiogram 3.x Message objects are frozen (Pydantic v2)
         # Also set the text to the appropriate command for proper parsing
         command_text = GAME_COMMANDS.get(game_type, f"/{game_type}")
-        fake_message = callback.message.model_copy(update={
+        
+        # For PvE mode, clear reply_to_message to avoid self-challenge detection
+        # (cmd_challenge checks reply_to_message for target user)
+        update_fields = {
             "from_user": callback.from_user,
             "text": command_text
-        })
+        }
+        if game_type == "pve":
+            update_fields["reply_to_message"] = None
+        
+        fake_message = callback.message.model_copy(update=update_fields)
         
         try:
             if game_type == "roulette":
@@ -198,8 +205,10 @@ class GameHubUI:
             elif game_type == "duel":
                 await callback.message.answer(
                     "⚔️ <b>PvP Дуэль</b>\n\n"
-                    "Вызови соперника: /challenge @username [ставка]\n"
-                    "Или /challenge для боя с Олегом!",
+                    "Способы вызова:\n"
+                    "• Ответь на сообщение соперника: /challenge [ставка]\n"
+                    "• По нику: /challenge @username [ставка]\n"
+                    "• Бой с Олегом: /challenge",
                     parse_mode="HTML"
                 )
             elif game_type == "pve":

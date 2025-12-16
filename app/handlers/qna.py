@@ -490,13 +490,30 @@ async def general_qna(msg: Message):
                 )
             
             try:
-                # В форумах используем send_message с message_thread_id
                 if is_forum:
-                    # Для старых топиков (ID < 1000) используем msg.answer()
-                    # который должен автоматически определить топик
                     if topic_id and topic_id < 1000:
-                        logger.info(f"[QNA] Старый топик (id={topic_id}), используем answer()")
-                        sent_message = await msg.answer(reply, disable_web_page_preview=True)
+                        # Старый топик — пробуем прямой API вызов через httpx
+                        logger.info(f"[QNA] Старый топик (id={topic_id}), прямой API вызов")
+                        import httpx
+                        bot_token = msg.bot.token
+                        api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                        payload = {
+                            "chat_id": msg.chat.id,
+                            "text": reply,
+                            "message_thread_id": topic_id,
+                            "disable_web_page_preview": True
+                        }
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.post(api_url, json=payload)
+                            result = resp.json()
+                            logger.info(f"[QNA] Прямой API ответ: {result}")
+                            if result.get("ok"):
+                                sent_message = None  # Не парсим, просто логируем
+                            else:
+                                raise TelegramBadRequest(
+                                    method="sendMessage",
+                                    message=result.get("description", "Unknown error")
+                                )
                     else:
                         sent_message = await msg.bot.send_message(
                             chat_id=msg.chat.id,

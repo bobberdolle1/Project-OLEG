@@ -360,6 +360,13 @@ async def general_qna(msg: Message):
     is_forum = getattr(msg.chat, 'is_forum', False)
     user_tag = f"@{msg.from_user.username}" if msg.from_user.username else f"id:{msg.from_user.id}"
     
+    # Детальная диагностика топика
+    logger.debug(
+        f"[QNA DEBUG] raw message_thread_id={msg.message_thread_id if hasattr(msg, 'message_thread_id') else 'NO_ATTR'}, "
+        f"is_topic_message={getattr(msg, 'is_topic_message', 'NO_ATTR')}, "
+        f"reply_to={msg.reply_to_message.message_id if msg.reply_to_message else None}"
+    )
+    
     # Логируем входящее сообщение
     logger.info(
         f"[QNA IN] chat={msg.chat.id} | type={msg.chat.type} | forum={is_forum} | "

@@ -374,11 +374,13 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
     except Exception as e:
         logger.warning(f"Error extracting GIF frames: {e}")
     
-    # Если не удалось извлечь кадры - пробуем использовать сырые байты
-    # (vision pipeline может сам справиться с некоторыми форматами)
+    # Если не удалось извлечь кадры - возвращаем ошибку
+    # Vision модель не может обработать сырые MP4 байты
     if not frame_bytes:
-        logger.info("Using raw animation bytes for vision analysis")
-        frame_bytes = animation_bytes
+        logger.warning("Failed to extract frames from animation, cannot analyze")
+        if not is_auto_reply:
+            await message.reply("Не смог разобрать эту гифку — формат не поддерживается 😕")
+        return
     
     # Используем caption как user_query
     user_query = None

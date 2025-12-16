@@ -102,7 +102,18 @@ Your response must be exactly one word from the list above."""
         Raises:
             ValueError: Если данные не являются валидным GIF/MP4
         """
-        # Сначала пробуем открыть как GIF через PIL
+        # Определяем формат по magic bytes
+        is_mp4 = gif_data[:4] == b'\x00\x00\x00\x18' or gif_data[4:8] == b'ftyp'
+        is_gif = gif_data[:6] in (b'GIF87a', b'GIF89a')
+        
+        logger.debug(f"Animation format detection: is_gif={is_gif}, is_mp4={is_mp4}, first_bytes={gif_data[:12].hex()}")
+        
+        # Если это MP4 — сразу идём в imageio
+        if is_mp4:
+            logger.info("Detected MP4 format, using imageio")
+            return self._extract_frames_mp4(gif_data)
+        
+        # Пробуем открыть как GIF через PIL
         try:
             gif = Image.open(io.BytesIO(gif_data))
             
@@ -143,12 +154,26 @@ Your response must be exactly one word from the list above."""
             logger.debug(f"PIL failed to open as GIF: {pil_error}, trying as MP4...")
         
         # Если PIL не смог открыть - пробуем как MP4 через imageio
+        return self._extract_frames_mp4(gif_data)
+    
+    def _extract_frames_mp4(self, mp4_data: bytes) -> List[bytes]:
+        """
+        Извлекает кадры из MP4 через imageio.
+        
+        Args:
+            mp4_data: Байты MP4 файла
+            
+        Returns:
+            Список из 3 кадров в формате PNG bytes
+        """
         try:
             import imageio.v3 as iio
             
             # Читаем все кадры из MP4
-            frames_array = iio.imread(io.BytesIO(gif_data), plugin="pyav")
+            frames_array = iio.imread(io.BytesIO(mp4_data), plugin="pyav")
             total_frames = len(frames_array)
+            
+            logger.info(f"MP4 has {total_frames} frames")
             
             if total_frames == 0:
                 raise ValueError("MP4 has no frames")
@@ -174,22 +199,15 @@ Your response must be exactly one word from the list above."""
                 frame_bytes = self._frame_to_bytes(frame_img)
                 frames.append(frame_bytes)
             
-            logger.info(f"Extracted {len(frames)} frames from MP4 with {total_frames} total frames")
+            logger.info(f"Extracted {len(frames)} frames from MP4")
             return frames
             
-        except ImportError:
-            logger.warning("imageio not available for MP4 processing, returning first frame only")
-            # Fallback: пробуем извлечь хотя бы первый кадр через PIL
-            try:
-                # Некоторые MP4 могут быть прочитаны PIL как статичное изображение
-                img = Image.open(io.BytesIO(gif_data))
-                frame_bytes = self._frame_to_bytes(img.convert('RGB'))
-                return [frame_bytes, frame_bytes, frame_bytes]
-            except Exception:
-                raise ValueError("Cannot extract frames: imageio not installed and PIL failed")
+        except ImportError as e:
+            logger.error(f"imageio not available for MP4 processing: {e}")
+            raise ValueError("Cannot extract frames from MP4: imageio[pyav] not installed")
         except Exception as e:
             logger.error(f"Error extracting frames from MP4: {e}")
-            raise ValueError(f"Failed to extract frames from GIF/MP4: {e}")
+            raise ValueError(f"Failed to extract frames from MP4: {e}")
     
     def _frame_to_bytes(self, frame: Image.Image) -> bytes:
         """Конвертирует PIL Image в PNG bytes."""

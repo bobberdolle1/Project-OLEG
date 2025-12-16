@@ -20,6 +20,9 @@ cachetools
 redis
 arq
 
+# GIF/MP4 processing
+imageio[pyav]
+
 # TTS
 edge-tts
 gTTS

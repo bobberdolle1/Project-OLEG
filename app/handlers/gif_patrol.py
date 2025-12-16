@@ -115,12 +115,22 @@ async def handle_unsafe_content(
             f"Сообщение удалено, пользователь заблокирован."
         )
         
+        thread_id = getattr(message, 'message_thread_id', None)
         try:
-            await bot.send_message(
-                chat_id=message.chat.id,
-                text=notification,
-                message_thread_id=thread_id
-            )
+            # Для форумов используем прямой API
+            if thread_id is not None:
+                import httpx
+                bot_token = bot.token
+                api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                payload = {
+                    "chat_id": message.chat.id,
+                    "text": notification,
+                    "message_thread_id": thread_id
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(api_url, json=payload)
+            else:
+                await bot.send_message(chat_id=message.chat.id, text=notification)
         except TelegramBadRequest:
             pass  # Игнорируем ошибки отправки уведомления
             
@@ -420,14 +430,34 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
             prefixes = ["👀 ", "🤔 ", "Хм, ", "О, гифка! ", ""]
             analysis_result = random.choice(prefixes) + analysis_result
         
-        await message.reply(analysis_result)
+        # Используем reply_parameters для форумов (работает со старыми топиками)
+        is_forum = getattr(message.chat, 'is_forum', False)
+        if is_forum:
+            import httpx
+            bot_token = bot.token
+            api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": message.chat.id,
+                "text": analysis_result,
+                "reply_parameters": {
+                    "message_id": message.message_id,
+                    "chat_id": message.chat.id
+                }
+            }
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(api_url, json=payload)
+                result = resp.json()
+                if not result.get("ok"):
+                    logger.error(f"[GIF] API error: {result.get('description')}")
+        else:
+            await message.reply(analysis_result)
         
         if is_auto_reply:
             logger.info(f"Auto-reply to GIF in chat {message.chat.id}")
             
     except TelegramBadRequest as e:
         if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
-            logger.warning(f"Не удалось ответить - топик/сообщение удалено: {e}")
+            logger.warning(f"Не удалось ответить на GIF - топик/сообщение удалено: {e}")
         else:
             logger.error(f"Telegram ошибка при обработке GIF: {e}")
     except Exception as e:

@@ -242,16 +242,33 @@ class AliveUIService:
         
         try:
             if bot is not None:
-                # Send the status message (with thread_id for forum chats)
-                message = await bot.send_message(
-                    chat_id, 
-                    phrase,
-                    message_thread_id=message_thread_id
-                )
+                # Send the status message
+                # Для форумов используем прямой API с reply_parameters (работает со старыми топиками)
+                message_id = None
+                if message_thread_id is not None:
+                    import httpx
+                    bot_token = bot.token
+                    api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": phrase,
+                        "message_thread_id": message_thread_id
+                    }
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(api_url, json=payload)
+                        result = resp.json()
+                        if result.get("ok"):
+                            message_id = result["result"]["message_id"]
+                        else:
+                            logger.warning(f"Failed to send status to forum: {result.get('description')}")
+                            return None
+                else:
+                    message = await bot.send_message(chat_id, phrase)
+                    message_id = message.message_id
                 
                 status = StatusMessage(
                     chat_id=chat_id,
-                    message_id=message.message_id,
+                    message_id=message_id,
                     category=category,
                     started_at=now,
                     last_updated_at=now,

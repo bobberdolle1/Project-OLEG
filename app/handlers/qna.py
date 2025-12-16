@@ -483,13 +483,15 @@ async def general_qna(msg: Message):
                 )
             
             try:
-                # В форумах явно указываем message_thread_id для надёжности
-                if is_forum and topic_id:
+                # В форумах ВСЕГДА используем send_message с явным message_thread_id
+                # потому что msg.reply() в aiogram 3.x не передаёт thread_id автоматически
+                if is_forum:
+                    # topic_id может быть None для General топика — это нормально
                     sent_message = await msg.bot.send_message(
                         chat_id=msg.chat.id,
                         text=reply,
                         reply_to_message_id=msg.message_id,
-                        message_thread_id=topic_id,
+                        message_thread_id=topic_id,  # None для General, число для других топиков
                         disable_web_page_preview=True
                     )
                 else:

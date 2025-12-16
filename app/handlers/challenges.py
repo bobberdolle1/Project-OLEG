@@ -28,9 +28,13 @@ ACCEPT_PREFIX = "challenge_accept:"
 DECLINE_PREFIX = "challenge_decline:"
 DUEL_ATTACK_PREFIX = "duel:"  # duel:{owner_id}:attack:{zone}
 DUEL_DEFEND_PREFIX = "duel:"  # duel:{owner_id}:defend:{zone}
+PVP_MOVE_PREFIX = "pvp:"  # pvp:{duel_id}:{user_id}:attack:{zone} or pvp:{duel_id}:{user_id}:defend:{zone}
 
 # Global duel engine instance
 duel_engine = DuelEngine()
+
+# In-memory storage for PvP duels (duel_id -> PvPDuelState)
+pvp_duels: dict[str, dict] = {}
 
 # Zone display names
 ZONE_NAMES = {
@@ -196,6 +200,44 @@ def create_defend_keyboard(owner_id: int, attack_zone: str) -> InlineKeyboardMar
     ])
 
 
+def create_pvp_move_keyboard(duel_id: str, user_id: int, phase: str) -> InlineKeyboardMarkup:
+    """Create keyboard for PvP move selection.
+    
+    Args:
+        duel_id: Unique duel identifier
+        user_id: Player making the move
+        phase: 'attack' or 'defend'
+    """
+    emoji = "⚔️" if phase == "attack" else "🛡️"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=f"{emoji} 🎯 Голова",
+                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:head"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{emoji} 💪 Тело",
+                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:body"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{emoji} 🦵 Ноги",
+                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:legs"
+            ),
+        ]
+    ])
+
+
+def create_pvp_waiting_keyboard(duel_id: str) -> InlineKeyboardMarkup:
+    """Create keyboard showing waiting status."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏳ Ожидание соперника...", callback_data=f"pvp:{duel_id}:wait")]
+    ])
+
+
 def render_duel_status(
     duel_state: DuelState,
     player1_name: str,
@@ -248,6 +290,34 @@ def render_round_result(
         lines.append(f"❌ {opp_name} промахнулся ({ZONE_NAMES[opp_attack]} заблокирована)")
     
     return "\n".join(lines)
+
+
+def render_pvp_status(duel: dict) -> str:
+    """Render PvP duel status with HP bars."""
+    p1_bar = duel_engine.render_hp_bar(duel["player1_hp"])
+    p2_bar = duel_engine.render_hp_bar(duel["player2_hp"])
+    
+    text = (
+        f"⚔️ <b>PvP ДУЭЛЬ</b>\n\n"
+        f"👤 {duel['player1_name']}: {p1_bar}\n"
+        f"👤 {duel['player2_name']}: {p2_bar}"
+    )
+    
+    if duel["bet"] > 0:
+        text += f"\n\n💰 На кону: {duel['bet'] * 2} монет"
+    
+    return text
+
+
+def get_pvp_move_status(duel: dict) -> str:
+    """Get status of moves for current round."""
+    p1_status = "✅" if duel["p1_phase"] == "done" else ("🛡️" if duel["p1_phase"] == "defend" else "⏳")
+    p2_status = "✅" if duel["p2_phase"] == "done" else ("🛡️" if duel["p2_phase"] == "defend" else "⏳")
+    
+    return (
+        f"👤 {duel['player1_name']}: {p1_status}\n"
+        f"👤 {duel['player2_name']}: {p2_status}"
+    )
 
 
 @router.message(Command("challenge", "fight", "duel"))
@@ -421,31 +491,21 @@ async def start_pvp_challenge(
     Requirement 4.1: PvP mode with @username argument
     """
     # Ensure balances exist
-    await ensure_user_balance(challenger_id, chat_id)
-    await ensure_user_balance(target_id, chat_id)
+    challenger_balance = await ensure_user_balance(challenger_id, chat_id)
+    target_balance_val = await ensure_user_balance(target_id, chat_id)
+    
+    # Check balances for bet
+    if bet_amount > 0:
+        if challenger_balance < bet_amount:
+            await msg.reply(f"❌ Недостаточно монет! У тебя {challenger_balance}, нужно {bet_amount}.")
+            return
+        if target_balance_val < bet_amount:
+            await msg.reply(f"❌ У соперника недостаточно монет для ставки {bet_amount}.")
+            return
     
     # Sync balances from DB to game engine
-    async_session = get_session()
-    async with async_session() as session:
-        result = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == challenger_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        challenger_balance = result.scalars().first()
-        if challenger_balance:
-            game_engine.set_balance(challenger_id, chat_id, challenger_balance.balance)
-        
-        result = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == target_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        target_balance = result.scalars().first()
-        if target_balance:
-            game_engine.set_balance(target_id, chat_id, target_balance.balance)
+    game_engine.set_balance(challenger_id, chat_id, challenger_balance)
+    game_engine.set_balance(target_id, chat_id, target_balance_val)
     
     # Create challenge
     result = game_engine.create_challenge(
@@ -467,12 +527,13 @@ async def start_pvp_challenge(
     
     # Build challenge message
     challenger_name = msg.from_user.username or msg.from_user.first_name
-    bet_text = f" на {bet_amount} очков" if bet_amount > 0 else ""
+    bet_text = f" на <b>{bet_amount}</b> монет" if bet_amount > 0 else ""
     
     challenge_text = (
-        f"⚔️ <b>Вызов на дуэль!</b>\n\n"
-        f"@{challenger_name} вызывает @{target_name} на бой{bet_text}!\n\n"
-        f"У тебя 5 минут, чтобы принять или отклонить."
+        f"⚔️ <b>ВЫЗОВ НА ДУЭЛЬ!</b>\n\n"
+        f"👊 <b>@{challenger_name}</b> вызывает <b>@{target_name}</b>{bet_text}!\n\n"
+        f"🎮 <i>Зонный бой: выбирай атаку и защиту одновременно с соперником!</i>\n\n"
+        f"⏱ Время на ответ: 5 минут"
     )
     
     await msg.reply(
@@ -507,29 +568,20 @@ async def callback_accept_challenge(callback: CallbackQuery):
     # Update database
     await update_challenge_status_in_db(challenge_id, ChallengeStatus.ACCEPTED)
     
-    # Sync balances to database
-    challenger_balance = game_engine.get_balance(challenge.challenger_id, challenge.chat_id)
-    target_balance = game_engine.get_balance(challenge.target_id, challenge.chat_id)
-    
-    await sync_balance_to_db(
-        challenge.challenger_id, 
-        challenge.chat_id, 
-        challenger_balance.balance,
-        lost=challenge.bet_amount
-    )
-    await sync_balance_to_db(
-        challenge.target_id, 
-        challenge.chat_id, 
-        target_balance.balance,
-        lost=challenge.bet_amount
-    )
-    
-    # Create duel state for PvP
-    duel_state = duel_engine.create_duel(
-        challenger_id=challenge.challenger_id,
-        target_id=challenge.target_id,
-        bet=challenge.bet_amount
-    )
+    # Deduct bets from both players
+    if challenge.bet_amount > 0:
+        await sync_balance_to_db(
+            challenge.challenger_id, 
+            challenge.chat_id, 
+            game_engine.get_balance(challenge.challenger_id, challenge.chat_id).balance,
+            lost=challenge.bet_amount
+        )
+        await sync_balance_to_db(
+            challenge.target_id, 
+            challenge.chat_id, 
+            game_engine.get_balance(challenge.target_id, challenge.chat_id).balance,
+            lost=challenge.bet_amount
+        )
     
     # Get challenger name
     async_session = get_session()
@@ -540,43 +592,59 @@ async def callback_accept_challenge(callback: CallbackQuery):
         challenger_user = result_db.scalars().first()
         challenger_name = challenger_user.username if challenger_user else "Игрок"
     
-    # Register game session for challenger
-    await state_manager.register_game(
-        user_id=challenge.challenger_id,
-        chat_id=chat_id,
-        game_type="duel",
-        message_id=callback.message.message_id,
-        initial_state={
-            "duel_state": {
-                "player1_id": duel_state.player1_id,
-                "player2_id": duel_state.player2_id,
-                "player1_hp": duel_state.player1_hp,
-                "player2_hp": duel_state.player2_hp,
-                "current_turn": duel_state.current_turn,
-                "bet": duel_state.bet,
-                "status": duel_state.status.value
-            },
-            "player1_name": challenger_name,
-            "player2_name": acceptor_name,
-            "phase": "attack",
-            "attack_zone": None,
-            "pvp_mode": True,
-            "challenge_id": challenge_id
-        }
+    # Create PvP duel state
+    duel_id = challenge_id[:8]  # Short ID for callbacks
+    pvp_duels[duel_id] = {
+        "challenge_id": challenge_id,
+        "chat_id": chat_id,
+        "message_id": callback.message.message_id,
+        "player1_id": challenge.challenger_id,
+        "player2_id": challenge.target_id,
+        "player1_name": challenger_name,
+        "player2_name": acceptor_name,
+        "player1_hp": 100,
+        "player2_hp": 100,
+        "bet": challenge.bet_amount,
+        "round": 1,
+        # Current round moves (reset each round)
+        "p1_attack": None,
+        "p1_defend": None,
+        "p2_attack": None,
+        "p2_defend": None,
+        "p1_phase": "attack",  # attack -> defend -> done
+        "p2_phase": "attack",
+    }
+    
+    # Build initial message
+    duel_text = render_pvp_status(pvp_duels[duel_id])
+    duel_text += (
+        f"\n\n⚔️ <b>Раунд 1</b>\n"
+        f"Оба игрока: выберите зону АТАКИ!\n\n"
+        f"👤 {challenger_name}: ожидание...\n"
+        f"👤 {acceptor_name}: ожидание..."
     )
     
-    # Update message with duel UI
-    status_text = render_duel_status(duel_state, challenger_name, acceptor_name)
-    status_text += f"\n\n🎯 <b>{challenger_name}, выбери зону атаки:</b>"
-    
+    # Send message to both players via bot
     await callback.message.edit_text(
-        status_text,
-        reply_markup=create_attack_keyboard(challenge.challenger_id),
+        duel_text,
+        reply_markup=create_pvp_move_keyboard(duel_id, acceptor_id, "attack"),
         parse_mode="HTML"
     )
     
-    await callback.answer("Вызов принят! Да начнётся бой!")
-    logger.info(f"PvP challenge accepted: {challenge_id}")
+    # Send separate message to challenger
+    try:
+        await callback.message.answer(
+            f"⚔️ <b>Дуэль началась!</b>\n\n"
+            f"Ты vs @{acceptor_name}\n\n"
+            f"🎯 Выбери зону АТАКИ:",
+            reply_markup=create_pvp_move_keyboard(duel_id, challenge.challenger_id, "attack"),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send challenger message: {e}")
+    
+    await callback.answer("⚔️ Бой начался!")
+    logger.info(f"PvP duel started: {duel_id} - {challenger_name} vs {acceptor_name}")
 
 
 @router.callback_query(F.data.startswith(DECLINE_PREFIX))
@@ -606,6 +674,293 @@ async def callback_decline_challenge(callback: CallbackQuery):
     
     await callback.answer("Вызов отклонён. Трус!")
     logger.info(f"Challenge declined: {challenge_id}")
+
+
+@router.callback_query(F.data.startswith(PVP_MOVE_PREFIX))
+async def callback_pvp_move(callback: CallbackQuery):
+    """Handle PvP move selection (attack or defend)."""
+    if not callback.data or not callback.from_user:
+        return
+    
+    # Parse: pvp:{duel_id}:{user_id}:{phase}:{zone} or pvp:{duel_id}:wait
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return
+    
+    duel_id = parts[1]
+    
+    # Handle wait button
+    if parts[2] == "wait":
+        await callback.answer("⏳ Ожидаем соперника...", show_alert=False)
+        return
+    
+    if len(parts) < 5:
+        return
+    
+    expected_user_id = int(parts[2])
+    phase = parts[3]  # attack or defend
+    zone = parts[4]   # head, body, legs or "pick"
+    
+    # Handle "pick" - show zone selection
+    if zone == "pick":
+        user_id = callback.from_user.id
+        if user_id != expected_user_id:
+            await callback.answer("⚠️ Это не твоя кнопка!", show_alert=True)
+            return
+        
+        if duel_id not in pvp_duels:
+            await callback.answer("❌ Дуэль не найдена", show_alert=True)
+            return
+        
+        duel = pvp_duels[duel_id]
+        is_player1 = user_id == duel["player1_id"]
+        player_prefix = "p1" if is_player1 else "p2"
+        current_phase = duel[f"{player_prefix}_phase"]
+        
+        if current_phase == "done":
+            await callback.answer("✅ Ты уже сделал ход!", show_alert=False)
+            return
+        
+        await callback.message.edit_text(
+            f"⚔️ <b>Раунд {duel['round']}</b>\n\n"
+            f"🎯 Выбери зону {'АТАКИ' if current_phase == 'attack' else 'ЗАЩИТЫ'}:",
+            reply_markup=create_pvp_move_keyboard(duel_id, user_id, current_phase),
+            parse_mode="HTML"
+        )
+        await callback.answer()
+        return
+    
+    user_id = callback.from_user.id
+    
+    # Verify it's the right player
+    if user_id != expected_user_id:
+        await callback.answer("⚠️ Это не твоя кнопка!", show_alert=True)
+        return
+    
+    # Get duel state
+    if duel_id not in pvp_duels:
+        await callback.answer("❌ Дуэль не найдена или завершена", show_alert=True)
+        return
+    
+    duel = pvp_duels[duel_id]
+    
+    # Determine which player
+    is_player1 = user_id == duel["player1_id"]
+    player_prefix = "p1" if is_player1 else "p2"
+    current_phase = duel[f"{player_prefix}_phase"]
+    
+    # Verify phase matches
+    if current_phase != phase:
+        if current_phase == "done":
+            await callback.answer("✅ Ты уже сделал ход, ждём соперника", show_alert=False)
+        else:
+            await callback.answer(f"⚠️ Сейчас фаза: {current_phase}", show_alert=True)
+        return
+    
+    # Record the move
+    if phase == "attack":
+        duel[f"{player_prefix}_attack"] = zone
+        duel[f"{player_prefix}_phase"] = "defend"
+        
+        # Update message to show defend selection
+        await callback.message.edit_text(
+            f"⚔️ Атака: {ZONE_NAMES[Zone(zone)]}\n\n"
+            f"🛡️ <b>Теперь выбери зону ЗАЩИТЫ:</b>",
+            reply_markup=create_pvp_move_keyboard(duel_id, user_id, "defend"),
+            parse_mode="HTML"
+        )
+        await callback.answer(f"⚔️ Атака: {ZONE_NAMES[Zone(zone)]}")
+        
+    elif phase == "defend":
+        duel[f"{player_prefix}_defend"] = zone
+        duel[f"{player_prefix}_phase"] = "done"
+        
+        # Show waiting message
+        await callback.message.edit_text(
+            f"✅ <b>Ход сделан!</b>\n\n"
+            f"⚔️ Атака: {ZONE_NAMES[Zone(duel[f'{player_prefix}_attack'])]}\n"
+            f"🛡️ Защита: {ZONE_NAMES[Zone(zone)]}\n\n"
+            f"⏳ Ожидаем соперника...",
+            reply_markup=create_pvp_waiting_keyboard(duel_id),
+            parse_mode="HTML"
+        )
+        await callback.answer("✅ Ход сделан!")
+        
+        # Check if both players are done
+        if duel["p1_phase"] == "done" and duel["p2_phase"] == "done":
+            await process_pvp_round(callback, duel_id)
+
+
+async def process_pvp_round(callback: CallbackQuery, duel_id: str):
+    """Process a completed PvP round."""
+    if duel_id not in pvp_duels:
+        return
+    
+    duel = pvp_duels[duel_id]
+    
+    # Get moves
+    p1_attack = Zone(duel["p1_attack"])
+    p1_defend = Zone(duel["p1_defend"])
+    p2_attack = Zone(duel["p2_attack"])
+    p2_defend = Zone(duel["p2_defend"])
+    
+    # Calculate hits
+    p1_hits = p1_attack != p2_defend  # P1 hits P2
+    p2_hits = p2_attack != p1_defend  # P2 hits P1
+    
+    # Apply damage
+    damage = 25
+    if p2_hits:
+        duel["player1_hp"] = max(0, duel["player1_hp"] - damage)
+    if p1_hits:
+        duel["player2_hp"] = max(0, duel["player2_hp"] - damage)
+    
+    # Build round result
+    result_lines = []
+    if p1_hits:
+        result_lines.append(f"💥 {duel['player1_name']} попал в {ZONE_NAMES[p1_attack]}!")
+    else:
+        result_lines.append(f"🛡️ {duel['player2_name']} заблокировал {ZONE_NAMES[p1_attack]}")
+    
+    if p2_hits:
+        result_lines.append(f"💥 {duel['player2_name']} попал в {ZONE_NAMES[p2_attack]}!")
+    else:
+        result_lines.append(f"🛡️ {duel['player1_name']} заблокировал {ZONE_NAMES[p2_attack]}")
+    
+    round_result = "\n".join(result_lines)
+    
+    # Check for game end
+    game_over = duel["player1_hp"] <= 0 or duel["player2_hp"] <= 0
+    
+    if game_over:
+        await finish_pvp_duel(callback, duel_id, round_result)
+        return
+    
+    # Prepare next round
+    duel["round"] += 1
+    duel["p1_attack"] = None
+    duel["p1_defend"] = None
+    duel["p2_attack"] = None
+    duel["p2_defend"] = None
+    duel["p1_phase"] = "attack"
+    duel["p2_phase"] = "attack"
+    
+    # Build status message
+    status = render_pvp_status(duel)
+    status += (
+        f"\n\n📜 <b>Раунд {duel['round'] - 1}:</b>\n{round_result}\n\n"
+        f"⚔️ <b>Раунд {duel['round']}</b> — выберите АТАКУ!"
+    )
+    
+    # Send new round message with buttons for BOTH players
+    round_msg = (
+        f"⚔️ <b>Раунд {duel['round']}</b>\n\n"
+        f"{render_pvp_status(duel)}\n\n"
+        f"📜 Прошлый раунд:\n{round_result}\n\n"
+        f"🎯 Выберите зону АТАКИ!"
+    )
+    
+    # Create keyboard with buttons for both players
+    both_players_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"⚔️ {duel['player1_name']} — Атака", 
+            callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:pick"
+        )],
+        [InlineKeyboardButton(
+            text=f"⚔️ {duel['player2_name']} — Атака", 
+            callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:pick"
+        )],
+    ])
+    
+    try:
+        await callback.message.answer(
+            round_msg,
+            reply_markup=both_players_keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send round message: {e}")
+
+
+async def finish_pvp_duel(callback: CallbackQuery, duel_id: str, last_round: str):
+    """Finish PvP duel and distribute rewards."""
+    if duel_id not in pvp_duels:
+        return
+    
+    duel = pvp_duels[duel_id]
+    chat_id = duel["chat_id"]
+    
+    # Determine winner
+    if duel["player1_hp"] <= 0 and duel["player2_hp"] <= 0:
+        # Both dead - tie goes to player1 (challenger)
+        winner_id = duel["player1_id"]
+        winner_name = duel["player1_name"]
+        loser_id = duel["player2_id"]
+        loser_name = duel["player2_name"]
+    elif duel["player1_hp"] <= 0:
+        winner_id = duel["player2_id"]
+        winner_name = duel["player2_name"]
+        loser_id = duel["player1_id"]
+        loser_name = duel["player1_name"]
+    else:
+        winner_id = duel["player1_id"]
+        winner_name = duel["player1_name"]
+        loser_id = duel["player2_id"]
+        loser_name = duel["player2_name"]
+    
+    # Build final message
+    final_text = render_pvp_status(duel)
+    final_text += f"\n\n📜 <b>Финальный раунд:</b>\n{last_round}"
+    final_text += f"\n\n🏆 <b>{winner_name} ПОБЕДИЛ!</b>"
+    
+    # Handle bet payouts
+    if duel["bet"] > 0:
+        winnings = duel["bet"] * 2
+        winner_balance = await ensure_user_balance(winner_id, chat_id)
+        new_balance = winner_balance + winnings
+        await sync_balance_to_db(winner_id, chat_id, new_balance, won=winnings)
+        final_text += f"\n💰 Выигрыш: {winnings} монет!"
+    
+    # Update ELO
+    try:
+        from app.services.leagues import league_service
+        from app.database.models import GameStat
+        
+        async_session = get_session()
+        async with async_session() as db_session:
+            winner_status, loser_status = await league_service.update_elo(
+                winner_id=winner_id,
+                loser_id=loser_id,
+                session=db_session
+            )
+            await db_session.commit()
+            
+            final_text += (
+                f"\n\n📊 <b>ELO:</b>\n"
+                f"  {winner_name}: {winner_status.elo} (+16)\n"
+                f"  {loser_name}: {loser_status.elo} (-16)"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to update ELO: {e}")
+    
+    # Send final message
+    try:
+        await callback.message.edit_text(final_text, parse_mode="HTML")
+    except Exception:
+        pass
+    
+    try:
+        await callback.message.answer(
+            f"🏆 <b>ДУЭЛЬ ЗАВЕРШЕНА!</b>\n\n"
+            f"{final_text}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    
+    # Cleanup
+    del pvp_duels[duel_id]
+    logger.info(f"PvP duel finished: {duel_id}, winner={winner_name}")
 
 
 @router.callback_query(F.data.regexp(r"^duel:\d+:attack:(head|body|legs)$"))

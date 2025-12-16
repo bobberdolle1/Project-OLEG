@@ -33,10 +33,11 @@ WORKDIR /app
 RUN sed -i 's|deb.debian.org|mirror.yandex.ru|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|deb.debian.org|mirror.yandex.ru|g' /etc/apt/sources.list 2>/dev/null || true
 
-# Runtime зависимости (ffmpeg для аудио, espeak для офлайн TTS)
+# Runtime зависимости (ffmpeg для аудио, espeak для офлайн TTS, шрифты для цитат)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     espeak \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Копируем wheels и устанавливаем

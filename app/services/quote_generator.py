@@ -267,10 +267,8 @@ class QuoteGeneratorService:
         initial = username[0].upper() if username else "?"
         text_color = (255, 255, 255)
         
-        try:
-            initial_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size // 2)
-        except OSError:
-            initial_font = self.username_font
+        # Use already loaded font instead of hardcoded path
+        initial_font = self.username_font
         
         try:
             bbox = initial_font.getbbox(initial)
@@ -675,11 +673,8 @@ class QuoteGeneratorService:
         # Red/orange gradient-like circle for Oleg
         draw.ellipse([x, y, x + size, y + size], fill=(220, 53, 69))
         
-        # Draw "O" for Oleg
-        try:
-            initial_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size // 2)
-        except OSError:
-            initial_font = self.username_font
+        # Use already loaded font instead of hardcoded path
+        initial_font = self.username_font
         
         try:
             bbox = initial_font.getbbox("O")

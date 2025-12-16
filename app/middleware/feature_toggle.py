@@ -34,6 +34,9 @@ class FeatureToggleMiddleware(BaseMiddleware):
         "/duel": "games",
         "/quote": "quotes",
         "/цитата": "quotes",
+        "/q": "quotes",
+        "/qs": "quotes",
+        "/qd": "quotes",
     }
     
     async def __call__(

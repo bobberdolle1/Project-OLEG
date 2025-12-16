@@ -122,6 +122,8 @@ async def cmd_quote(msg: Message):
     
     Property 17: Quote chain limit - max 10 messages
     """
+    logger.info(f"[QUOTE] /q command received from {msg.from_user.id} in chat {msg.chat.id}")
+    
     if not msg.reply_to_message:
         await msg.reply("❌ Нужно ответить на сообщение, чтобы сделать из него цитату.")
         return
@@ -156,15 +158,18 @@ async def _generate_single_message_quote(msg: Message):
     Fortress Update: Uses new QuoteGeneratorService with gradient backgrounds.
     Requirements: 7.1, 7.2, 7.5, 7.6
     """
+    logger.info(f"[QUOTE] _generate_single_message_quote called for chat {msg.chat.id}")
     original_msg = msg.reply_to_message
     
     # Извлекаем текст из сообщения
     text = extract_message_text(original_msg)
+    logger.info(f"[QUOTE] Extracted text: {text[:50] if text else 'None'}...")
     if not text:
         await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
         return
     
     username = original_msg.from_user.username or original_msg.from_user.first_name
+    logger.info(f"[QUOTE] Username: {username}")
     
     # Get timestamp if available
     timestamp = None

@@ -97,13 +97,14 @@ async def handle_voice_message(msg: Message):
 @router.message(F.video_note)
 async def handle_video_note(msg: Message):
     """
-    Handle incoming video notes (circles) - extract audio, transcribe and respond.
+    Handle incoming video notes (circles) - extract audio, transcribe, 
+    extract frames for visual analysis, and respond.
+    
+    Combines STT (speech-to-text) with vision analysis for comprehensive
+    understanding of video messages.
+    
     Only responds in private chats or when replying to bot's message.
     """
-    if not stt_available():
-        logger.warning("STT not available, skipping video note")
-        return
-    
     # В группах отвечаем только если это реплай на сообщение бота
     if msg.chat.type != "private":
         if not msg.reply_to_message:
@@ -123,28 +124,77 @@ async def handle_video_note(msg: Message):
     # Show typing indicator
     await msg.bot.send_chat_action(msg.chat.id, "typing")
     
+    transcribed_text = None
+    visual_description = None
+    
     try:
-        # Transcribe video note
-        text = await transcribe_video_note(msg.bot, msg.video_note.file_id)
+        # 1. Транскрибируем аудио (если STT доступен)
+        if stt_available():
+            try:
+                transcribed_text = await transcribe_video_note(msg.bot, msg.video_note.file_id)
+                if transcribed_text:
+                    logger.info(f"Transcribed video note: {transcribed_text[:100]}...")
+            except Exception as stt_err:
+                logger.warning(f"STT failed for video note: {stt_err}")
         
-        if not text:
-            await msg.reply("🎥 Не удалось распознать речь в кружочке")
+        # 2. Извлекаем кадры и анализируем визуально
+        try:
+            from app.services.gif_patrol import gif_patrol_service
+            from app.services.ollama_client import analyze_image_content
+            
+            # Скачиваем видео
+            file = await msg.bot.get_file(msg.video_note.file_id)
+            video_data = await msg.bot.download_file(file.file_path)
+            video_bytes = video_data.read() if hasattr(video_data, 'read') else video_data
+            
+            # Извлекаем кадры (используем метод из gif_patrol)
+            frames = gif_patrol_service.extract_frames(video_bytes)
+            
+            if frames:
+                # Анализируем средний кадр (самый репрезентативный)
+                middle_frame = frames[len(frames) // 2]
+                visual_description = await analyze_image_content(
+                    middle_frame,
+                    query="Опиши что видишь на этом кадре из видеосообщения. Кратко, 1-2 предложения."
+                )
+                logger.info(f"Visual analysis: {visual_description[:100]}...")
+                
+        except Exception as vision_err:
+            logger.warning(f"Vision analysis failed for video note: {vision_err}")
+        
+        # 3. Формируем контекст для ответа
+        if not transcribed_text and not visual_description:
+            await msg.reply("🎥 Не удалось обработать кружочек — ни речь, ни картинку")
             return
         
-        logger.info(f"Transcribed video note: {text[:100]}...")
+        # Собираем полный контекст
+        context_parts = []
+        if transcribed_text:
+            context_parts.append(f"Человек говорит: {transcribed_text}")
+        if visual_description:
+            context_parts.append(f"На видео видно: {visual_description}")
         
-        # Get Oleg's response
+        full_context = "\n".join(context_parts)
+        
+        # 4. Генерируем ответ с учётом и аудио, и видео
         response = await generate_reply_with_context(
-            text,
+            full_context,
             username=msg.from_user.username or msg.from_user.first_name,
             chat_id=msg.chat.id
         )
         
+        # 5. Формируем красивый ответ
+        reply_parts = ["🎥"]
+        if transcribed_text:
+            reply_parts.append(f"<i>«{transcribed_text}»</i>")
+        if visual_description and not transcribed_text:
+            # Показываем описание только если нет речи
+            reply_parts.append(f"<i>(видно: {visual_description[:100]})</i>")
+        
         if response:
-            reply_text = f"🎥 <i>{text}</i>\n\n{response}"
-            await msg.reply(reply_text, parse_mode="HTML")
-        else:
-            await msg.reply(f"🎥 <i>{text}</i>", parse_mode="HTML")
+            reply_parts.append(f"\n\n{response}")
+        
+        await msg.reply(" ".join(reply_parts), parse_mode="HTML")
             
     except TelegramBadRequest as e:
         if "message to be replied not found" in str(e).lower() or "message to reply not found" in str(e).lower():

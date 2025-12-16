@@ -473,36 +473,49 @@ async def cb_owner_broadcast(callback: CallbackQuery, state: FSMContext):
         return
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="📝 Текстовая рассылка", callback_data="owner_bc_text")
+    kb.button(text="👤 В ЛС бота", callback_data="owner_bc_target_private")
+    kb.button(text="👥 В группы", callback_data="owner_bc_target_groups")
+    kb.button(text="🌍 Везде", callback_data="owner_bc_target_all")
     kb.button(text="📢 Полный мастер", callback_data="owner_bc_wizard")
     kb.button(text="🔙 Назад", callback_data="owner_main")
-    kb.adjust(1)
+    kb.adjust(3, 1, 1)
     
     await callback.message.edit_text(
         "📢 <b>Рассылка</b>\n\n"
-        "Выбери тип рассылки:\n\n"
-        "• <b>Текстовая</b> - быстрая отправка текста во все чаты\n"
-        "• <b>Полный мастер</b> - пошаговый мастер с выбором типа контента",
+        "Выбери куда отправить:\n\n"
+        "• <b>В ЛС бота</b> - пользователям, которые писали боту\n"
+        "• <b>В группы</b> - во все группы где есть бот\n"
+        "• <b>Везде</b> - и в ЛС, и в группы\n\n"
+        "Или используй <b>Полный мастер</b> для отправки фото/видео/кружочков",
         reply_markup=kb.as_markup()
     )
     await callback.answer()
 
 
-@router.callback_query(F.data == "owner_bc_text")
-async def cb_owner_bc_text(callback: CallbackQuery, state: FSMContext):
-    """Быстрая текстовая рассылка."""
+@router.callback_query(F.data.startswith("owner_bc_target_"))
+async def cb_owner_bc_target(callback: CallbackQuery, state: FSMContext):
+    """Выбор цели рассылки."""
     if not is_owner(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    target = callback.data.replace("owner_bc_target_", "")
+    await state.update_data(broadcast_target=target)
     await state.set_state(OwnerStates.waiting_broadcast_text)
+    
+    target_labels = {
+        "private": "👤 в ЛС бота",
+        "groups": "👥 в группы",
+        "all": "🌍 везде"
+    }
     
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data="owner_broadcast")
     
     await callback.message.edit_text(
-        "📝 <b>Текстовая рассылка</b>\n\n"
-        "Отправь текст сообщения для рассылки во все группы:",
+        f"📝 <b>Текстовая рассылка</b>\n\n"
+        f"Цель: {target_labels.get(target, target)}\n\n"
+        "Отправь текст сообщения для рассылки:",
         reply_markup=kb.as_markup()
     )
     await callback.answer()
@@ -518,12 +531,26 @@ async def handle_broadcast_text(msg: Message, state: FSMContext, bot: Bot):
         await msg.reply("❌ Отправь текстовое сообщение.")
         return
     
+    data = await state.get_data()
+    target = data.get("broadcast_target", "groups")
+    
     await state.update_data(broadcast_text=msg.text)
     await state.set_state(OwnerStates.waiting_broadcast_confirm)
     
-    # Получить количество чатов
+    # Получить количество получателей в зависимости от цели
     async with get_session()() as session:
-        chats_count = await session.scalar(select(func.count(Chat.id)))
+        groups_count = await session.scalar(select(func.count(Chat.id)))
+        private_count = await session.scalar(
+            select(func.count(PrivateChat.user_id))
+            .where(PrivateChat.is_blocked == False)
+        )
+    
+    if target == "private":
+        recipients_text = f"{private_count or 0} пользователей (ЛС)"
+    elif target == "groups":
+        recipients_text = f"{groups_count or 0} групп"
+    else:  # all
+        recipients_text = f"{(private_count or 0) + (groups_count or 0)} ({private_count or 0} ЛС + {groups_count or 0} групп)"
     
     kb = InlineKeyboardBuilder()
     kb.button(text="🚀 Отправить", callback_data="owner_bc_send")
@@ -535,7 +562,7 @@ async def handle_broadcast_text(msg: Message, state: FSMContext, bot: Bot):
     await msg.answer(
         f"📢 <b>Подтверждение рассылки</b>\n\n"
         f"<b>Текст:</b>\n{preview}\n\n"
-        f"<b>Получатели:</b> {chats_count} групп\n\n"
+        f"<b>Получатели:</b> {recipients_text}\n\n"
         f"Подтвердить отправку?",
         reply_markup=kb.as_markup()
     )
@@ -550,6 +577,7 @@ async def cb_owner_bc_send(callback: CallbackQuery, state: FSMContext, bot: Bot)
     
     data = await state.get_data()
     text = data.get("broadcast_text")
+    target = data.get("broadcast_target", "groups")
     
     if not text:
         await callback.answer("❌ Текст не найден", show_alert=True)
@@ -560,10 +588,18 @@ async def cb_owner_bc_send(callback: CallbackQuery, state: FSMContext, bot: Bot)
     
     await callback.message.edit_text("📢 <b>Рассылка в процессе...</b>\n\n⏳ Подождите...")
     
-    # Получить все чаты
+    # Получить ID получателей в зависимости от цели
+    chat_ids = []
     async with get_session()() as session:
-        result = await session.execute(select(Chat.id))
-        chat_ids = [row[0] for row in result.all()]
+        if target in ("groups", "all"):
+            result = await session.execute(select(Chat.id))
+            chat_ids.extend([row[0] for row in result.all()])
+        
+        if target in ("private", "all"):
+            result = await session.execute(
+                select(PrivateChat.user_id).where(PrivateChat.is_blocked == False)
+            )
+            chat_ids.extend([row[0] for row in result.all()])
     
     sent = 0
     failed = 0

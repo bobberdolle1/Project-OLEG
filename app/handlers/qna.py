@@ -376,6 +376,7 @@ async def general_qna(msg: Message):
 
     logger.info(f"[QNA PROCESS] Обрабатываем от {user_tag}: \"{text[:50]}...\"")
 
+    try:
         # Проверяем, спрашивает ли про игры — даём контекст ИИ
         games_context = GAMES_AI_CONTEXT if _is_games_help_request(text) else None
 

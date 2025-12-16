@@ -492,16 +492,11 @@ async def general_qna(msg: Message):
             try:
                 # В форумах используем send_message с message_thread_id
                 if is_forum:
-                    # Для старых топиков (ID < 1000) пробуем без reply_to_message_id
-                    # так как Telegram может не находить thread по старым ID
+                    # Для старых топиков (ID < 1000) используем msg.answer()
+                    # который должен автоматически определить топик
                     if topic_id and topic_id < 1000:
-                        logger.info(f"[QNA] Старый топик (id={topic_id}), отправляем без reply_to")
-                        sent_message = await msg.bot.send_message(
-                            chat_id=msg.chat.id,
-                            text=reply,
-                            message_thread_id=topic_id,
-                            disable_web_page_preview=True
-                        )
+                        logger.info(f"[QNA] Старый топик (id={topic_id}), используем answer()")
+                        sent_message = await msg.answer(reply, disable_web_page_preview=True)
                     else:
                         sent_message = await msg.bot.send_message(
                             chat_id=msg.chat.id,

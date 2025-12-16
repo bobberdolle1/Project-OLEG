@@ -490,17 +490,26 @@ async def general_qna(msg: Message):
                 )
             
             try:
-                # В форумах ВСЕГДА используем send_message с явным message_thread_id
-                # потому что msg.reply() в aiogram 3.x не передаёт thread_id автоматически
+                # В форумах используем send_message с message_thread_id
                 if is_forum:
-                    # topic_id может быть None для General топика — это нормально
-                    sent_message = await msg.bot.send_message(
-                        chat_id=msg.chat.id,
-                        text=reply,
-                        reply_to_message_id=msg.message_id,
-                        message_thread_id=topic_id,  # None для General, число для других топиков
-                        disable_web_page_preview=True
-                    )
+                    # Для старых топиков (ID < 1000) пробуем без reply_to_message_id
+                    # так как Telegram может не находить thread по старым ID
+                    if topic_id and topic_id < 1000:
+                        logger.info(f"[QNA] Старый топик (id={topic_id}), отправляем без reply_to")
+                        sent_message = await msg.bot.send_message(
+                            chat_id=msg.chat.id,
+                            text=reply,
+                            message_thread_id=topic_id,
+                            disable_web_page_preview=True
+                        )
+                    else:
+                        sent_message = await msg.bot.send_message(
+                            chat_id=msg.chat.id,
+                            text=reply,
+                            reply_to_message_id=msg.message_id,
+                            message_thread_id=topic_id,
+                            disable_web_page_preview=True
+                        )
                 else:
                     sent_message = await msg.reply(reply, disable_web_page_preview=True)
                 logger.info(f"[QNA OK] Ответ отправлен в chat={msg.chat.id}, topic={topic_id}")

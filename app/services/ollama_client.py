@@ -1029,15 +1029,23 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     # Проверяем нужен ли веб-поиск по ключевым словам
     needs_search = force_web_search or should_trigger_web_search(user_text)
     
+    # ПРИНУДИТЕЛЬНЫЙ веб-поиск — не ждём пока модель решит, сами ищем
+    search_results = None
+    if needs_search and settings.ollama_web_search_enabled:
+        logger.info(f"[FORCED SEARCH] Принудительный веб-поиск для: {user_text[:50]}...")
+        try:
+            search_results = await _execute_web_search(user_text)
+            logger.info(f"[FORCED SEARCH] Получено результатов: {len(search_results)} символов")
+        except Exception as e:
+            logger.warning(f"[FORCED SEARCH] Ошибка поиска: {e}")
+    
     # Формируем системный промпт с актуальной датой
     system_prompt = CORE_OLEG_PROMPT_TEMPLATE.format(current_date=_get_current_date_context())
     
-    # Добавляем подсказку для веб-поиска если нужен
-    if needs_search:
-        system_prompt += "\n\nВАЖНО: Этот вопрос требует АКТУАЛЬНОЙ информации. "
-        system_prompt += "ОБЯЗАТЕЛЬНО используй web_search чтобы найти свежие данные. "
-        system_prompt += "Не отвечай из головы — ищи в интернете!"
-        logger.info(f"[SEARCH HINT] Добавлена подсказка для веб-поиска: {user_text[:50]}...")
+    # Добавляем результаты поиска в промпт если есть
+    if search_results:
+        system_prompt += f"\n\nРЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ (используй эту инфу для ответа):\n{search_results}"
+        logger.info(f"[SEARCH CONTEXT] Результаты поиска добавлены в контекст")
     
     if chat_context:
         system_prompt += f"\n\nТЕКУЩИЙ КОНТЕКСТ ЧАТА: {chat_context}"

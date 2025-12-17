@@ -107,7 +107,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - searxng-data:/etc/searxng
+      - ./monitoring/searxng:/etc/searxng
     environment:
       - SEARXNG_BASE_URL=http://localhost:8080
     networks:

@@ -1,0 +1,46 @@
+# SearXNG settings for OLEG bot
+# Отключаем проверку заголовков X-Forwarded-For (бот обращается напрямую)
+
+use_default_settings: true
+
+server:
+  # Отключаем лимитер и проверку IP
+  limiter: false
+  image_proxy: false
+  # Секретный ключ (сгенерируй свой для продакшена)
+  secret_key: "oleg-searxng-secret-key-change-me"
+
+search:
+  # Безопасный поиск выключен
+  safe_search: 0
+  # Автокомплит
+  autocomplete: "google"
+  # Язык по умолчанию
+  default_lang: "ru"
+
+# Отключаем bot detection
+general:
+  debug: false
+  instance_name: "OLEG SearXNG"
+
+# Настройки движков поиска
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  
+  - name: bing
+    engine: bing
+    shortcut: b
+    disabled: false
+  
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: w
+    disabled: false

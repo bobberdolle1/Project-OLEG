@@ -40,11 +40,14 @@ import re
 
 # Паттерны для номеров видеокарт (780M, 4070, 3060 Ti, RX 7900 и т.д.)
 GPU_MODEL_PATTERNS = [
-    r'\b\d{3,4}m?\b',  # 780, 780M, 4070, 3060
+    r'\b\d{3,4}m\b',  # 780M, 680M (мобильные/iGPU)
+    r'\b\d{4}\b',  # 4070, 3060, 7900 (дискретные)
     r'\b\d{3,4}\s*ti\b',  # 3060 Ti, 4070 Ti
     r'\brx\s*\d{4}\b',  # RX 7900, RX 6800
+    r'\bradeon\s*\d{3}m?\b',  # Radeon 780M, Radeon 680M (AMD iGPU)
     r'\bi\d-\d{4,5}\b',  # i5-12400, i7-13700
     r'\bryzen\s*\d\s*\d{4}\b',  # Ryzen 5 5600, Ryzen 7 7800
+    r'\brdna\s*\d\b',  # RDNA 3, RDNA 2
 ]
 
 

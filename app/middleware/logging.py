@@ -26,12 +26,20 @@ class MessageLoggerMiddleware(BaseMiddleware):
             user_tag = f"@{event.from_user.username}" if event.from_user and event.from_user.username else f"id:{event.from_user.id if event.from_user else 'unknown'}"
             topic_id = getattr(event, 'message_thread_id', None)
             is_forum = getattr(event.chat, 'is_forum', False)
+            text_preview = (event.text or event.caption or "")[:50]
             
-            logger.debug(
-                f"[MSG IN] chat={event.chat.id} | type={event.chat.type} | "
-                f"forum={is_forum} | topic={topic_id} | user={user_tag} | "
-                f"msg_id={event.message_id}"
-            )
+            # Для команд логируем на INFO уровне
+            if event.text and event.text.startswith("/"):
+                logger.info(
+                    f"[CMD IN] chat={event.chat.id} | user={user_tag} | "
+                    f"cmd={text_preview}"
+                )
+            else:
+                logger.debug(
+                    f"[MSG IN] chat={event.chat.id} | type={event.chat.type} | "
+                    f"forum={is_forum} | topic={topic_id} | user={user_tag} | "
+                    f"msg_id={event.message_id}"
+                )
             text = event.text or event.caption or ""
             links = LINK_RE.findall(text) if text else []
             async_session = get_session()

@@ -52,11 +52,15 @@ class FeatureToggleMiddleware(BaseMiddleware):
         # Проверяем команды
         if event.text and event.text.startswith("/"):
             command = event.text.split()[0].split("@")[0].lower()
+            logger.info(f"[FEATURE_TOGGLE] Command detected: {command}")
             
             feature = self.COMMAND_FEATURES.get(command)
-            if feature and not is_feature_enabled(feature):
-                logger.debug(f"Feature '{feature}' is disabled, ignoring command {command}")
-                return  # Игнорируем команду
+            if feature:
+                enabled = is_feature_enabled(feature)
+                logger.info(f"[FEATURE_TOGGLE] Feature '{feature}' for command '{command}': enabled={enabled}")
+                if not enabled:
+                    logger.warning(f"[FEATURE_TOGGLE] Feature '{feature}' is disabled, ignoring command {command}")
+                    return  # Игнорируем команду
         
         # Проверяем голосовые сообщения
         if event.voice and not is_feature_enabled("voice_recognition"):

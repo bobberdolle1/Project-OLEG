@@ -958,6 +958,15 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
 # Список групп и топ пользователей
 # ============================================================================
 
+# Хранилище замученных групп (в памяти, сбрасывается при перезапуске)
+_muted_groups: set[int] = set()
+
+
+def is_group_muted(chat_id: int) -> bool:
+    """Проверить, замучена ли группа."""
+    return chat_id in _muted_groups
+
+
 @router.callback_query(F.data == "owner_groups_list")
 async def cb_owner_groups_list(callback: CallbackQuery):
     """Показать список всех групп где есть бот."""
@@ -982,20 +991,145 @@ async def cb_owner_groups_list(callback: CallbackQuery):
         return
     
     text = f"👥 <b>Список групп ({len(chats)})</b>\n\n"
-    for i, chat in enumerate(chats[:20], 1):  # Показываем первые 20
-        forum_icon = "📋" if chat.is_forum else "💬"
-        text += f"{i}. {forum_icon} <code>{chat.id}</code>\n   {chat.title}\n"
-    
-    if len(chats) > 20:
-        text += f"\n... и ещё {len(chats) - 20} групп"
+    text += "Нажми на группу для управления:\n\n"
     
     kb = InlineKeyboardBuilder()
+    for chat in chats[:15]:  # Показываем первые 15
+        muted = "🔇" if is_group_muted(chat.id) else ""
+        forum_icon = "📋" if chat.is_forum else "💬"
+        title = chat.title[:25] + "..." if len(chat.title) > 25 else chat.title
+        kb.button(text=f"{muted}{forum_icon} {title}", callback_data=f"owner_group:{chat.id}")
+    
+    if len(chats) > 15:
+        text += f"\n... и ещё {len(chats) - 15} групп"
+    
     kb.button(text="🔄 Обновить", callback_data="owner_groups_list")
     kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_group:"))
+async def cb_owner_group_actions(callback: CallbackQuery):
+    """Показать действия для конкретной группы."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    chat_id = int(callback.data.split(":")[1])
+    
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(select(Chat).filter_by(id=chat_id))
+        chat = result.scalars().first()
+    
+    if not chat:
+        await callback.answer("Группа не найдена", show_alert=True)
+        return
+    
+    muted = is_group_muted(chat_id)
+    mute_text = "🔊 Размутить" if muted else "🔇 Замутить"
+    
+    text = f"⚙️ <b>Управление группой</b>\n\n"
+    text += f"📋 <b>Название:</b> {chat.title}\n"
+    text += f"🆔 <b>ID:</b> <code>{chat.id}</code>\n"
+    text += f"📌 <b>Форум:</b> {'Да' if chat.is_forum else 'Нет'}\n"
+    text += f"🔇 <b>Мут:</b> {'Да' if muted else 'Нет'}\n"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text=mute_text, callback_data=f"owner_mute_group:{chat_id}")
+    kb.button(text="🚪 Выйти из группы", callback_data=f"owner_leave_group:{chat_id}")
+    kb.button(text="🔙 К списку", callback_data="owner_groups_list")
+    kb.adjust(2, 1)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_mute_group:"))
+async def cb_owner_mute_group(callback: CallbackQuery):
+    """Замутить/размутить группу."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    chat_id = int(callback.data.split(":")[1])
+    
+    if chat_id in _muted_groups:
+        _muted_groups.remove(chat_id)
+        await callback.answer("🔊 Группа размучена!", show_alert=True)
+    else:
+        _muted_groups.add(chat_id)
+        await callback.answer("🔇 Группа замучена! Бот не будет отвечать.", show_alert=True)
+    
+    # Возвращаемся к действиям группы
+    await cb_owner_group_actions(callback)
+
+
+@router.callback_query(F.data.startswith("owner_leave_group:"))
+async def cb_owner_leave_group(callback: CallbackQuery):
+    """Подтверждение выхода из группы."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    chat_id = int(callback.data.split(":")[1])
+    
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(select(Chat).filter_by(id=chat_id))
+        chat = result.scalars().first()
+    
+    title = chat.title if chat else f"ID: {chat_id}"
+    
+    text = f"⚠️ <b>Подтверждение выхода</b>\n\n"
+    text += f"Ты уверен, что хочешь выйти из группы?\n"
+    text += f"<b>{title}</b>\n\n"
+    text += "Это действие нельзя отменить!"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, выйти", callback_data=f"owner_leave_confirm:{chat_id}")
+    kb.button(text="❌ Отмена", callback_data=f"owner_group:{chat_id}")
     kb.adjust(2)
     
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_leave_confirm:"))
+async def cb_owner_leave_confirm(callback: CallbackQuery):
+    """Выполнить выход из группы."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    chat_id = int(callback.data.split(":")[1])
+    
+    try:
+        await callback.bot.leave_chat(chat_id)
+        
+        # Удаляем из БД
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(select(Chat).filter_by(id=chat_id))
+            chat = result.scalars().first()
+            if chat:
+                await session.delete(chat)
+                await session.commit()
+        
+        # Удаляем из мута если был
+        _muted_groups.discard(chat_id)
+        
+        await callback.answer("🚪 Бот вышел из группы!", show_alert=True)
+        
+        # Возвращаемся к списку групп
+        await cb_owner_groups_list(callback)
+        
+    except Exception as e:
+        logger.error(f"Failed to leave chat {chat_id}: {e}")
+        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
 
 
 @router.callback_query(F.data == "owner_top_users")

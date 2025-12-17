@@ -355,6 +355,11 @@ async def general_qna(msg: Message):
     if msg.text and msg.text.startswith('/'):
         return
     
+    # Проверяем, не замучена ли группа владельцем
+    from app.handlers.owner_panel import is_group_muted
+    if is_group_muted(msg.chat.id):
+        return
+    
     # Собираем информацию для логирования
     topic_id = getattr(msg, 'message_thread_id', None)
     is_forum = getattr(msg.chat, 'is_forum', False)

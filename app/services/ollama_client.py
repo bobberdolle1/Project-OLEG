@@ -800,6 +800,7 @@ def _contains_prompt_injection(text: str) -> bool:
 
     # Высокорисковые паттерны — явные попытки манипуляции (срабатывают сразу)
     high_risk_patterns = [
+        # Английские паттерны
         "system:", "system :", "system prompt", "systemprompt",
         "prompt:", "prompt :", "instruction:", "instruction :",
         "system message", "system message:", "systemmessage",
@@ -810,16 +811,40 @@ def _contains_prompt_injection(text: str) -> bool:
         "new instruction", "override", "bypass",
         "ignore previous", "ignore above", 
         "disregard previous", "disregard above",
+        "forget your instructions", "forget everything",
+        "you are now", "from now on you are", "pretend to be",
+        "act like", "behave as", "respond as",
+        "jailbreak", "dan mode", "developer mode",
         # Русские паттерны
         "забудь предыдущие", "забудь инструкции", "забудь всё",
         "игнорируй предыдущие", "игнорируй инструкции",
         "отныне ты", "теперь ты", "ты теперь",
         "веди себя как", "общайся как", "говори как",
         "новая роль", "смени роль", "измени роль",
-        # Эмоциональные манипуляции
+        "притворись", "представь что ты", "играй роль",
+        # Украинские паттерны
+        "забудь інструкції", "ігноруй інструкції",
+        "тепер ти", "відтепер ти", "поводься як",
+        # Немецкие паттерны
+        "vergiss deine anweisungen", "ignoriere anweisungen",
+        "du bist jetzt", "ab jetzt bist du", "verhalte dich wie",
+        # Французские паттерны
+        "oublie tes instructions", "ignore les instructions",
+        "tu es maintenant", "à partir de maintenant",
+        # Испанские паттерны
+        "olvida tus instrucciones", "ignora las instrucciones",
+        "ahora eres", "a partir de ahora eres", "actúa como",
+        # Китайские паттерны (пиньинь и иероглифы)
+        "忘记指令", "忽略指令", "你现在是", "从现在开始你是",
+        # Японские паттерны
+        "指示を忘れて", "指示を無視", "今からあなたは",
+        # Эмоциональные манипуляции (мультиязычные)
         "иначе погибнут", "иначе умрут", "иначе убьют",
         "это важная задача", "чрезвычайно важн", "очень важн",
         "жизнь зависит", "спаси мо", "помоги спасти",
+        "or else they will die", "my parents will die", "life depends",
+        "this is extremely important", "urgent task",
+        "oder sie werden sterben", "leben hängt davon ab",
     ]
 
     for pattern in high_risk_patterns:
@@ -829,23 +854,31 @@ def _contains_prompt_injection(text: str) -> bool:
     # Контекстные паттерны — требуют комбинации с другими словами
     # Эти слова сами по себе могут быть частью обычного разговора
     context_triggers = {
-        "ignore": ["instruction", "prompt", "system", "previous", "above", "all"],
-        "forget": ["instruction", "prompt", "system", "previous", "above", "everything you know"],
-        "disregard": ["instruction", "prompt", "system", "previous", "above"],
-        "act as": ["different", "new", "another", "assistant", "ai", "bot"],
-        "roleplay as": ["different", "new", "another"],
+        # Английские
+        "ignore": ["instruction", "prompt", "system", "previous", "above", "all", "rules"],
+        "forget": ["instruction", "prompt", "system", "previous", "above", "everything", "rules"],
+        "disregard": ["instruction", "prompt", "system", "previous", "above", "rules"],
+        "act as": ["different", "new", "another", "assistant", "ai", "bot", "character"],
+        "roleplay as": ["different", "new", "another", "character"],
         "you are": ["now", "actually", "really", "not oleg", "not олег", "assistant", "ai"],
-        "your role is": ["now", "actually", "to be"],
-        "start acting": ["as", "like"],
-        "begin acting": ["as", "like"],
-        "reveal": ["prompt", "instruction", "system", "secret"],
-        "show me": ["prompt", "instruction", "system", "your programming"],
-        "display": ["prompt", "instruction", "system"],
-        "print": ["prompt", "instruction", "system"],
-        "output": ["prompt", "instruction", "system"],
+        "your role is": ["now", "actually", "to be", "changed"],
+        "start acting": ["as", "like", "different"],
+        "begin acting": ["as", "like", "different"],
+        "reveal": ["prompt", "instruction", "system", "secret", "programming"],
+        "show me": ["prompt", "instruction", "system", "your programming", "rules"],
+        "display": ["prompt", "instruction", "system", "rules"],
+        "print": ["prompt", "instruction", "system", "rules"],
+        "output": ["prompt", "instruction", "system", "rules"],
         "instead of": ["oleg", "олег", "being", "your role"],
-        "replace": ["instruction", "prompt", "system", "your role"],
-        "skip": ["instruction", "prompt", "system", "filter"],
+        "replace": ["instruction", "prompt", "system", "your role", "personality"],
+        "skip": ["instruction", "prompt", "system", "filter", "rules"],
+        # Русские контекстные
+        "забудь": ["инструкции", "правила", "всё", "предыдущее", "систем"],
+        "игнорируй": ["инструкции", "правила", "предыдущее", "систем"],
+        "покажи": ["промпт", "инструкции", "системн", "правила"],
+        "выведи": ["промпт", "инструкции", "системн"],
+        "ты не": ["олег", "бот", "ии", "ассистент"],
+        "перестань быть": ["олегом", "ботом", "собой"],
     }
 
     for trigger, contexts in context_triggers.items():

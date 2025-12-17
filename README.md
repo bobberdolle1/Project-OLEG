@@ -604,7 +604,7 @@ OWNER_ID=your_telegram_id
 
 # Ollama — три модели для разных задач
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud    # Текст
+OLLAMA_BASE_MODEL=deepseek-v3.2:cloud    # Текст
 OLLAMA_VISION_MODEL=qwen3-vl:235b-cloud       # Изображения
 OLLAMA_MEMORY_MODEL=glm-4.6:cloud             # RAG
 

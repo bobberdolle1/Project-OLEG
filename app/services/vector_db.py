@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Tuple, Any
 import json
 from datetime import datetime
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -635,6 +636,249 @@ class VectorDB:
             "low_importance_deleted": low_importance_deleted,
             "total_deleted": total
         }
+
+    # =========================================================================
+    # Default Knowledge Management
+    # =========================================================================
+    
+    def load_default_knowledge(
+        self,
+        collection_name: str,
+        knowledge_file: Optional[str] = None
+    ) -> dict:
+        """
+        Загружает начальную базу знаний из JSON файла в RAG.
+        
+        Эти знания являются "дефолтными" для бота и восстанавливаются
+        при вайпе базы данных.
+        
+        Args:
+            collection_name: Название коллекции для загрузки
+            knowledge_file: Путь к JSON файлу (по умолчанию app/data/default_knowledge.json)
+            
+        Returns:
+            Словарь со статистикой загрузки
+        """
+        if not self.client:
+            raise Exception("ChromaDB не инициализирована")
+        
+        # Определяем путь к файлу знаний
+        if knowledge_file is None:
+            # Ищем относительно корня проекта
+            base_paths = [
+                Path(__file__).parent.parent / "data" / "default_knowledge.json",
+                Path("app/data/default_knowledge.json"),
+                Path("./app/data/default_knowledge.json"),
+            ]
+            
+            knowledge_path = None
+            for path in base_paths:
+                if path.exists():
+                    knowledge_path = path
+                    break
+            
+            if knowledge_path is None:
+                logger.warning("Файл default_knowledge.json не найден")
+                return {"loaded": 0, "categories": 0, "error": "file_not_found"}
+        else:
+            knowledge_path = Path(knowledge_file)
+            if not knowledge_path.exists():
+                logger.warning(f"Файл знаний не найден: {knowledge_path}")
+                return {"loaded": 0, "categories": 0, "error": "file_not_found"}
+        
+        try:
+            with open(knowledge_path, "r", encoding="utf-8") as f:
+                knowledge_data = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка парсинга JSON: {e}")
+            return {"loaded": 0, "categories": 0, "error": f"json_error: {e}"}
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        loaded_count = 0
+        categories_count = 0
+        version = knowledge_data.get("version", "unknown")
+        
+        categories = knowledge_data.get("categories", {})
+        
+        for category_name, category_data in categories.items():
+            categories_count += 1
+            facts = category_data.get("facts", [])
+            
+            for i, fact in enumerate(facts):
+                fact_text = fact.get("text", "")
+                if not fact_text:
+                    continue
+                
+                # Формируем метаданные
+                metadata = {
+                    "source": "default_knowledge",
+                    "category": category_name,
+                    "importance": fact.get("importance", 5),
+                    "tags": ",".join(fact.get("tags", [])),
+                    "version": version,
+                    "created_at": datetime.now().isoformat(),
+                    # Системные факты не привязаны к конкретному чату
+                    "chat_id": 0,
+                    "user_id": 0,
+                    "topic_id": -1,
+                }
+                
+                # Уникальный ID для дефолтных знаний
+                doc_id = f"default_{category_name}_{i}"
+                
+                try:
+                    # Проверяем, не существует ли уже этот факт
+                    existing = collection.get(ids=[doc_id])
+                    if existing and existing['ids']:
+                        # Обновляем существующий
+                        collection.update(
+                            ids=[doc_id],
+                            documents=[fact_text],
+                            metadatas=[metadata]
+                        )
+                    else:
+                        # Добавляем новый
+                        collection.add(
+                            documents=[fact_text],
+                            metadatas=[metadata],
+                            ids=[doc_id]
+                        )
+                    loaded_count += 1
+                except Exception as e:
+                    logger.error(f"Ошибка загрузки факта {doc_id}: {e}")
+        
+        logger.info(f"Загружено {loaded_count} фактов из {categories_count} категорий (версия: {version})")
+        
+        return {
+            "loaded": loaded_count,
+            "categories": categories_count,
+            "version": version,
+            "collection": collection_name
+        }
+    
+    def get_default_knowledge_stats(self, collection_name: str) -> dict:
+        """
+        Получает статистику по загруженным дефолтным знаниям.
+        
+        Returns:
+            Словарь со статистикой по категориям
+        """
+        if not self.client:
+            return {"error": "ChromaDB не инициализирована"}
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        try:
+            # Получаем все дефолтные знания
+            results = collection.get(
+                where={"source": "default_knowledge"}
+            )
+            
+            if not results['ids']:
+                return {"total": 0, "categories": {}}
+            
+            # Группируем по категориям
+            categories = {}
+            for i, doc_id in enumerate(results['ids']):
+                metadata = results['metadatas'][i] if results['metadatas'] else {}
+                category = metadata.get('category', 'unknown')
+                
+                if category not in categories:
+                    categories[category] = 0
+                categories[category] += 1
+            
+            return {
+                "total": len(results['ids']),
+                "categories": categories,
+                "version": results['metadatas'][0].get('version', 'unknown') if results['metadatas'] else 'unknown'
+            }
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения статистики: {e}")
+            return {"error": str(e)}
+    
+    def clear_default_knowledge(self, collection_name: str) -> int:
+        """
+        Удаляет все дефолтные знания из коллекции.
+        
+        Returns:
+            Количество удалённых фактов
+        """
+        if not self.client:
+            raise Exception("ChromaDB не инициализирована")
+        
+        collection = self.get_or_create_collection(collection_name)
+        
+        try:
+            results = collection.get(
+                where={"source": "default_knowledge"}
+            )
+            
+            if not results['ids']:
+                return 0
+            
+            count = len(results['ids'])
+            collection.delete(ids=results['ids'])
+            
+            logger.info(f"Удалено {count} дефолтных знаний")
+            return count
+            
+        except Exception as e:
+            logger.error(f"Ошибка удаления дефолтных знаний: {e}")
+            return 0
+    
+    def search_with_default_knowledge(
+        self,
+        collection_name: str,
+        query: str,
+        chat_id: Optional[int] = None,
+        n_results: int = 5,
+        include_defaults: bool = True
+    ) -> List[Dict]:
+        """
+        Поиск с учётом дефолтных знаний.
+        
+        Сначала ищет в контексте чата, затем дополняет дефолтными знаниями.
+        
+        Args:
+            collection_name: Название коллекции
+            query: Запрос для поиска
+            chat_id: ID чата (None для поиска только в дефолтных)
+            n_results: Количество результатов
+            include_defaults: Включать ли дефолтные знания
+            
+        Returns:
+            Список фактов с приоритетом контекста чата
+        """
+        results = []
+        
+        # 1. Ищем в контексте чата (если указан)
+        if chat_id is not None:
+            chat_results = self.search_facts(
+                collection_name=collection_name,
+                query=query,
+                n_results=n_results,
+                where={"chat_id": chat_id}
+            )
+            for r in chat_results:
+                r['source_type'] = 'chat'
+            results.extend(chat_results)
+        
+        # 2. Дополняем дефолтными знаниями
+        if include_defaults and len(results) < n_results:
+            remaining = n_results - len(results)
+            default_results = self.search_facts(
+                collection_name=collection_name,
+                query=query,
+                n_results=remaining,
+                where={"source": "default_knowledge"}
+            )
+            for r in default_results:
+                r['source_type'] = 'default'
+            results.extend(default_results)
+        
+        return results[:n_results]
 
 
 # Глобальный экземпляр векторной БД

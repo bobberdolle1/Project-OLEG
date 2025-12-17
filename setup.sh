@@ -68,7 +68,7 @@ if curl -s "$OLLAMA_URL/api/tags" > /dev/null 2>&1; then
     echo "✅ Ollama доступна по адресу $OLLAMA_URL"
     
     # Проверка модели
-    OLLAMA_MODEL=$(grep "OLLAMA_MODEL" .env | cut -d'=' -f2 || echo "deepseek-v3.1:671b-cloud")
+    OLLAMA_MODEL=$(grep "OLLAMA_MODEL" .env | cut -d'=' -f2 || echo "deepseek-v3.2:cloud")
     if curl -s "$OLLAMA_URL/api/tags" | grep -q "$OLLAMA_MODEL"; then
         echo "✅ Модель $OLLAMA_MODEL установлена"
     else

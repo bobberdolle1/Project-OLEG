@@ -11,7 +11,7 @@ def test_settings_default_values():
     settings = Settings(telegram_bot_token="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
     
     assert settings.ollama_base_url == "http://localhost:11434"
-    assert settings.ollama_base_model == "deepseek-v3.1:671b-cloud"
+    assert settings.ollama_base_model == "deepseek-v3.2:cloud"
     assert settings.ollama_timeout == 90
     assert settings.rate_limit_enabled is True
     assert settings.rate_limit_requests == 10

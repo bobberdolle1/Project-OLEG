@@ -26,7 +26,7 @@ class Settings(BaseSettings):
         description="Ollama API base URL"
     )
     ollama_base_model: str = Field(
-        default="deepseek-v3.1:671b-cloud",
+        default="deepseek-v3.2:cloud",
         description="Main model for text generation"
     )
     ollama_vision_model: str = Field(

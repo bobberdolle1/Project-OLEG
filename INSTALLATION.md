@@ -93,7 +93,7 @@ brew install ffmpeg
 ### 4. Ollama модели
 
 ```bash
-ollama pull deepseek-v3.1:671b-cloud
+ollama pull deepseek-v3.2:cloud
 ollama pull qwen3-vl:235b-cloud
 ollama pull glm-4.6:cloud
 ```
@@ -123,7 +123,7 @@ OWNER_ID=your_id
 
 # Ollama — три модели
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud    # Текст
+OLLAMA_BASE_MODEL=deepseek-v3.2:cloud    # Текст
 OLLAMA_VISION_MODEL=qwen3-vl:235b-cloud       # Изображения
 OLLAMA_MEMORY_MODEL=glm-4.6:cloud             # RAG
 OLLAMA_TIMEOUT=90

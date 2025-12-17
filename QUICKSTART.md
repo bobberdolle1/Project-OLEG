@@ -58,7 +58,7 @@ OWNER_ID=123456789                     # Твой Telegram ID
 
 # Ollama (должен быть запущен)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_BASE_MODEL=deepseek-v3.1:671b-cloud
+OLLAMA_BASE_MODEL=deepseek-v3.2:cloud
 OLLAMA_VISION_MODEL=qwen3-vl:235b-cloud
 ```
 

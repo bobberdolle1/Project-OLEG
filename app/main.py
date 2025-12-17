@@ -127,6 +127,28 @@ async def on_startup(bot: Bot, dp: Dispatcher):
         except Exception as e:
             logger.warning(f"Ошибка инициализации Arq worker pool: {e}")
 
+    # Initialize default knowledge in RAG
+    logger.info("Проверка дефолтных знаний в RAG...")
+    try:
+        from app.services.vector_db import vector_db
+        if vector_db.client:
+            collection_name = settings.chromadb_collection_name
+            stats = vector_db.get_default_knowledge_stats(collection_name)
+            
+            if stats.get("total", 0) == 0:
+                logger.info("Дефолтные знания не найдены, загружаем...")
+                result = vector_db.load_default_knowledge(collection_name)
+                if result.get("error"):
+                    logger.warning(f"Ошибка загрузки дефолтных знаний: {result['error']}")
+                else:
+                    logger.info(f"Загружено {result['loaded']} фактов из {result['categories']} категорий (v{result.get('version', '?')})")
+            else:
+                logger.info(f"Дефолтные знания уже загружены: {stats['total']} фактов (v{stats.get('version', '?')})")
+        else:
+            logger.warning("ChromaDB не инициализирована, пропускаем загрузку дефолтных знаний")
+    except Exception as e:
+        logger.warning(f"Ошибка инициализации дефолтных знаний: {e}")
+
     # Start metrics server
     if settings.metrics_enabled:
         logger.info("Запуск сервера метрик...")

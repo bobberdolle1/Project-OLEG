@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 Полный вайп базы данных и векторной памяти.
-Сбрасывает всё к начальному состоянию.
+Сбрасывает всё к начальному состоянию и восстанавливает дефолтные знания.
 
 Использование:
-    python wipe_all.py
+    python wipe_all.py              # Вайп + восстановление дефолтных знаний
+    python wipe_all.py --no-restore # Вайп без восстановления
+    python wipe_all.py -y           # Без подтверждения
 """
 
 import asyncio
@@ -20,6 +22,11 @@ load_dotenv()
 def get_chromadb_path() -> Path:
     """Получить путь к ChromaDB из переменных окружения."""
     return Path(os.getenv("CHROMADB_PERSIST_DIR", "./data/chromadb"))
+
+
+def get_collection_name() -> str:
+    """Получить название коллекции из переменных окружения."""
+    return os.getenv("CHROMADB_COLLECTION_NAME", "oleg_kb")
 
 
 def get_database_url() -> str:
@@ -84,10 +91,46 @@ def wipe_vector_memory():
     print(f"   ✅ Создана пустая директория: {chromadb_path}")
 
 
-async def main(skip_confirm: bool = False):
+def restore_default_knowledge():
+    """Восстановить дефолтные знания в RAG."""
+    print("📚 Восстановление дефолтных знаний...")
+    
+    try:
+        from app.services.vector_db import vector_db
+        
+        if not vector_db.client:
+            # Переинициализируем после вайпа
+            vector_db.init_db()
+        
+        if not vector_db.client:
+            print("   ⚠️  ChromaDB не инициализирована, пропускаем восстановление")
+            return
+        
+        collection_name = get_collection_name()
+        result = vector_db.load_default_knowledge(collection_name)
+        
+        if result.get("error"):
+            print(f"   ⚠️  Ошибка: {result['error']}")
+        else:
+            print(f"   ✅ Загружено {result['loaded']} фактов из {result['categories']} категорий")
+            print(f"   📌 Версия базы знаний: {result.get('version', 'unknown')}")
+            
+    except ImportError as e:
+        print(f"   ⚠️  Не удалось импортировать vector_db: {e}")
+    except Exception as e:
+        print(f"   ❌ Ошибка восстановления: {e}")
+
+
+async def main(skip_confirm: bool = False, restore_knowledge: bool = True):
     print("=" * 50)
     print("🔥 ПОЛНЫЙ ВАЙП ДАННЫХ БОТА")
     print("=" * 50)
+    print()
+    
+    if restore_knowledge:
+        print("ℹ️  После вайпа будут восстановлены дефолтные знания")
+    else:
+        print("⚠️  Дефолтные знания НЕ будут восстановлены (--no-restore)")
     print()
     
     # Подтверждение
@@ -105,6 +148,11 @@ async def main(skip_confirm: bool = False):
     # Вайп базы данных
     await wipe_database()
     
+    # Восстановление дефолтных знаний
+    if restore_knowledge:
+        print()
+        restore_default_knowledge()
+    
     print()
     print("=" * 50)
     print("✅ ВАЙП ЗАВЕРШЁН")
@@ -116,4 +164,5 @@ async def main(skip_confirm: bool = False):
 if __name__ == "__main__":
     import sys
     skip = "--yes" in sys.argv or "-y" in sys.argv
-    asyncio.run(main(skip_confirm=skip))
+    no_restore = "--no-restore" in sys.argv
+    asyncio.run(main(skip_confirm=skip, restore_knowledge=not no_restore))

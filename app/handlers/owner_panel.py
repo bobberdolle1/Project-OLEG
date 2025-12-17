@@ -1022,6 +1022,25 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
         results.append(f"❌ База данных: {str(e)[:50]}")
         logger.error(f"Ошибка при вайпе БД: {e}")
     
+    # 3. Восстановление дефолтных знаний
+    try:
+        from app.services.vector_db import vector_db
+        from app.config import settings
+        
+        if vector_db.client:
+            # Переинициализируем коллекцию
+            collection_name = settings.chromadb_collection_name
+            load_result = vector_db.load_default_knowledge(collection_name)
+            
+            if load_result.get("error"):
+                results.append(f"⚠️ Дефолтные знания: {load_result['error']}")
+            else:
+                results.append(f"✅ Дефолтные знания: загружено {load_result['loaded']} фактов (v{load_result.get('version', '?')})")
+        else:
+            results.append("⚠️ Дефолтные знания: ChromaDB не инициализирована")
+    except Exception as e:
+        results.append(f"❌ Дефолтные знания: {str(e)[:50]}")
+    
     logger.warning(f"WIPE executed by owner {callback.from_user.id}")
     
     kb = InlineKeyboardBuilder()
@@ -1031,7 +1050,8 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
         "🗑 <b>ВАЙП ЗАВЕРШЁН</b>\n\n"
         "<b>Результаты:</b>\n" +
         "\n".join(results) +
-        "\n\n✅ Бот готов к работе с чистого листа!",
+        "\n\n✅ Бот готов к работе с чистого листа!\n"
+        "📚 Дефолтные знания восстановлены.",
         reply_markup=kb.as_markup()
     )
     await callback.answer("Вайп выполнен!", show_alert=True)

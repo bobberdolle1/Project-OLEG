@@ -1,0 +1,326 @@
+{
+  "version": "2025-01-17",
+  "description": "Начальная база знаний Олега о ПК-железе. Загружается в RAG при первом запуске и после вайпа.",
+  "categories": {
+    "platforms": {
+      "description": "Актуальные платформы 2025",
+      "facts": [
+        {
+          "text": "Intel LGA1851 — новая платформа для Core Ultra (Arrow Lake). Сокет LGA1851, чипсеты Z890/B860, только DDR5, PCIe 5.0. Для хай-энд игр и продакшна.",
+          "importance": 9,
+          "tags": ["intel", "lga1851", "arrow lake", "core ultra", "ddr5"]
+        },
+        {
+          "text": "Intel LGA1700 — платформа для Core 12-14 поколения (Alder/Raptor Lake). Чипсеты B660/Z690/B760/Z790, поддержка DDR4 и DDR5, PCIe 4.0/5.0. Массовый сегмент.",
+          "importance": 9,
+          "tags": ["intel", "lga1700", "raptor lake", "alder lake", "ddr4", "ddr5"]
+        },
+        {
+          "text": "AMD AM5 — платформа для Ryzen 7000/9000 (Zen 4/5). Чипсеты B650/B650E/X670/X670E/X870/X870E, только DDR5, PCIe 5.0. Заявлена как долгоживущая. DDR5-6000 EXPO оптимально.",
+          "importance": 9,
+          "tags": ["amd", "am5", "ryzen", "zen4", "zen5", "ddr5", "expo"]
+        },
+        {
+          "text": "AMD AM4 — платформа для Ryzen 1000-5000 (Zen-Zen 3). Чипсеты B450/B550/X570, только DDR4, PCIe 4.0. Всё ещё актуальна для бюджетных сборок.",
+          "importance": 8,
+          "tags": ["amd", "am4", "ryzen", "zen3", "ddr4", "бюджет"]
+        }
+      ]
+    },
+    "cpus_gaming": {
+      "description": "Лучшие процессоры для игр 2025",
+      "facts": [
+        {
+          "text": "Ryzen 7 9800X3D — лучший игровой процессор 2025. 8 ядер/16 потоков, Zen 5, 96MB 3D V-Cache. Сокет AM5, TDP 120W. Абсолютный топ для игр.",
+          "importance": 10,
+          "tags": ["amd", "ryzen", "9800x3d", "gaming", "3d v-cache", "am5"]
+        },
+        {
+          "text": "Ryzen 7 7800X3D — отличный игровой процессор, дешевле 9800X3D. 8 ядер/16 потоков, Zen 4, 96MB 3D V-Cache. Сокет AM5, TDP 120W.",
+          "importance": 9,
+          "tags": ["amd", "ryzen", "7800x3d", "gaming", "3d v-cache", "am5"]
+        },
+        {
+          "text": "Core Ultra 9 285K — топовый Intel для игр и продакшна. 24 ядра/24 потока, Arrow Lake, сокет LGA1851. TDP 125W, буст до 5.7 GHz.",
+          "importance": 9,
+          "tags": ["intel", "core ultra", "285k", "gaming", "lga1851"]
+        },
+        {
+          "text": "Ryzen 5 9600X — лучший бюджетный процессор для игр 2025. 6 ядер/12 потоков, Zen 5, сокет AM5. TDP 65W, отличная энергоэффективность.",
+          "importance": 9,
+          "tags": ["amd", "ryzen", "9600x", "gaming", "бюджет", "am5"]
+        },
+        {
+          "text": "Core i5-14600K — универсальный Intel среднего класса. 14 ядер/20 потоков, Raptor Lake, сокет LGA1700. Хорош для игр и работы.",
+          "importance": 8,
+          "tags": ["intel", "i5", "14600k", "gaming", "lga1700"]
+        }
+      ]
+    },
+    "gpus_nvidia": {
+      "description": "Видеокарты NVIDIA 2025",
+      "facts": [
+        {
+          "text": "RTX 5090 — флагман NVIDIA Blackwell. 32GB GDDR7, шина 512-bit, TDP 575W, MSRP $1999. DLSS 4, лучшая карта для 4K/8K.",
+          "importance": 9,
+          "tags": ["nvidia", "rtx 5090", "blackwell", "флагман", "gddr7"]
+        },
+        {
+          "text": "RTX 5080 — хай-энд NVIDIA Blackwell. 16GB GDDR7, шина 256-bit, TDP 360W, MSRP $999. Отличный выбор для 4K gaming.",
+          "importance": 9,
+          "tags": ["nvidia", "rtx 5080", "blackwell", "4k"]
+        },
+        {
+          "text": "RTX 4090 — топовая карта Ada Lovelace. 24GB GDDR6X, шина 384-bit, TDP 450W. Всё ещё актуальна, но жрёт много энергии.",
+          "importance": 8,
+          "tags": ["nvidia", "rtx 4090", "ada lovelace", "флагман"]
+        },
+        {
+          "text": "RTX 4070 Super — лучший выбор цена/производительность NVIDIA. 12GB GDDR6X, шина 192-bit, TDP 220W, MSRP $599. Идеален для 1440p.",
+          "importance": 9,
+          "tags": ["nvidia", "rtx 4070 super", "ada lovelace", "1440p", "цена/качество"]
+        },
+        {
+          "text": "RTX 4060 — бюджетная карта NVIDIA. 8GB GDDR6, шина 128-bit, TDP 115W, MSRP $299. Для 1080p gaming, но 8GB уже мало для новых игр.",
+          "importance": 8,
+          "tags": ["nvidia", "rtx 4060", "ada lovelace", "1080p", "бюджет"]
+        }
+      ]
+    },
+    "gpus_amd": {
+      "description": "Видеокарты AMD 2025",
+      "facts": [
+        {
+          "text": "RX 9070 XT — новая карта AMD RDNA 4. 16GB, шина 256-bit, TDP ~250W, MSRP $599. FSR 4, улучшенный рейтрейсинг.",
+          "importance": 9,
+          "tags": ["amd", "rx 9070 xt", "rdna 4", "fsr 4"]
+        },
+        {
+          "text": "RX 7900 XTX — флагман AMD RDNA 3. 24GB GDDR6, шина 384-bit, TDP 355W, MSRP $999. Конкурент RTX 4080.",
+          "importance": 8,
+          "tags": ["amd", "rx 7900 xtx", "rdna 3", "флагман"]
+        },
+        {
+          "text": "RX 7800 XT — лучший выбор AMD для 1440p. 16GB GDDR6, шина 256-bit, TDP 263W, MSRP $499. Больше VRAM чем у конкурентов NVIDIA.",
+          "importance": 9,
+          "tags": ["amd", "rx 7800 xt", "rdna 3", "1440p", "цена/качество"]
+        },
+        {
+          "text": "RX 7600 — бюджетная карта AMD. 8GB GDDR6, шина 128-bit, TDP 165W, MSRP $269. Для 1080p, конкурент RTX 4060.",
+          "importance": 8,
+          "tags": ["amd", "rx 7600", "rdna 3", "1080p", "бюджет"]
+        }
+      ]
+    },
+    "ram": {
+      "description": "Стандарты памяти 2025",
+      "facts": [
+        {
+          "text": "DDR5 — стандарт памяти 2025. Скорости 4800-8000+ MT/s. Рекомендуется DDR5-5600/6000/6400 для игр. 32GB (2x16) — золотая середина для AAA и стриминга.",
+          "importance": 9,
+          "tags": ["ddr5", "память", "ram", "2025"]
+        },
+        {
+          "text": "DDR5-6000 EXPO — оптимальный выбор для AMD Ryzen 7000/9000. EXPO профили работают из коробки, sweet spot для Infinity Fabric.",
+          "importance": 9,
+          "tags": ["ddr5", "expo", "amd", "ryzen", "am5"]
+        },
+        {
+          "text": "DDR4 — актуальна только для старых платформ (AM4, LGA1200, бюджетные LGA1700). Рекомендуется DDR4-3200/3600 MT/s.",
+          "importance": 7,
+          "tags": ["ddr4", "память", "ram", "бюджет"]
+        }
+      ]
+    },
+    "storage": {
+      "description": "Накопители 2025",
+      "facts": [
+        {
+          "text": "NVMe PCIe 5.0 — топовые SSD 2025. Скорость чтения 12000+ MB/s. Crucial T705, Samsung 990 Pro Gen5. Для 4K/8K монтажа, в играх разница с Gen4 минимальна.",
+          "importance": 8,
+          "tags": ["nvme", "pcie 5.0", "ssd", "gen5"]
+        },
+        {
+          "text": "NVMe PCIe 4.0 — мейнстрим SSD 2025. Скорость чтения до 7000 MB/s. Оптимальный выбор цена/скорость для игр и работы.",
+          "importance": 9,
+          "tags": ["nvme", "pcie 4.0", "ssd", "gen4", "мейнстрим"]
+        },
+        {
+          "text": "SATA SSD — только для хранения и старых систем. Скорость до 550 MB/s. Не рекомендуется как основной диск в 2025.",
+          "importance": 6,
+          "tags": ["sata", "ssd", "хранение"]
+        }
+      ]
+    },
+    "psu": {
+      "description": "Блоки питания 2025",
+      "facts": [
+        {
+          "text": "ATX 3.1 — новый стандарт БП 2025. Коннектор 12V-2x6 (замена 12VHPWR), до 600W для GPU, улучшенный контакт, меньше риск оплавления.",
+          "importance": 9,
+          "tags": ["psu", "atx 3.1", "12v-2x6", "блок питания"]
+        },
+        {
+          "text": "Для RTX 4070/5070 рекомендуется БП 650-750W 80+ Gold. Для RTX 4080/5080 — 850W. Для RTX 4090/5090 — 1000W+ 80+ Platinum.",
+          "importance": 9,
+          "tags": ["psu", "мощность", "rtx", "рекомендации"]
+        }
+      ]
+    },
+    "software_os": {
+      "description": "Операционные системы 2025",
+      "facts": [
+        {
+          "text": "Windows 11 24H2/25H1 — основная ОС 2025. Обязательна для Zen 5 и Arrow Lake (оптимизированный планировщик). Chris Titus WinUtil — лучший деблоатер.",
+          "importance": 9,
+          "tags": ["windows 11", "os", "24h2", "winutil"]
+        },
+        {
+          "text": "Windows 12 — НЕ ВЫШЛА! Microsoft перенесла релиз на 2026/2027. Вместо неё выходят обновления 25H1/25H2.",
+          "importance": 10,
+          "tags": ["windows 12", "os", "не вышла", "миф"]
+        },
+        {
+          "text": "Для игр на Windows: отключи VBS (Virtualization-Based Security) и Memory Integrity для +5-10% FPS. Используй WinUtil: iwr -useb christitus.com/win | iex",
+          "importance": 8,
+          "tags": ["windows", "gaming", "оптимизация", "vbs"]
+        },
+        {
+          "text": "Bazzite — топ-1 Linux для гейминга. SteamOS для любого ПК, основан на Fedora Atomic. Идеален для handhelds и HTPC.",
+          "importance": 8,
+          "tags": ["linux", "bazzite", "gaming", "steamos"]
+        },
+        {
+          "text": "Nobara Project — топ-2 Linux для гейминга. Fedora с патчами для игр, кодеков и драйверов из коробки. Автор — GloriousEggroll.",
+          "importance": 8,
+          "tags": ["linux", "nobara", "gaming", "fedora"]
+        }
+      ]
+    },
+    "software_tuning": {
+      "description": "Софт для тюнинга 2025",
+      "facts": [
+        {
+          "text": "NVIDIA App — замена GeForce Experience. Не требует логина, встроенный разгон, RTX HDR. Старый GFE мертв.",
+          "importance": 9,
+          "tags": ["nvidia", "nvidia app", "драйверы", "тюнинг"]
+        },
+        {
+          "text": "MSI Afterburner + RTSS — золотой стандарт для мониторинга OSD и андервольта NVIDIA. Для AMD лучше встроенный Adrenalin.",
+          "importance": 9,
+          "tags": ["msi afterburner", "rtss", "мониторинг", "андервольт"]
+        },
+        {
+          "text": "FanControl — единственная нормальная прога для настройки вентиляторов. Умеет миксовать сенсоры. Мастхэв для тишины.",
+          "importance": 8,
+          "tags": ["fancontrol", "вентиляторы", "охлаждение"]
+        },
+        {
+          "text": "HWInfo64 — библия сенсоров. Показывает троттлинг VRM, реальное напряжение, WHEA Errors. Если WHEA Errors != 0 — разгон нестабилен.",
+          "importance": 9,
+          "tags": ["hwinfo64", "мониторинг", "сенсоры", "whea"]
+        }
+      ]
+    },
+    "software_stress": {
+      "description": "Стресс-тесты 2025",
+      "facts": [
+        {
+          "text": "OCCT — лучший комбайн для стресс-тестов 2025. Тестирует CPU, память, GPU (3D Adaptive для VRAM). Если крашится за час — система нестабильна.",
+          "importance": 9,
+          "tags": ["occt", "стресс-тест", "стабильность"]
+        },
+        {
+          "text": "TestMem5 + Anta777 Extreme — единственный способ быстро найти ошибки DDR5. 3 цикла без ошибок = память ок.",
+          "importance": 9,
+          "tags": ["testmem5", "anta777", "ddr5", "память", "тест"]
+        },
+        {
+          "text": "Y-Cruncher — убийца нестабильных Curve Optimizer. Тесты VST и VT3 выявляют ошибки контроллера памяти за минуты.",
+          "importance": 8,
+          "tags": ["y-cruncher", "curve optimizer", "amd", "стабильность"]
+        },
+        {
+          "text": "CoreCycler — скрипт поверх Prime95. Нагружает ядра по очереди. Если ядро #2 крашится — ему нужен отдельный CO.",
+          "importance": 8,
+          "tags": ["corecycler", "prime95", "curve optimizer", "amd"]
+        }
+      ]
+    },
+    "tuning_guides": {
+      "description": "Гайды по тюнингу 2025",
+      "facts": [
+        {
+          "text": "Тюнинг AMD Ryzen (Zen 4/5): PBO2 + Curve Optimizer. В BIOS: AMD Overclocking -> PBO -> Advanced. Начинай с CO -15/-20, удачные камни берут -30. Тестируй CoreCycler, не Cinebench!",
+          "importance": 9,
+          "tags": ["amd", "ryzen", "pbo2", "curve optimizer", "тюнинг"]
+        },
+        {
+          "text": "Тюнинг Intel (Core 13/14/Ultra): AC/DC Loadline или VF Curve. Способ 1: AC Loadline Mode от 9-12 к 1-5. Способ 2: Global Core SVID Offset -0.050V до -0.100V.",
+          "importance": 9,
+          "tags": ["intel", "андервольт", "loadline", "vf curve", "тюнинг"]
+        },
+        {
+          "text": "Андервольт NVIDIA RTX 40/50: MSI Afterburner -> Ctrl+F (кривая). Найди точку 950 mV, подними до нужной частоты (2700 MHz). Память: +500, тест, +1000, тест.",
+          "importance": 9,
+          "tags": ["nvidia", "rtx", "андервольт", "msi afterburner", "тюнинг"]
+        },
+        {
+          "text": "Тюнинг AMD Radeon RX 7000/9000: Adrenalin -> Performance -> Tuning. Min Frequency Trick: Max 2800, Min 2700 MHz — убирает микрофризы. Undervolt по 10-20 мВ.",
+          "importance": 9,
+          "tags": ["amd", "radeon", "rx", "adrenalin", "тюнинг"]
+        },
+        {
+          "text": "Тюнинг DDR5: tREFI — главный параметр! Сток ~10000, разгон 50000-65535. ОБЯЗАТЕЛЬНО обдув памяти при tREFI 65k, иначе BSOD от перегрева.",
+          "importance": 9,
+          "tags": ["ddr5", "память", "trefi", "тайминги", "тюнинг"]
+        }
+      ]
+    },
+    "meta_2025": {
+      "description": "Мета тюнинга 2025",
+      "facts": [
+        {
+          "text": "Мета 2025: классический разгон мёртв. Железо выжато на 99% по частотам, но с запасом по вольтажу. Убираешь лишний вольтаж = ниже температуры = выше буст.",
+          "importance": 10,
+          "tags": ["мета", "2025", "андервольт", "тюнинг"]
+        },
+        {
+          "text": "ECC Trap на GDDR6X/GDDR7: переразгон памяти GPU = FPS падает БЕЗ артефактов. Память тратит такты на коррекцию ошибок. Если баллы перестали расти — откатывайся.",
+          "importance": 9,
+          "tags": ["gpu", "память", "ecc", "разгон", "gddr6x", "gddr7"]
+        },
+        {
+          "text": "DDU (Display Driver Uninstaller) — святая вода. Обязательно Safe Mode + DDU при смене видеокарты, особенно при переходе NVIDIA <-> AMD.",
+          "importance": 9,
+          "tags": ["ddu", "драйверы", "видеокарта", "чистка"]
+        }
+      ]
+    },
+    "builds_2025": {
+      "description": "Рекомендации по сборкам 2025",
+      "facts": [
+        {
+          "text": "Бюджетный гейминг 2025: Ryzen 5 5600 или i5-12400, RTX 4060 или RX 7600, 16-32GB DDR4-3200, NVMe Gen3/Gen4 500GB-1TB, БП 550-650W 80+ Bronze.",
+          "importance": 9,
+          "tags": ["сборка", "бюджет", "gaming", "2025"]
+        },
+        {
+          "text": "Средний гейминг 2025: Ryzen 5 9600X/7800X3D или i5-14600K, RTX 4070 Super или RX 7800 XT, 32GB DDR5-6000, NVMe Gen4 1-2TB, БП 750W 80+ Gold ATX 3.0.",
+          "importance": 9,
+          "tags": ["сборка", "средний", "gaming", "2025"]
+        },
+        {
+          "text": "Хай-энд гейминг 2025: Ryzen 7 9800X3D или Core Ultra 9 285K, RTX 5080/4080 Super или RX 7900 XTX, 32-64GB DDR5-6400+, NVMe Gen4/Gen5 2TB+, БП 850-1000W ATX 3.1.",
+          "importance": 9,
+          "tags": ["сборка", "хай-энд", "gaming", "2025"]
+        },
+        {
+          "text": "Рабочая станция 2025: Ryzen 9 9950X или Threadripper 9980X, RTX 4090/5090, 64-128GB DDR5 ECC, NVMe Gen5 2-4TB + HDD для архива, БП 1000-1600W 80+ Platinum.",
+          "importance": 9,
+          "tags": ["сборка", "workstation", "рендер", "продакшн", "2025"]
+        }
+      ]
+    }
+  }
+}

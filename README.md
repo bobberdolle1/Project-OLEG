@@ -2,14 +2,14 @@
   <img src="https://img.shields.io/badge/🤖-ОЛЕГ-red?style=for-the-badge&labelColor=black" alt="Oleg Bot"/>
 </p>
 
-<h1 align="center">🎰 ОЛЕГ 7.5 — Mini Games & Economy 🎰</h1>
+<h1 align="center">🎰 ОЛЕГ 7.9 — Anti-Hallucination & Web Search 🎰</h1>
 
 <p align="center">
   <strong>Цифровой гигачад. Ветеран кремниевых войн. Местный решала.</strong>
 </p>
 
 <p align="center">
-  <em>8 новых мини-игр с кнопками, магазин и полноценная экономика!</em>
+  <em>Умный веб-поиск, база знаний о железе 2025, fallback модели!</em>
 </p>
 
 <p align="center">
@@ -51,9 +51,22 @@
 
 ---
 
-## 🚀 Что нового в 7.5
+## 🚀 Что нового в 7.9
 
-### 🎮 Mini Games & Economy — Главные фичи
+### 🧠 Anti-Hallucination & Web Search — Главные фичи
+
+```diff
++ 🔍 SearXNG в Docker — свой поисковик без лимитов и блокировок
++ 🌐 Умный веб-поиск — SearXNG → Brave → DuckDuckGo (с ротацией UA)
++ 📚 База знаний 2025 — RTX 50, RX 9000, Ryzen 9000, Core Ultra в RAG
++ � Fallbйack модели — автопереключение на gemma3:12b при недоступности cloud
++ � Voice /Vision в старых топиках — исправлена ошибка "thread not found"
++ 🛡️ Мультиязычная защита от injection — 8 языков, base64, zero-width
++ � Различсение пользователей — Олег не путает людей в групповых чатах
++ �  Контекст чата — бот знает название и описание чата
+```
+
+### 🎮 Mini Games & Economy (v7.5)
 
 ```diff
 + 🎣 Рыбалка (/fish) — лови рыбу разной редкости и продавай!
@@ -66,7 +79,6 @@
 + 🐔 Петушиные бои (/cockfight) — выбери петуха и ставь!
 + 🏪 Магазин (/shop) — покупай предметы за монеты
 + 💰 Экономика — баланс, ежедневный бонус, переводы
-+ 🎮 Game Hub 3 страницы — все игры с пагинацией
 ```
 
 ### 🎰 Grand Casino & Dictator (v7.0) — Предыдущие фичи
@@ -604,17 +616,24 @@ OWNER_ID=your_telegram_id
 
 # Ollama — три модели для разных задач
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_BASE_MODEL=deepseek-v3.2:cloud    # Текст
+OLLAMA_BASE_MODEL=deepseek-v3.2:cloud         # Текст
 OLLAMA_VISION_MODEL=qwen3-vl:235b-cloud       # Изображения
 OLLAMA_MEMORY_MODEL=glm-4.6:cloud             # RAG
+
+# Fallback модели (локальные, когда cloud недоступен)
+OLLAMA_FALLBACK_ENABLED=true
+OLLAMA_FALLBACK_MODEL=gemma3:12b              # Хорошо следует инструкциям
+OLLAMA_FALLBACK_VISION_MODEL=gemma3:12b       # Поддерживает vision
+OLLAMA_FALLBACK_MEMORY_MODEL=gemma3:12b
+
+# Web Search (Anti-Hallucination)
+# Приоритет: SearXNG → Brave → DuckDuckGo
+SEARXNG_URL=http://searxng:8080               # Docker контейнер (рекомендуется)
+BRAVE_SEARCH_API_KEY=                         # Опционально: 2000 запросов/мес бесплатно
 
 # Голосовые сообщения
 VOICE_RECOGNITION_ENABLED=true
 WHISPER_MODEL=base  # tiny/base/small/medium/large
-
-# TTS
-TTS_ENABLED=true
-TTS_VOICE=ru-RU-DmitryNeural
 
 # Database
 DATABASE_URL=sqlite+aiosqlite:///./data/oleg.db
@@ -623,9 +642,6 @@ DATABASE_URL=sqlite+aiosqlite:///./data/oleg.db
 REDIS_ENABLED=true
 REDIS_HOST=redis
 REDIS_PORT=6379
-
-# Security
-HMAC_SECRET_KEY=your_secret_key_here
 ```
 
 Полный список в [.env.example](.env.example)
@@ -678,6 +694,16 @@ pytest tests/integration/
 
 ## 📈 Roadmap
 
+### ✅ Реализовано (v7.9 Anti-Hallucination & Web Search)
+- [x] 🔍 SearXNG в Docker — свой поисковик без лимитов
+- [x] 🌐 Умный веб-поиск — SearXNG → Brave → DDG с ротацией UA
+- [x] 📚 База знаний 2025 — RTX 50, RX 9000, Ryzen 9000, Core Ultra
+- [x] � УFallback модели — gemma3:12b при недоступности cloud
+- [x] � Voйice/Vision в старых топиках — safe_reply() для форумов
+- [x] 🛡️ Мультиязычная защита — 8 языков, base64, zero-width
+- [x] � ЛРазличение пользователей — контекст "ТЕКУЩИЙ СОБЕСЕДНИК"
+- [x] � Кеонтекст чата — название, описание, тип
+
 ### ✅ Реализовано (v7.5 Mini Games & Economy)
 - [x] 🎣 Рыбалка — 6 уровней редкости, каталог рыб
 - [x] 🚀 Краш — реалтайм множитель, кнопка "ЗАБРАТЬ"
@@ -689,7 +715,6 @@ pytest tests/integration/
 - [x] 🐔 Петушиные бои — 3 тира петухов
 - [x] 🏪 Магазин — категории, inline-кнопки
 - [x] 💰 Экономика — баланс, daily, transfer
-- [x] Game Hub 3 страницы — пагинация
 
 ### ✅ Реализовано (v7.0 Grand Casino & Dictator)
 - [x] Game Hub — центральное меню с Inline-кнопками
@@ -800,6 +825,7 @@ services:
     depends_on:
       - redis
       - chromadb
+      - searxng
     
   oleg-worker:
     build: .
@@ -812,6 +838,12 @@ services:
     
   chromadb:
     image: ghcr.io/chroma-core/chroma:latest
+  
+  # SearXNG — метапоисковик для веб-поиска (Anti-Hallucination)
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8080:8080"
 ```
 
 ---

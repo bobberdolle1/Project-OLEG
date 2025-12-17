@@ -78,6 +78,164 @@ async def is_ollama_available() -> bool:
 def reset_ollama_availability_cache():
     """Сбросить кэш доступности Ollama (например, после успешного запроса)."""
     global _ollama_available, _ollama_check_time
+
+
+# ============================================================================
+# Fallback модели и уведомления
+# ============================================================================
+
+# Кэш статуса моделей (TTL 60 секунд)
+_model_status_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=50, ttl=60)
+
+# Флаг что уведомление уже отправлено (TTL 30 минут)
+_owner_notified_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=10, ttl=1800)
+
+# Текущая активная модель (для отслеживания переключений)
+_current_active_model: str | None = None
+
+
+async def check_model_available(model: str) -> bool:
+    """
+    Проверить доступность конкретной модели.
+    
+    Args:
+        model: Название модели
+        
+    Returns:
+        True если модель доступна
+    """
+    cache_key = f"model_{model}"
+    if cache_key in _model_status_cache:
+        return _model_status_cache[cache_key]
+    
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Пробуем сделать минимальный запрос к модели
+            response = await client.post(
+                f"{settings.ollama_base_url}/api/generate",
+                json={"model": model, "prompt": "test", "stream": False},
+                timeout=15
+            )
+            available = response.status_code == 200
+            _model_status_cache[cache_key] = available
+            return available
+    except Exception as e:
+        logger.debug(f"Model {model} check failed: {e}")
+        _model_status_cache[cache_key] = False
+        return False
+
+
+async def get_active_model(model_type: str = "base") -> str:
+    """
+    Получить активную модель с учётом fallback.
+    
+    Args:
+        model_type: Тип модели - "base", "vision", "memory"
+        
+    Returns:
+        Название модели для использования
+    """
+    global _current_active_model
+    
+    # Определяем основную и fallback модели
+    if model_type == "vision":
+        primary = settings.ollama_vision_model
+        fallback = settings.ollama_fallback_vision_model
+    elif model_type == "memory":
+        primary = settings.ollama_memory_model
+        fallback = settings.ollama_fallback_memory_model
+    else:
+        primary = settings.ollama_base_model
+        fallback = settings.ollama_fallback_model
+    
+    # Если fallback отключен - всегда используем основную
+    if not settings.ollama_fallback_enabled:
+        return primary
+    
+    # Проверяем доступность основной модели
+    if await check_model_available(primary):
+        if _current_active_model != primary:
+            _current_active_model = primary
+            logger.info(f"Using primary model: {primary}")
+        return primary
+    
+    # Основная недоступна - пробуем fallback
+    logger.warning(f"Primary model {primary} unavailable, trying fallback {fallback}")
+    
+    if await check_model_available(fallback):
+        if _current_active_model != fallback:
+            _current_active_model = fallback
+            logger.warning(f"Switched to fallback model: {fallback}")
+            # Уведомляем владельца о переключении
+            await notify_owner_model_switch(primary, fallback)
+        return fallback
+    
+    # Обе модели недоступны
+    logger.error(f"Both primary ({primary}) and fallback ({fallback}) models unavailable!")
+    await notify_owner_service_down("Ollama", f"Модели {primary} и {fallback} недоступны")
+    return primary  # Возвращаем основную, пусть ошибка обработается выше
+
+
+async def notify_owner_model_switch(primary: str, fallback: str):
+    """Уведомить владельца о переключении на fallback модель."""
+    cache_key = f"switch_{primary}_{fallback}"
+    if cache_key in _owner_notified_cache:
+        return
+    
+    _owner_notified_cache[cache_key] = True
+    
+    if not settings.owner_id:
+        return
+    
+    try:
+        from aiogram import Bot
+        bot = Bot(token=settings.telegram_bot_token)
+        await bot.send_message(
+            chat_id=settings.owner_id,
+            text=(
+                f"⚠️ <b>Переключение модели</b>\n\n"
+                f"Основная модель недоступна:\n"
+                f"❌ <code>{primary}</code>\n\n"
+                f"Переключился на резервную:\n"
+                f"✅ <code>{fallback}</code>\n\n"
+                f"Проверь статус Ollama!"
+            ),
+            parse_mode="HTML"
+        )
+        await bot.session.close()
+        logger.info(f"Owner notified about model switch: {primary} -> {fallback}")
+    except Exception as e:
+        logger.error(f"Failed to notify owner about model switch: {e}")
+
+
+async def notify_owner_service_down(service: str, details: str = ""):
+    """Уведомить владельца о недоступности сервиса."""
+    cache_key = f"down_{service}"
+    if cache_key in _owner_notified_cache:
+        return
+    
+    _owner_notified_cache[cache_key] = True
+    
+    if not settings.owner_id:
+        return
+    
+    try:
+        from aiogram import Bot
+        bot = Bot(token=settings.telegram_bot_token)
+        await bot.send_message(
+            chat_id=settings.owner_id,
+            text=(
+                f"🚨 <b>Сервис недоступен!</b>\n\n"
+                f"❌ <b>{service}</b>\n"
+                f"{details}\n\n"
+                f"Бот работает в ограниченном режиме."
+            ),
+            parse_mode="HTML"
+        )
+        await bot.session.close()
+        logger.warning(f"Owner notified about service down: {service}")
+    except Exception as e:
+        logger.error(f"Failed to notify owner about service down: {e}")
     _ollama_available = None
     _ollama_check_time = 0
 
@@ -845,18 +1003,32 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     # Добавляем текущее сообщение
     messages.append({"role": "user", "content": f"{display_name}: {user_text}"})
     
+    # Получаем активную модель с учётом fallback
+    active_model = await get_active_model("base")
+    
     try:
-        # Используем основную модель для текстовых ответов с поддержкой веб-поиска
-        return await _ollama_chat(messages, model=settings.ollama_base_model, enable_tools=True)
-    except httpx.TimeoutException:
-        logger.error("Ollama timeout - server not responding")
-        return _get_error_response("timeout", "Сервер ИИ тупит. Попробуй позже, чемпион.")
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Ollama HTTP error: {e.response.status_code}")
-        return _get_error_response("http_error", "Сервер ИИ сломался. Админы уже в курсе (наверное).")
-    except httpx.RequestError as e:
-        logger.error(f"Ollama connection error: {e}")
-        return _get_error_response("connection", "Не могу достучаться до сервера ИИ. Проверь, запущен ли Ollama.")
+        # Используем активную модель для текстовых ответов с поддержкой веб-поиска
+        return await _ollama_chat(messages, model=active_model, enable_tools=True)
+    except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError) as e:
+        logger.error(f"Ollama error with {active_model}: {e}")
+        
+        # Пробуем fallback если включен и это была основная модель
+        if settings.ollama_fallback_enabled and active_model == settings.ollama_base_model:
+            fallback = settings.ollama_fallback_model
+            logger.warning(f"Trying fallback model: {fallback}")
+            try:
+                await notify_owner_model_switch(active_model, fallback)
+                return await _ollama_chat(messages, model=fallback, enable_tools=True)
+            except Exception as fallback_err:
+                logger.error(f"Fallback model {fallback} also failed: {fallback_err}")
+                await notify_owner_service_down("Ollama", f"Обе модели недоступны: {active_model}, {fallback}")
+        
+        if isinstance(e, httpx.TimeoutException):
+            return _get_error_response("timeout", "Сервер ИИ тупит. Попробуй позже, чемпион.")
+        elif isinstance(e, httpx.HTTPStatusError):
+            return _get_error_response("http_error", "Сервер ИИ сломался. Админы уже в курсе (наверное).")
+        else:
+            return _get_error_response("connection", "Не могу достучаться до сервера ИИ. Проверь, запущен ли Ollama.")
     except Exception as e:
         logger.error(f"Unexpected error in generate_text_reply: {e}")
         return _get_error_response("unknown", "Что-то пошло не так. Попробуй ещё раз или обратись к админу.")

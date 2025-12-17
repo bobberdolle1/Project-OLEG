@@ -283,16 +283,35 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
     
     # Проверка сервисов
     services_status = []
+    has_critical_issues = False
     
-    # Ollama
+    # Ollama - реальная проверка доступности
     try:
-        from app.services.ollama_client import ollama_client
-        if hasattr(ollama_client, 'client'):
-            services_status.append("✅ Ollama")
+        from app.services.ollama_client import is_ollama_available, check_model_available
+        ollama_ok = await is_ollama_available()
+        if ollama_ok:
+            # Проверяем основную модель
+            model_ok = await check_model_available(settings.ollama_base_model)
+            if model_ok:
+                services_status.append(f"✅ Ollama ({settings.ollama_base_model})")
+            else:
+                # Проверяем fallback
+                if settings.ollama_fallback_enabled:
+                    fallback_ok = await check_model_available(settings.ollama_fallback_model)
+                    if fallback_ok:
+                        services_status.append(f"⚠️ Ollama (fallback: {settings.ollama_fallback_model})")
+                    else:
+                        services_status.append("❌ Ollama (модели недоступны)")
+                        has_critical_issues = True
+                else:
+                    services_status.append(f"❌ Ollama (модель {settings.ollama_base_model} недоступна)")
+                    has_critical_issues = True
         else:
-            services_status.append("⚠️ Ollama (не инициализирован)")
-    except Exception:
-        services_status.append("❌ Ollama")
+            services_status.append("❌ Ollama (сервер недоступен)")
+            has_critical_issues = True
+    except Exception as e:
+        services_status.append(f"❌ Ollama ({e})")
+        has_critical_issues = True
     
     # Redis
     if settings.redis_enabled:
@@ -314,8 +333,10 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
             services_status.append("✅ ChromaDB")
         else:
             services_status.append("⚠️ ChromaDB (не инициализирован)")
+            has_critical_issues = True
     except Exception:
         services_status.append("❌ ChromaDB")
+        has_critical_issues = True
     
     # Whisper (faster-whisper)
     if settings.voice_recognition_enabled:
@@ -343,15 +364,44 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
     for status in services_status:
         text += f"├ {status}\n"
     
-    text += f"\n<b>Модель:</b> {settings.ollama_base_model}\n"
-    text += f"<b>Vision:</b> {settings.ollama_vision_model}\n"
+    text += f"\n<b>Модели:</b>\n"
+    text += f"├ Base: {settings.ollama_base_model}\n"
+    text += f"├ Vision: {settings.ollama_vision_model}\n"
+    text += f"└ Memory: {settings.ollama_memory_model}\n"
+    
+    if settings.ollama_fallback_enabled:
+        text += f"\n<b>Fallback модели:</b>\n"
+        text += f"├ Base: {settings.ollama_fallback_model}\n"
+        text += f"├ Vision: {settings.ollama_fallback_vision_model}\n"
+        text += f"└ Memory: {settings.ollama_fallback_memory_model}\n"
+    
+    # Предупреждение о критических проблемах
+    if has_critical_issues:
+        text += "\n⚠️ <b>Есть критические проблемы!</b>"
     
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data="owner_status")
+    if has_critical_issues:
+        kb.button(text="🔔 Тест уведомления", callback_data="owner_test_notify")
     kb.button(text="🔙 Назад", callback_data="owner_main")
     kb.adjust(2)
     
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data == "owner_test_notify")
+async def cb_owner_test_notify(callback: CallbackQuery):
+    """Тестовое уведомление о проблемах."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    try:
+        from app.services.ollama_client import notify_owner_service_down
+        await notify_owner_service_down("Тест", "Это тестовое уведомление о проблемах с сервисами")
+        await callback.answer("✅ Уведомление отправлено!", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ Ошибка: {e}", show_alert=True)
 
 
 # ============================================================================

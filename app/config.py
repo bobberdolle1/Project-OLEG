@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     ollama_cache_max_size: int = Field(default=128, ge=10, description="Max cache size")
     ollama_web_search_enabled: bool = Field(default=True, description="Enable web search tool for LLM")
     
+    # Fallback models (локальные модели когда cloud недоступен)
+    ollama_fallback_enabled: bool = Field(default=True, description="Enable fallback to local models when cloud unavailable")
+    ollama_fallback_model: str = Field(default="qwen3:8b", description="Fallback model for text generation")
+    ollama_fallback_vision_model: str = Field(default="qwen3-vl:4b-instruct", description="Fallback model for vision")
+    ollama_fallback_memory_model: str = Field(default="qwen3:8b", description="Fallback model for memory/RAG")
+    
     # Toxicity analysis
     toxicity_analysis_enabled: bool = Field(default=True, description="Enable toxicity analysis")
     toxicity_threshold: int = Field(default=75, ge=0, le=100, description="Toxicity threshold (0-100)")

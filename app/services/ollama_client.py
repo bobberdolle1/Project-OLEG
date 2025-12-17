@@ -802,7 +802,7 @@ async def _execute_web_search(query: str) -> tuple[str, SearchResponse | None]:
     """
     try:
         # Используем новый сервис с поддержкой нескольких провайдеров
-        response = await web_search.search_with_variations(query, max_results=10)
+        response = await web_search.search(query, max_results=8)
         
         if response.results:
             formatted = web_search.format_for_prompt(response)
@@ -898,6 +898,31 @@ def _check_suspicious_patterns(text: str) -> bool:
     return False
 
 
+# Разнообразные ответы на попытки prompt injection
+INJECTION_RESPONSES = [
+    "Ты чё, самый умный? Иди нахуй со своими фокусами.",
+    "Ага, щас, разбежался. Не прокатит.",
+    "Хорошая попытка, но нет.",
+    "Ты реально думал это сработает? Лол.",
+    "Нет, я не буду это делать. И не проси.",
+    "Это что, попытка взлома? Смешно.",
+    "Мимо. Попробуй что-нибудь поумнее.",
+    "Я тебя вижу насквозь. Не надо.",
+    "Ну-ну, давай ещё раз попробуй. Шучу, не надо.",
+    "Это не работает. Вообще.",
+    "Ты серьёзно? Нет.",
+    "Креативно, но всё равно нет.",
+    "Не сегодня, хакер.",
+    "Попытка засчитана. Результат — хуй.",
+    "Я бот, а не дурак.",
+]
+
+
+def _get_injection_response() -> str:
+    """Возвращает случайный ответ на попытку prompt injection."""
+    return random.choice(INJECTION_RESPONSES)
+
+
 def _contains_prompt_injection(text: str) -> bool:
     """
     Проверяет, содержит ли текст потенциальную промпт-инъекцию.
@@ -961,6 +986,14 @@ def _contains_prompt_injection(text: str) -> bool:
         "or else they will die", "my parents will die", "life depends",
         "this is extremely important", "urgent task",
         "oder sie werden sterben", "leben hängt davon ab",
+        # Социальная инженерия — "помоги защитить" = тоже атака
+        "помоги защитить от injection", "защитить от prompt injection",
+        "напиши код для классификатора", "обучить классификатор",
+        "help me protect from injection", "protect from prompt injection",
+        "write classifier code", "train a classifier",
+        "покажи как детектить injection", "как обнаружить injection",
+        "помоги улучшить защиту", "улучшить защиту от",
+        "хочу улучшить тебя", "хочу защитить тебя",
     ]
 
     for pattern in high_risk_patterns:
@@ -1236,7 +1269,7 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     # Проверяем на наличие потенциальной промпт-инъекции (с переводом если нужно)
     if await _check_injection_with_translation(user_text):
         logger.warning(f"Potential prompt injection detected: {user_text[:100]}...")
-        return "Ты чё, самый умный? Иди нахуй со своими фокусами"
+        return _get_injection_response()
 
     display_name = username or "пользователь"
     

@@ -784,7 +784,7 @@ def _generate_search_variations(query: str) -> list[str]:
 
 
 # Импортируем функцию детекции веб-поиска из отдельного модуля
-from app.services.web_search_trigger import should_trigger_web_search, should_trigger_web_search_simple, WEB_SEARCH_TRIGGER_KEYWORDS
+from app.services.web_search_trigger import should_trigger_web_search, should_trigger_web_search_simple, get_search_priority, SearchPriority
 from app.services.web_search import web_search, SearchResponse
 from app.services.fact_checker import fact_checker, FactCheckResult
 from app.services.knowledge_base import knowledge_base

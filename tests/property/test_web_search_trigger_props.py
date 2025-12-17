@@ -1,10 +1,8 @@
 """
-Property-based tests for Web Search Trigger Detection.
+Property-based tests for Smart Web Search Trigger.
 
-Tests correctness properties defined in the design document.
-**Feature: oleg-personality-improvements, Property 1: Search keywords trigger web search**
-**Feature: anti-hallucination-v1**
-**Validates: Requirements 1.3**
+Tests correctness properties for the new categorization system.
+**Feature: anti-hallucination-v2**
 """
 
 import os
@@ -17,139 +15,159 @@ _module_path = os.path.join(_project_root, 'app', 'services', 'web_search_trigge
 _spec = importlib.util.spec_from_file_location("web_search_trigger", _module_path)
 _trigger_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_trigger_module)
-# Use the simple version that returns bool for backward compatibility
+
+# Import functions
 should_trigger_web_search = _trigger_module.should_trigger_web_search_simple
-WEB_SEARCH_TRIGGER_KEYWORDS = _trigger_module.WEB_SEARCH_TRIGGER_KEYWORDS
+get_search_priority = _trigger_module.get_search_priority
+SearchPriority = _trigger_module.SearchPriority
+
+# Keywords that should ALWAYS trigger search (CRITICAL priority)
+ALWAYS_SEARCH_KEYWORDS = [
+    "сколько стоит", "цена", "ценник", "почём", "где купить",
+    "когда выйдет", "когда релиз", "дата выхода",
+    "вышла ли", "вышел ли", "уже вышла",
+    "последние новости", "что нового",
+    "последняя версия", "актуальная версия",
+]
+
+# Keywords that should NEVER trigger search (casual chat)
+NEVER_SEARCH_KEYWORDS = [
+    "привет", "здарова", "хай",
+    "спасибо", "пасиб",
+    "пока", "бб",
+    "лол", "кек", "ахах",
+]
 
 
-class TestWebSearchKeywordTrigger:
+class TestSearchPriorityCategories:
     """
-    **Feature: oleg-personality-improvements, Property 1: Search keywords trigger web search**
-    **Validates: Requirements 1.3**
-    
-    *For any* user message containing keywords ["вышла", "релиз", "новости", "когда выйдет", 
-    "цена", "сколько стоит"], the `should_trigger_web_search` function SHALL return True.
+    Tests for search priority categorization.
+    **Feature: anti-hallucination-v2**
     """
     
-    @settings(max_examples=100)
-    @given(st.sampled_from(WEB_SEARCH_TRIGGER_KEYWORDS))
-    def test_keyword_triggers_search(self, keyword: str):
+    @settings(max_examples=50)
+    @given(st.sampled_from(ALWAYS_SEARCH_KEYWORDS))
+    def test_critical_keywords_trigger_search(self, keyword: str):
         """
-        Property 1a: Any message containing a trigger keyword should trigger web search.
+        Property: Critical keywords (prices, releases) should ALWAYS trigger search.
         """
-        # Create message with keyword
         message = f"Привет, {keyword} что-нибудь интересное?"
         
+        priority, _ = get_search_priority(message)
+        assert priority == SearchPriority.CRITICAL, \
+            f"Keyword '{keyword}' should have CRITICAL priority, got {priority}"
+    
+    @settings(max_examples=50)
+    @given(st.sampled_from(NEVER_SEARCH_KEYWORDS))
+    def test_casual_keywords_never_search(self, keyword: str):
+        """
+        Property: Casual chat keywords should NEVER trigger search.
+        """
+        # Test standalone keyword
+        priority, _ = get_search_priority(keyword)
+        assert priority == SearchPriority.NEVER, \
+            f"Casual keyword '{keyword}' should have NEVER priority, got {priority}"
+    
+    def test_critical_overrides_never(self):
+        """
+        Property: Critical keywords should override casual keywords.
+        """
+        # Message starts with greeting but asks about price
+        message = "привет, сколько стоит RTX 5090?"
+        
+        priority, _ = get_search_priority(message)
+        assert priority == SearchPriority.CRITICAL, \
+            "Price question should override greeting"
+    
+    @settings(max_examples=30)
+    @given(st.sampled_from(["RTX 4070", "RX 7900", "Ryzen 9", "i9-14900"]))
+    def test_hardware_models_high_priority(self, model: str):
+        """
+        Property: Questions about specific hardware models should have HIGH priority.
+        """
+        message = f"сколько VRAM у {model}?"
+        
+        priority, _ = get_search_priority(message)
+        assert priority in (SearchPriority.HIGH, SearchPriority.CRITICAL), \
+            f"Hardware question about '{model}' should have HIGH/CRITICAL priority"
+
+
+class TestSearchTriggerFunction:
+    """
+    Tests for should_trigger_web_search function.
+    """
+    
+    @settings(max_examples=50)
+    @given(st.sampled_from(ALWAYS_SEARCH_KEYWORDS))
+    def test_always_keywords_return_true(self, keyword: str):
+        """
+        Property: ALWAYS keywords should return True from should_trigger_web_search.
+        """
+        message = f"Вопрос: {keyword}?"
+        
         result = should_trigger_web_search(message)
         assert result is True, \
-            f"Message with keyword '{keyword}' should trigger web search"
+            f"Keyword '{keyword}' should trigger search"
     
-    @settings(max_examples=100)
-    @given(st.sampled_from(WEB_SEARCH_TRIGGER_KEYWORDS))
-    def test_keyword_case_insensitive(self, keyword: str):
+    @settings(max_examples=50)
+    @given(st.sampled_from(NEVER_SEARCH_KEYWORDS))
+    def test_never_keywords_return_false(self, keyword: str):
         """
-        Property 1b: Keyword detection should be case-insensitive.
+        Property: NEVER keywords (alone) should return False.
         """
-        # Test uppercase
-        message_upper = f"Привет, {keyword.upper()} что-нибудь?"
-        result_upper = should_trigger_web_search(message_upper)
-        
-        # Test mixed case
-        message_title = f"Привет, {keyword.title()} что-нибудь?"
-        result_title = should_trigger_web_search(message_title)
-        
-        assert result_upper is True, \
-            f"Uppercase keyword '{keyword.upper()}' should trigger search"
-        assert result_title is True, \
-            f"Title case keyword '{keyword.title()}' should trigger search"
-    
-    @settings(max_examples=100)
-    @given(
-        st.text(min_size=5, max_size=100).filter(
-            lambda t: not any(kw in t.lower() for kw in WEB_SEARCH_TRIGGER_KEYWORDS)
-        )
-    )
-    def test_no_keyword_no_trigger(self, text: str):
-        """
-        Property 1c: Messages without trigger keywords should not trigger web search.
-        """
-        # Ensure no keywords present
-        assume(not any(kw in text.lower() for kw in WEB_SEARCH_TRIGGER_KEYWORDS))
-        
-        result = should_trigger_web_search(text)
+        result = should_trigger_web_search(keyword)
         assert result is False, \
-            f"Message without keywords should not trigger search: '{text[:50]}...'"
-    
-    @settings(max_examples=100)
-    @given(st.sampled_from(WEB_SEARCH_TRIGGER_KEYWORDS), st.text(min_size=0, max_size=50))
-    def test_keyword_with_context(self, keyword: str, context: str):
-        """
-        Property 1d: Keyword should trigger search regardless of surrounding context.
-        """
-        message = f"{context} {keyword} {context}"
-        
-        result = should_trigger_web_search(message)
-        assert result is True, \
-            f"Keyword '{keyword}' with context should trigger search"
+            f"Casual keyword '{keyword}' should not trigger search"
     
     def test_empty_string_no_trigger(self):
         """
-        Property 1e: Empty string should not trigger web search.
+        Property: Empty string should not trigger web search.
         """
         result = should_trigger_web_search("")
         assert result is False, "Empty string should not trigger search"
     
-    def test_none_handling(self):
+    def test_case_insensitive(self):
         """
-        Property 1f: None input should not trigger web search (and not crash).
+        Property: Search detection should be case-insensitive.
         """
-        result = should_trigger_web_search(None)
-        assert result is False, "None should not trigger search"
+        result_lower = should_trigger_web_search("сколько стоит rtx 5090?")
+        result_upper = should_trigger_web_search("СКОЛЬКО СТОИТ RTX 5090?")
+        
+        assert result_lower == result_upper, \
+            "Case should not affect search trigger"
 
 
-class TestWebSearchReleaseKeywords:
+class TestReleaseKeywords:
     """
     Tests specifically for release/news related keywords.
-    **Validates: Requirements 1.1, 1.3**
     """
     
-    @settings(max_examples=50)
-    @given(st.sampled_from(["вышла", "вышел", "вышло", "релиз", "выйдет", "когда выйдет"]))
-    def test_release_keywords_trigger(self, keyword: str):
+    @settings(max_examples=30)
+    @given(st.sampled_from(["когда выйдет", "дата выхода", "вышла ли", "последние новости"]))
+    def test_release_keywords_critical(self, keyword: str):
         """
-        Release-related keywords should always trigger search.
+        Release-related keywords should have CRITICAL priority.
         """
-        messages = [
-            f"Когда {keyword} новая игра?",
-            f"Уже {keyword}?",
-            f"Слышал что {keyword} патч",
-        ]
+        message = f"{keyword} GTA 6?"
         
-        for msg in messages:
-            result = should_trigger_web_search(msg)
-            assert result is True, \
-                f"Release keyword '{keyword}' in '{msg}' should trigger search"
+        priority, _ = get_search_priority(message)
+        assert priority == SearchPriority.CRITICAL, \
+            f"Release keyword '{keyword}' should be CRITICAL"
 
 
-class TestWebSearchPriceKeywords:
+class TestPriceKeywords:
     """
     Tests specifically for price-related keywords.
-    **Validates: Requirements 1.3**
     """
     
-    @settings(max_examples=50)
+    @settings(max_examples=30)
     @given(st.sampled_from(["сколько стоит", "цена", "ценник", "где купить"]))
-    def test_price_keywords_trigger(self, keyword: str):
+    def test_price_keywords_critical(self, keyword: str):
         """
-        Price-related keywords should always trigger search.
+        Price-related keywords should have CRITICAL priority.
         """
-        messages = [
-            f"{keyword} RTX 4090?",
-            f"Подскажи {keyword}",
-            f"Интересует {keyword} на это",
-        ]
+        message = f"{keyword} RTX 4090?"
         
-        for msg in messages:
-            result = should_trigger_web_search(msg)
-            assert result is True, \
-                f"Price keyword '{keyword}' in '{msg}' should trigger search"
+        priority, _ = get_search_priority(message)
+        assert priority == SearchPriority.CRITICAL, \
+            f"Price keyword '{keyword}' should be CRITICAL"

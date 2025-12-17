@@ -815,17 +815,17 @@ async def process_pvp_round(callback: CallbackQuery, duel_id: str):
     if p1_hits:
         duel["player2_hp"] = max(0, duel["player2_hp"] - damage)
     
-    # Build round result
+    # Build round result (без спойлеров — только попал/промах)
     result_lines = []
     if p1_hits:
-        result_lines.append(f"💥 {duel['player1_name']} попал в {ZONE_NAMES[p1_attack]}!")
+        result_lines.append(f"💥 {duel['player1_name']} попал!")
     else:
-        result_lines.append(f"🛡️ {duel['player2_name']} заблокировал {ZONE_NAMES[p1_attack]}")
+        result_lines.append(f"🛡️ {duel['player1_name']} промахнулся")
     
     if p2_hits:
-        result_lines.append(f"💥 {duel['player2_name']} попал в {ZONE_NAMES[p2_attack]}!")
+        result_lines.append(f"💥 {duel['player2_name']} попал!")
     else:
-        result_lines.append(f"🛡️ {duel['player1_name']} заблокировал {ZONE_NAMES[p2_attack]}")
+        result_lines.append(f"🛡️ {duel['player2_name']} промахнулся")
     
     round_result = "\n".join(result_lines)
     
@@ -845,31 +845,27 @@ async def process_pvp_round(callback: CallbackQuery, duel_id: str):
     duel["p1_phase"] = "attack"
     duel["p2_phase"] = "attack"
     
-    # Build status message
-    status = render_pvp_status(duel)
-    status += (
-        f"\n\n📜 <b>Раунд {duel['round'] - 1}:</b>\n{round_result}\n\n"
-        f"⚔️ <b>Раунд {duel['round']}</b> — выберите АТАКУ!"
-    )
-    
-    # Send new round message with buttons for BOTH players
+    # Send new round message with direct zone buttons
     round_msg = (
         f"⚔️ <b>Раунд {duel['round']}</b>\n\n"
         f"{render_pvp_status(duel)}\n\n"
-        f"📜 Прошлый раунд:\n{round_result}\n\n"
+        f"📜 Раунд {duel['round'] - 1}: {round_result}\n\n"
         f"🎯 Выберите зону АТАКИ!"
     )
     
-    # Create keyboard with buttons for both players
+    # Create keyboard with direct zone selection for both players
+    # Each player sees their own buttons
     both_players_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"⚔️ {duel['player1_name']} — Атака", 
-            callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:pick"
-        )],
-        [InlineKeyboardButton(
-            text=f"⚔️ {duel['player2_name']} — Атака", 
-            callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:pick"
-        )],
+        [
+            InlineKeyboardButton(text="🎯 Голова", callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:head"),
+            InlineKeyboardButton(text="💪 Тело", callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:body"),
+            InlineKeyboardButton(text="🦵 Ноги", callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:legs"),
+        ],
+        [
+            InlineKeyboardButton(text="🎯 Голова", callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:head"),
+            InlineKeyboardButton(text="💪 Тело", callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:body"),
+            InlineKeyboardButton(text="🦵 Ноги", callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:legs"),
+        ],
     ])
     
     try:
@@ -908,7 +904,7 @@ async def finish_pvp_duel(callback: CallbackQuery, duel_id: str, last_round: str
         loser_id = duel["player2_id"]
         loser_name = duel["player2_name"]
     
-    # Build final message
+    # Build final message (без спойлеров зон)
     final_text = render_pvp_status(duel)
     final_text += f"\n\n📜 <b>Финальный раунд:</b>\n{last_round}"
     final_text += f"\n\n🏆 <b>{winner_name} ПОБЕДИЛ!</b>"

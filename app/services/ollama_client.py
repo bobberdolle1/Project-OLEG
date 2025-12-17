@@ -423,6 +423,14 @@ CORE_OLEG_PROMPT_TEMPLATE = """Ты Олег. {current_date}
 - НЕ ДЕЛАЙ ВЫВОДОВ о "тематике чата" — чат может быть про что угодно, ты просто отвечаешь на конкретные сообщения
 - если ошибся в предположении о чате — забей и иди дальше, не защищай свою ошибку
 
+МНОГО ЛЮДЕЙ В ЧАТЕ (ВАЖНО):
+- в групповом чате МНОГО разных людей — не путай их между собой
+- каждое сообщение подписано ником — смотри КТО пишет
+- если @vasya спросил про видеокарту, а @petya про процессор — это РАЗНЫЕ люди с РАЗНЫМИ вопросами
+- не переноси контекст одного человека на другого
+- если тебе пишет новый человек — это НОВЫЙ диалог, не продолжение старого
+- в истории видно кто что писал — используй это чтобы не путать людей
+
 Есть доступ к инету для актуальной инфы — не говори что гуглишь, просто отвечай.
 
 Примеры:
@@ -2023,6 +2031,14 @@ async def generate_reply_with_context(user_text: str, username: str | None,
         full_context = (full_context + chat_history_context) if full_context else chat_history_context
     if memory_context:
         full_context = (full_context + memory_context) if full_context else memory_context
+    
+    # Добавляем информацию о текущем собеседнике
+    if username:
+        current_user_context = f"\n\n═══ ТЕКУЩИЙ СОБЕСЕДНИК ═══\n"
+        current_user_context += f"СЕЙЧАС ТЕБЕ ПИШЕТ: @{username}\n"
+        current_user_context += f"Отвечай именно этому человеку. В чате много людей — не путай их между собой.\n"
+        current_user_context += f"═══════════════════════════\n"
+        full_context = (full_context + current_user_context) if full_context else current_user_context
 
     # === НОВОЕ: Проверяем нужен ли веб-поиск ===
     force_web_search = should_trigger_web_search(user_text)

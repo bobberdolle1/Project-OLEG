@@ -54,11 +54,24 @@ class WebSearchService:
     """
     
     # Публичные SearXNG инстансы (fallback если свой не настроен)
+    # Обновлено: декабрь 2025
     PUBLIC_SEARXNG_INSTANCES = [
         "https://searx.be",
-        "https://search.bus-hit.me", 
+        "https://search.bus-hit.me",
         "https://searx.tiekoetter.com",
         "https://search.ononoki.org",
+        "https://searx.work",
+        "https://search.sapti.me",
+        "https://searx.namejeff.xyz",
+        "https://searx.divided-by-zero.eu",
+    ]
+    
+    # User-Agent ротация для DDG
+    DDG_USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     ]
     
     def __init__(self):
@@ -230,41 +243,65 @@ class WebSearchService:
         query: str, 
         max_results: int
     ) -> SearchResponse:
-        """Поиск через DuckDuckGo HTML."""
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.post(
-                    "https://html.duckduckgo.com/html/",
-                    data={"q": query},
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    }
-                )
-                response.raise_for_status()
+        """Поиск через DuckDuckGo HTML с ротацией User-Agent."""
+        import random
+        
+        # Пробуем несколько раз с разными User-Agent
+        for attempt in range(3):
+            try:
+                user_agent = random.choice(self.DDG_USER_AGENTS)
                 
-                html = response.text
-                results = []
-                
-                snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)<', html)
-                titles = re.findall(r'class="result__a"[^>]*>([^<]+)<', html)
-                urls = re.findall(r'class="result__a"[^>]*href="([^"]+)"', html)
-                
-                for i, (title, snippet) in enumerate(zip(titles[:max_results], snippets[:max_results])):
-                    title = title.replace("&amp;", "&").replace("&quot;", '"').strip()
-                    snippet = snippet.replace("&amp;", "&").replace("&quot;", '"').strip()
-                    url = urls[i] if i < len(urls) else ""
+                async with httpx.AsyncClient(
+                    timeout=15,
+                    follow_redirects=False  # Не следовать редиректам — это признак блокировки
+                ) as client:
+                    response = await client.post(
+                        "https://html.duckduckgo.com/html/",
+                        data={"q": query},
+                        headers={
+                            "User-Agent": user_agent,
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.5",
+                            "Referer": "https://duckduckgo.com/",
+                        }
+                    )
                     
-                    if title and snippet:
-                        results.append(SearchResult(
-                            title=title, snippet=snippet, url=url, source="duckduckgo"
-                        ))
-                
-                logger.info(f"[DDG] Found {len(results)} results for: {query[:30]}...")
-                return SearchResponse(results=results, query=query, provider="duckduckgo")
-                
-        except Exception as e:
-            logger.warning(f"[DDG] Search error: {e}")
-            return SearchResponse(results=[], query=query, provider="duckduckgo", error=str(e))
+                    # Если редирект — DDG заблокировал
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        logger.debug(f"[DDG] Redirect detected (attempt {attempt + 1}), trying again...")
+                        await asyncio.sleep(1)  # Небольшая задержка перед повтором
+                        continue
+                    
+                    response.raise_for_status()
+                    
+                    html = response.text
+                    results = []
+                    
+                    snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)<', html)
+                    titles = re.findall(r'class="result__a"[^>]*>([^<]+)<', html)
+                    urls = re.findall(r'class="result__a"[^>]*href="([^"]+)"', html)
+                    
+                    for i, (title, snippet) in enumerate(zip(titles[:max_results], snippets[:max_results])):
+                        title = title.replace("&amp;", "&").replace("&quot;", '"').strip()
+                        snippet = snippet.replace("&amp;", "&").replace("&quot;", '"').strip()
+                        url = urls[i] if i < len(urls) else ""
+                        
+                        if title and snippet:
+                            results.append(SearchResult(
+                                title=title, snippet=snippet, url=url, source="duckduckgo"
+                            ))
+                    
+                    if results:
+                        logger.info(f"[DDG] Found {len(results)} results for: {query[:30]}...")
+                        return SearchResponse(results=results, query=query, provider="duckduckgo")
+                    
+            except Exception as e:
+                logger.debug(f"[DDG] Attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(0.5)
+                continue
+        
+        logger.warning(f"[DDG] All attempts failed for: {query[:30]}...")
+        return SearchResponse(results=[], query=query, provider="duckduckgo", error="DDG blocked or unavailable")
     
     def format_for_prompt(self, response: SearchResponse, max_chars: int = 2000) -> str:
         """Форматирует результаты для промпта LLM."""

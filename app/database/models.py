@@ -338,7 +338,7 @@ class Quote(Base):
 
     user: Mapped["User"] = relationship(back_populates="quotes")
     sticker_pack: Mapped[Optional["StickerPack"]] = relationship(back_populates="quotes")
-    votes: Mapped[List["QuoteVote"]] = relationship(back_populates="quote", cascade="all, delete-orphan")
+    votes: Mapped[list["QuoteVote"]] = relationship(back_populates="quote", cascade="all, delete-orphan")
 
 
 class QuoteVote(Base):

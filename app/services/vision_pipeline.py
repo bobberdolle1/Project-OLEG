@@ -165,6 +165,8 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
         try:
             image_base64 = base64.b64encode(image_data).decode('utf-8')
             
+            # Формат для Ollama vision API
+            # Некоторые модели требуют images на уровне сообщения, другие — отдельно
             payload = {
                 "model": settings.ollama_vision_model,
                 "messages": [
@@ -175,13 +177,15 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                     }
                 ],
                 "stream": False,
-                "think": False,
                 "options": {
-                    "temperature": 0.3,  # Низкая температура для точного описания
+                    "temperature": 0.3,
                     "num_ctx": 4096,
-                    "num_predict": 512
+                    "num_predict": 1024  # Увеличиваем лимит токенов
                 }
             }
+            
+            # Логируем размер изображения
+            logger.info(f"Vision Step 1: Image size {len(image_data)} bytes, base64 {len(image_base64)} chars")
             
             logger.info(f"Vision Step 1: Requesting description from {settings.ollama_vision_model}")
             
@@ -193,14 +197,29 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 response.raise_for_status()
                 
                 data = response.json()
+                
+                # Логируем полный ответ для диагностики
+                logger.debug(f"Vision Step 1: Full API response keys: {list(data.keys())}")
+                
                 message = data.get("message", {})
                 raw_content = message.get("content", "").strip()
+                
+                # Проверяем альтернативные поля ответа
+                if not raw_content:
+                    # Некоторые модели возвращают в response напрямую
+                    raw_content = data.get("response", "").strip()
+                
+                if not raw_content:
+                    # Проверяем done_reason — может быть ошибка
+                    done_reason = data.get("done_reason", "")
+                    if done_reason:
+                        logger.warning(f"Vision Step 1: done_reason={done_reason}")
                 
                 # Логируем сырой ответ для диагностики
                 if raw_content:
                     logger.debug(f"Vision Step 1: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
                 else:
-                    logger.warning("Vision Step 1: Model returned empty content")
+                    logger.warning(f"Vision Step 1: Model returned empty content. Full response: {str(data)[:500]}")
                     return None
                 
                 # Фильтруем thinking-теги если есть

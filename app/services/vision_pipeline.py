@@ -49,7 +49,9 @@ class VisionPipeline:
 - Hardware components, software interfaces, or code if present
 - Overall context and purpose of the image
 
-Be factual and descriptive. Do not add opinions or commentary."""
+Be factual and descriptive. Do not add opinions or commentary.
+
+IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any internal reasoning tags. Just describe what you see."""
     
     # Промпт для Oleg LLM (Step 2)
     OLEG_COMMENT_TEMPLATE = """Юзер прислал фото. На нем: {description}
@@ -192,16 +194,33 @@ Be factual and descriptive. Do not add opinions or commentary."""
                 
                 data = response.json()
                 message = data.get("message", {})
-                content = message.get("content", "").strip()
+                raw_content = message.get("content", "").strip()
+                
+                # Логируем сырой ответ для диагностики
+                if raw_content:
+                    logger.debug(f"Vision Step 1: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
+                else:
+                    logger.warning("Vision Step 1: Model returned empty content")
+                    return None
                 
                 # Фильтруем thinking-теги если есть
-                content = think_filter.filter(content)
+                content = think_filter.filter(raw_content)
                 
                 if content and content != think_filter.fallback_message:
                     logger.info(f"Vision Step 1: Got description ({len(content)} chars)")
                     return content
                 
-                logger.warning("Vision Step 1: Empty description from model")
+                # Если после фильтрации пусто — возможно весь ответ был в think-тегах
+                # Попробуем извлечь контент из think-тегов как fallback
+                import re
+                think_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+                if think_match:
+                    think_content = think_match.group(1).strip()
+                    if think_content:
+                        logger.warning(f"Vision Step 1: Using think content as fallback ({len(think_content)} chars)")
+                        return think_content
+                
+                logger.warning(f"Vision Step 1: Empty after filter. Raw was: {raw_content[:100]}...")
                 return None
                 
         except httpx.ConnectError:

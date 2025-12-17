@@ -745,7 +745,12 @@ def _generate_search_variations(query: str) -> list[str]:
     if "лучше" in query_lower or "выбрать" in query_lower:
         variations.append(f"{query} сравнение обзор")
     
-    return variations[:3]  # Максимум 3 запроса
+    # Для вопросов про железо добавляем "latest new" для свежих результатов
+    hardware_keywords = ["видеокарт", "процессор", "железо", "gpu", "cpu", "rtx", "radeon", "ryzen", "intel"]
+    if any(hw in query_lower for hw in hardware_keywords):
+        variations.append(f"{query} latest new {current_year}")
+    
+    return variations[:4]  # Максимум 4 запроса
 
 
 # Импортируем функцию детекции веб-поиска из отдельного модуля

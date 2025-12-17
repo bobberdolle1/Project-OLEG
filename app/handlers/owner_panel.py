@@ -417,7 +417,7 @@ async def cb_owner_chat_detail(callback: CallbackQuery, bot: Bot):
         return
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="🚪 Покинуть чат", callback_data=f"owner_leave_{chat_id}")
+    kb.button(text="🚪 Покинуть чат", callback_data=f"owner_leavechat:{chat_id}")
     kb.button(text="🔙 К списку", callback_data="owner_chats")
     kb.adjust(1)
     
@@ -433,14 +433,14 @@ async def cb_owner_chat_detail(callback: CallbackQuery, bot: Bot):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("owner_leave_"))
+@router.callback_query(F.data.startswith("owner_leavechat:"))
 async def cb_owner_leave_chat(callback: CallbackQuery, bot: Bot):
     """Покинуть чат."""
     if not is_owner(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    chat_id = int(callback.data.split("_")[2])
+    chat_id = int(callback.data.split(":")[1])
     
     try:
         await bot.leave_chat(chat_id)
@@ -1141,19 +1141,26 @@ async def cb_owner_top_users(callback: CallbackQuery):
     
     async_session = get_session()
     async with async_session() as session:
-        from app.database.models import GameStat
+        from app.database.models import GameStat, MessageLog
+        
+        # Топ по количеству сообщений (самые активные)
+        msg_result = await session.execute(
+            select(
+                MessageLog.user_id,
+                MessageLog.username,
+                func.count(MessageLog.id).label('msg_count')
+            )
+            .group_by(MessageLog.user_id, MessageLog.username)
+            .order_by(func.count(MessageLog.id).desc())
+            .limit(10)
+        )
+        top_active = msg_result.all()
         
         # Топ по репутации
         rep_result = await session.execute(
             select(User).order_by(User.reputation_score.desc()).limit(10)
         )
         top_rep = rep_result.scalars().all()
-        
-        # Топ по размеру (grow)
-        size_result = await session.execute(
-            select(GameStat).order_by(GameStat.size_cm.desc()).limit(10)
-        )
-        top_size = size_result.scalars().all()
         
         # Общее количество пользователей
         count_result = await session.execute(select(func.count(User.id)))
@@ -1162,15 +1169,15 @@ async def cb_owner_top_users(callback: CallbackQuery):
     text = f"🏆 <b>Топ пользователей</b>\n"
     text += f"📊 Всего: {total_users} пользователей\n\n"
     
-    text += "<b>🎖 Топ по репутации:</b>\n"
+    text += "<b>💬 Топ по активности (сообщения):</b>\n"
+    for i, row in enumerate(top_active, 1):
+        name = f"@{row.username}" if row.username else f"id:{row.user_id}"
+        text += f"{i}. {name} — {row.msg_count:,} сообщений\n"
+    
+    text += "\n<b>🎖 Топ по репутации:</b>\n"
     for i, user in enumerate(top_rep, 1):
         name = f"@{user.username}" if user.username else user.first_name or f"id:{user.tg_user_id}"
         text += f"{i}. {name} — {user.reputation_score} очков\n"
-    
-    text += "\n<b>📏 Топ по размеру:</b>\n"
-    for i, stat in enumerate(top_size, 1):
-        name = f"@{stat.username}" if stat.username else f"id:{stat.tg_user_id}"
-        text += f"{i}. {name} — {stat.size_cm} см\n"
     
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data="owner_top_users")
@@ -1297,8 +1304,364 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb.button(text="💬 Управление чатами", callback_data="owner_chats")
     kb.button(text="👥 Список групп", callback_data="owner_groups_list")
     kb.button(text="🏆 Топ пользователей", callback_data="owner_top_users")
+    kb.button(text="👤 Управление юзерами", callback_data="owner_users")
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     kb.button(text="🚨 Экстренные действия", callback_data="owner_emergency")
     
-    kb.adjust(2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2)
     return kb
+
+
+# ============================================================================
+# Управление пользователями
+# ============================================================================
+
+class UserManagementStates(StatesGroup):
+    """FSM состояния для управления пользователями."""
+    waiting_user_search = State()
+
+
+@router.callback_query(F.data == "owner_users")
+async def cb_owner_users(callback: CallbackQuery):
+    """Меню управления пользователями."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    async_session = get_session()
+    async with async_session() as session:
+        total_users = await session.scalar(select(func.count(User.id)))
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔍 Поиск пользователя", callback_data="owner_user_search")
+    kb.button(text="🏆 Топ активных", callback_data="owner_top_users")
+    kb.button(text="📋 Последние юзеры", callback_data="owner_users_recent")
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        f"👤 <b>Управление пользователями</b>\n\n"
+        f"📊 Всего пользователей: {total_users or 0}\n\n"
+        "Выбери действие:",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_user_search")
+async def cb_owner_user_search(callback: CallbackQuery, state: FSMContext):
+    """Начать поиск пользователя."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await state.set_state(UserManagementStates.waiting_user_search)
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data="owner_users")
+    
+    await callback.message.edit_text(
+        "🔍 <b>Поиск пользователя</b>\n\n"
+        "Отправь:\n"
+        "• @username\n"
+        "• ID пользователя\n"
+        "• Часть имени",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.message(UserManagementStates.waiting_user_search)
+async def handle_user_search(msg: Message, state: FSMContext):
+    """Обработка поиска пользователя."""
+    if not is_owner(msg.from_user.id):
+        return
+    
+    await state.clear()
+    query = msg.text.strip()
+    
+    async_session = get_session()
+    async with async_session() as session:
+        users = []
+        
+        # Поиск по ID
+        if query.isdigit():
+            result = await session.execute(
+                select(User).where(User.tg_user_id == int(query))
+            )
+            users = list(result.scalars().all())
+        
+        # Поиск по username
+        if not users and query.startswith("@"):
+            username = query[1:]
+            result = await session.execute(
+                select(User).where(User.username.ilike(f"%{username}%"))
+            )
+            users = list(result.scalars().all())
+        
+        # Поиск по имени
+        if not users:
+            result = await session.execute(
+                select(User).where(
+                    (User.first_name.ilike(f"%{query}%")) |
+                    (User.username.ilike(f"%{query}%"))
+                ).limit(10)
+            )
+            users = list(result.scalars().all())
+    
+    if not users:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔍 Искать снова", callback_data="owner_user_search")
+        kb.button(text="🔙 Назад", callback_data="owner_users")
+        kb.adjust(1)
+        
+        await msg.answer(
+            f"❌ Пользователь не найден: <code>{query}</code>",
+            reply_markup=kb.as_markup()
+        )
+        return
+    
+    if len(users) == 1:
+        # Показать профиль сразу
+        await show_user_profile(msg, users[0])
+    else:
+        # Показать список
+        kb = InlineKeyboardBuilder()
+        for user in users[:10]:
+            name = f"@{user.username}" if user.username else user.first_name or f"id:{user.tg_user_id}"
+            kb.button(text=name, callback_data=f"owner_user:{user.tg_user_id}")
+        kb.button(text="🔙 Назад", callback_data="owner_users")
+        kb.adjust(1)
+        
+        await msg.answer(
+            f"🔍 Найдено {len(users)} пользователей:",
+            reply_markup=kb.as_markup()
+        )
+
+
+async def show_user_profile(msg_or_callback, user: User, edit: bool = False):
+    """Показать профиль пользователя."""
+    async_session = get_session()
+    async with async_session() as session:
+        from app.database.models import GameStat, MessageLog
+        
+        # Статистика сообщений
+        msg_count = await session.scalar(
+            select(func.count(MessageLog.id))
+            .where(MessageLog.user_id == user.tg_user_id)
+        )
+        
+        # Игровая статистика
+        game_stat = await session.scalar(
+            select(GameStat).where(GameStat.tg_user_id == user.tg_user_id)
+        )
+    
+    name = f"@{user.username}" if user.username else user.first_name or "Без имени"
+    
+    text = f"👤 <b>Профиль пользователя</b>\n\n"
+    text += f"<b>Имя:</b> {user.first_name or 'N/A'}\n"
+    text += f"<b>Username:</b> @{user.username or 'N/A'}\n"
+    text += f"<b>ID:</b> <code>{user.tg_user_id}</code>\n"
+    text += f"<b>Репутация:</b> {user.reputation_score}\n"
+    text += f"<b>Сообщений:</b> {msg_count or 0:,}\n"
+    
+    if game_stat:
+        text += f"\n<b>🎮 Игровая статистика:</b>\n"
+        text += f"├ Размер: {game_stat.size_cm} см\n"
+        text += f"├ PvP побед: {game_stat.pvp_wins}\n"
+        text += f"└ Grow: {game_stat.grow_count}\n"
+    
+    text += f"\n<b>Создан:</b> {user.created_at.strftime('%d.%m.%Y %H:%M') if user.created_at else 'N/A'}"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Сбросить репутацию", callback_data=f"owner_user_reset_rep:{user.tg_user_id}")
+    kb.button(text="🎮 Сбросить игру", callback_data=f"owner_user_reset_game:{user.tg_user_id}")
+    kb.button(text="🗑 Удалить юзера", callback_data=f"owner_user_delete:{user.tg_user_id}")
+    kb.button(text="🔙 Назад", callback_data="owner_users")
+    kb.adjust(2, 1, 1)
+    
+    if edit and hasattr(msg_or_callback, 'message'):
+        await msg_or_callback.message.edit_text(text, reply_markup=kb.as_markup())
+    else:
+        await msg_or_callback.answer(text, reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("owner_user:"))
+async def cb_owner_user_profile(callback: CallbackQuery):
+    """Показать профиль пользователя по callback."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tg_user_id = int(callback.data.split(":")[1])
+    
+    async_session = get_session()
+    async with async_session() as session:
+        user = await session.scalar(
+            select(User).where(User.tg_user_id == tg_user_id)
+        )
+    
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    
+    await show_user_profile(callback, user, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_user_reset_rep:"))
+async def cb_owner_reset_reputation(callback: CallbackQuery):
+    """Сбросить репутацию пользователя."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tg_user_id = int(callback.data.split(":")[1])
+    
+    async_session = get_session()
+    async with async_session() as session:
+        user = await session.scalar(
+            select(User).where(User.tg_user_id == tg_user_id)
+        )
+        if user:
+            user.reputation_score = 0
+            await session.commit()
+    
+    await callback.answer("✅ Репутация сброшена!", show_alert=True)
+    
+    # Обновить профиль
+    if user:
+        await show_user_profile(callback, user, edit=True)
+
+
+@router.callback_query(F.data.startswith("owner_user_reset_game:"))
+async def cb_owner_reset_game(callback: CallbackQuery):
+    """Сбросить игровую статистику пользователя."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tg_user_id = int(callback.data.split(":")[1])
+    
+    async_session = get_session()
+    async with async_session() as session:
+        from app.database.models import GameStat
+        
+        game_stat = await session.scalar(
+            select(GameStat).where(GameStat.tg_user_id == tg_user_id)
+        )
+        if game_stat:
+            game_stat.size_cm = 0
+            game_stat.pvp_wins = 0
+            game_stat.grow_count = 0
+            game_stat.casino_jackpots = 0
+            await session.commit()
+    
+    await callback.answer("✅ Игровая статистика сброшена!", show_alert=True)
+    
+    # Обновить профиль
+    async with async_session() as session:
+        user = await session.scalar(
+            select(User).where(User.tg_user_id == tg_user_id)
+        )
+    if user:
+        await show_user_profile(callback, user, edit=True)
+
+
+@router.callback_query(F.data.startswith("owner_user_delete:"))
+async def cb_owner_delete_user(callback: CallbackQuery):
+    """Подтверждение удаления пользователя."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tg_user_id = int(callback.data.split(":")[1])
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ Да, удалить", callback_data=f"owner_user_delete_confirm:{tg_user_id}")
+    kb.button(text="❌ Отмена", callback_data=f"owner_user:{tg_user_id}")
+    kb.adjust(2)
+    
+    await callback.message.edit_text(
+        f"⚠️ <b>Подтверждение удаления</b>\n\n"
+        f"Удалить пользователя <code>{tg_user_id}</code>?\n\n"
+        "Это удалит все данные пользователя!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_user_delete_confirm:"))
+async def cb_owner_delete_user_confirm(callback: CallbackQuery):
+    """Выполнить удаление пользователя."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tg_user_id = int(callback.data.split(":")[1])
+    
+    async_session = get_session()
+    async with async_session() as session:
+        from app.database.models import GameStat, MessageLog
+        from sqlalchemy import delete
+        
+        # Удаляем связанные данные
+        await session.execute(delete(GameStat).where(GameStat.tg_user_id == tg_user_id))
+        await session.execute(delete(MessageLog).where(MessageLog.user_id == tg_user_id))
+        
+        # Удаляем пользователя
+        user = await session.scalar(select(User).where(User.tg_user_id == tg_user_id))
+        if user:
+            await session.delete(user)
+        
+        await session.commit()
+    
+    await callback.answer("✅ Пользователь удалён!", show_alert=True)
+    
+    # Вернуться к списку
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К управлению", callback_data="owner_users")
+    
+    await callback.message.edit_text(
+        f"✅ Пользователь <code>{tg_user_id}</code> удалён.",
+        reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(F.data == "owner_users_recent")
+async def cb_owner_users_recent(callback: CallbackQuery):
+    """Показать последних зарегистрированных пользователей."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).order_by(User.created_at.desc()).limit(15)
+        )
+        users = result.scalars().all()
+    
+    if not users:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔙 Назад", callback_data="owner_users")
+        await callback.message.edit_text(
+            "📭 Нет пользователей",
+            reply_markup=kb.as_markup()
+        )
+        await callback.answer()
+        return
+    
+    text = "📋 <b>Последние пользователи</b>\n\n"
+    
+    kb = InlineKeyboardBuilder()
+    for user in users:
+        name = f"@{user.username}" if user.username else user.first_name or f"id:{user.tg_user_id}"
+        date = user.created_at.strftime('%d.%m') if user.created_at else "?"
+        kb.button(text=f"{date} {name}", callback_data=f"owner_user:{user.tg_user_id}")
+    
+    kb.button(text="🔙 Назад", callback_data="owner_users")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()

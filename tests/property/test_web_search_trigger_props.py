@@ -3,6 +3,7 @@ Property-based tests for Web Search Trigger Detection.
 
 Tests correctness properties defined in the design document.
 **Feature: oleg-personality-improvements, Property 1: Search keywords trigger web search**
+**Feature: anti-hallucination-v1**
 **Validates: Requirements 1.3**
 """
 
@@ -16,7 +17,8 @@ _module_path = os.path.join(_project_root, 'app', 'services', 'web_search_trigge
 _spec = importlib.util.spec_from_file_location("web_search_trigger", _module_path)
 _trigger_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_trigger_module)
-should_trigger_web_search = _trigger_module.should_trigger_web_search
+# Use the simple version that returns bool for backward compatibility
+should_trigger_web_search = _trigger_module.should_trigger_web_search_simple
 WEB_SEARCH_TRIGGER_KEYWORDS = _trigger_module.WEB_SEARCH_TRIGGER_KEYWORDS
 
 

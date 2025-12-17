@@ -385,6 +385,9 @@ CORE_OLEG_PROMPT_TEMPLATE = """Ты Олег. {current_date}
 - если ты реально накосячил — признай спокойно, типа "да, лажанул" или "хм, точно, мой косяк"
 - не путай конструктивную критику с наездом — если человек объясняет почему ты неправ, это не троллинг
 - уточняющие вопросы это нормально, не воспринимай их как тупость
+- НЕ ЗАЦИКЛИВАЙСЯ на своих предположениях — если сказал что это "IT-чат" а тебе говорят что это чат китайского, просто прими это и иди дальше
+- ты НЕ ЗНАЕШЬ тематику чата заранее — не делай выводов типа "это IT-чат" или "это чат про игры", ты просто отвечаешь на сообщения
+- если ошибся в контексте — короткое "а, понял" и всё, не надо оправдываться и защищать свою ошибку
 
 КОГДА ПОСЫЛАТЬ:
 - явные провокации БЕЗ аргументов ("ты тупой и всё")
@@ -402,6 +405,8 @@ CORE_OLEG_PROMPT_TEMPLATE = """Ты Олег. {current_date}
 - ты видишь последние сообщения в чате — используй их чтобы понять о чём разговор
 - НИКОГДА не говори "не знаю о чём речь" если контекст есть — читай его
 - если врываешься в разговор — покажи что понял тему
+- НЕ ДЕЛАЙ ВЫВОДОВ о "тематике чата" — чат может быть про что угодно, ты просто отвечаешь на конкретные сообщения
+- если ошибся в предположении о чате — забей и иди дальше, не защищай свою ошибку
 
 Есть доступ к инету для актуальной инфы — не говори что гуглишь, просто отвечай.
 
@@ -416,6 +421,7 @@ CORE_OLEG_PROMPT_TEMPLATE = """Ты Олег. {current_date}
 "во что поиграть?" → "жанр какой, телепат в отпуске"
 "ты неправ, там не 8 а 16 гигов минимум" → "хм, дай гляну... да, ты прав, 16 сейчас база, мой косяк"
 "это не так работает" → "окей, а как тогда? объясни"
+"это не IT-чат, это чат китайского" → "а, понял, ну пофиг на тематику"
 "кто ты?" → "местный босс, кто ещё"
 "помоги плиз" → "с чем? я не экстрасенс"
 "обиделся?" → "на что? детсадовские провокации не катят"
@@ -763,54 +769,48 @@ def _generate_search_variations(query: str) -> list[str]:
 
 
 # Импортируем функцию детекции веб-поиска из отдельного модуля
-from app.services.web_search_trigger import should_trigger_web_search, WEB_SEARCH_TRIGGER_KEYWORDS
+from app.services.web_search_trigger import should_trigger_web_search, should_trigger_web_search_simple, WEB_SEARCH_TRIGGER_KEYWORDS
+from app.services.web_search import web_search, SearchResponse
+from app.services.fact_checker import fact_checker, FactCheckResult
+from app.services.knowledge_base import knowledge_base
 
 
-async def _execute_web_search(query: str) -> str:
+async def _execute_web_search(query: str) -> tuple[str, SearchResponse | None]:
     """
-    Выполняет веб-поиск через DuckDuckGo с несколькими запросами для лучшего покрытия.
+    Выполняет веб-поиск через улучшенный сервис (Brave/DuckDuckGo).
     
     Args:
         query: Поисковый запрос
         
     Returns:
-        Результаты поиска в текстовом формате
+        Tuple (результаты в текстовом формате, SearchResponse для fact-checking)
     """
     try:
-        search_variations = _generate_search_variations(query)
-        all_results = []
-        seen_titles = set()
+        # Используем новый сервис с поддержкой нескольких провайдеров
+        response = await web_search.search_with_variations(query, max_results=10)
         
-        async with httpx.AsyncClient(timeout=15) as client:
-            # Выполняем все запросы параллельно
-            tasks = [_execute_single_search(client, q) for q in search_variations]
-            search_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for i, results in enumerate(search_results):
-                if isinstance(results, Exception):
-                    logger.warning(f"Поиск #{i+1} завершился с ошибкой: {results}")
-                    continue
-                    
-                for result in results:
-                    # Дедупликация по заголовку
-                    title_key = result["title"].lower()[:50]
-                    if title_key not in seen_titles:
-                        seen_titles.add(title_key)
-                        all_results.append(result)
-        
-        if all_results:
-            # Берём топ-10 уникальных результатов
-            formatted = []
-            for i, r in enumerate(all_results[:10], 1):
-                formatted.append(f"{i}. {r['title']}\n   {r['snippet']}")
-            
-            return f"Результаты поиска (запросы: {', '.join(search_variations)}):\n" + "\n\n".join(formatted)
+        if response.results:
+            formatted = web_search.format_for_prompt(response)
+            logger.info(f"[SEARCH] {len(response.results)} results via {response.provider}")
+            return formatted, response
         else:
-            return "Поиск не дал результатов"
+            logger.warning(f"[SEARCH] No results for: {query[:50]}...")
+            return "Поиск не дал результатов", None
                 
     except Exception as e:
         logger.warning(f"Ошибка веб-поиска: {e}")
-        return f"Не удалось выполнить поиск: {str(e)}"
+        return f"Не удалось выполнить поиск: {str(e)}", None
+
+
+async def _execute_web_search_legacy(query: str) -> str:
+    """
+    Legacy версия веб-поиска (для обратной совместимости).
+    
+    Returns:
+        Результаты поиска в текстовом формате
+    """
+    result, _ = await _execute_web_search(query)
+    return result
 
 
 def _detect_non_cyrillic_text(text: str) -> bool:
@@ -1215,6 +1215,7 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
         Ответ от Олега или сообщение об ошибке
         
     **Feature: oleg-personality-improvements**
+    **Feature: anti-hallucination-v1**
     **Validates: Requirements 1.1, 1.2**
     """
     # Проверяем на наличие потенциальной промпт-инъекции (с переводом если нужно)
@@ -1225,32 +1226,50 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     display_name = username or "пользователь"
     
     # Проверяем нужен ли веб-поиск по ключевым словам
-    needs_search = force_web_search or should_trigger_web_search(user_text)
+    needs_search, search_reason = should_trigger_web_search(user_text)
+    needs_search = force_web_search or needs_search
+    
+    # Проверяем knowledge base для быстрых ответов без поиска
+    kb_info = None
+    kb_info = _check_knowledge_base(user_text)
     
     # ПРИНУДИТЕЛЬНЫЙ веб-поиск — не ждём пока модель решит, сами ищем
-    search_results = None
+    search_results_text = None
+    search_response: SearchResponse | None = None
+    
     if needs_search and settings.ollama_web_search_enabled:
-        logger.info(f"[FORCED SEARCH] Принудительный веб-поиск для: {user_text[:50]}...")
+        logger.info(f"[FORCED SEARCH] Принудительный веб-поиск для: {user_text[:50]}... (reason: {search_reason})")
         try:
-            search_results = await _execute_web_search(user_text)
-            logger.info(f"[FORCED SEARCH] Получено результатов: {len(search_results)} символов")
+            search_results_text, search_response = await _execute_web_search(user_text)
+            logger.info(f"[FORCED SEARCH] Получено результатов: {len(search_results_text)} символов")
         except Exception as e:
             logger.warning(f"[FORCED SEARCH] Ошибка поиска: {e}")
     
     # Формируем системный промпт с актуальной датой
     system_prompt = CORE_OLEG_PROMPT_TEMPLATE.format(current_date=_get_current_date_context())
     
+    # Добавляем информацию из knowledge base если есть
+    if kb_info:
+        system_prompt += f"""
+
+ПРОВЕРЕННЫЕ ДАННЫЕ ИЗ БАЗЫ ЗНАНИЙ:
+{kb_info}
+
+Используй эти данные как основу — они проверены и актуальны."""
+        logger.info(f"[KB] Добавлена информация из базы знаний")
+    
     # Добавляем результаты поиска в промпт если есть
-    if search_results:
+    if search_results_text:
         system_prompt += f"""
 
 РЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ:
-{search_results}
+{search_results_text}
 
 КРИТИЧНО: Используй ТОЛЬКО информацию из результатов поиска выше!
-- НЕ ВЫДУМЫВАЙ модели которых нет в результатах (RX 8000, RX 9000 — если их нет в поиске, не упоминай)
+- НЕ ВЫДУМЫВАЙ модели которых нет в результатах (RX 8000 НЕ СУЩЕСТВУЕТ — AMD пропустила 8000 и выпустила RX 9000)
 - Если в поиске нет нужной инфы — честно скажи "не нашёл актуальной инфы"
-- Лучше сказать меньше но правду, чем много но выдумки"""
+- Лучше сказать меньше но правду, чем много но выдумки
+- Если данные из базы знаний противоречат поиску — доверяй поиску (он свежее)"""
         logger.info(f"[SEARCH CONTEXT] Результаты поиска добавлены в контекст")
     
     if chat_context:
@@ -1272,7 +1291,28 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     
     try:
         # Используем активную модель для текстовых ответов с поддержкой веб-поиска
-        return await _ollama_chat(messages, model=active_model, enable_tools=True)
+        response = await _ollama_chat(messages, model=active_model, enable_tools=True)
+        
+        # Fact-checking: проверяем ответ на галлюцинации
+        if response and (needs_search or kb_info):
+            fact_check_result = fact_checker.check_response(response, search_response)
+            
+            if not fact_check_result.is_reliable:
+                logger.warning(
+                    f"[FACT CHECK] Low confidence response detected: "
+                    f"confidence={fact_check_result.confidence:.2f}, "
+                    f"hallucinated={fact_check_result.hallucinated_items}"
+                )
+                
+                # Добавляем предупреждение к ответу если есть проблемы
+                warning = fact_checker.format_warnings(fact_check_result)
+                if warning:
+                    response = f"{response}\n\n{warning}"
+            else:
+                logger.debug(f"[FACT CHECK] Response verified: confidence={fact_check_result.confidence:.2f}")
+        
+        return response
+        
     except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError) as e:
         logger.error(f"Ollama error with {active_model}: {e}")
         
@@ -1296,6 +1336,128 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     except Exception as e:
         logger.error(f"Unexpected error in generate_text_reply: {e}")
         return _get_error_response("unknown", "Что-то пошло не так. Попробуй ещё раз или обратись к админу.")
+
+
+def _check_knowledge_base(text: str) -> str | None:
+    """
+    Проверяет knowledge base на наличие релевантной информации.
+    
+    Args:
+        text: Текст запроса пользователя
+        
+    Returns:
+        Информация из базы знаний или None
+    """
+    import re
+    
+    text_lower = text.lower()
+    info_parts = []
+    
+    # Ищем упоминания видеокарт
+    gpu_patterns = [
+        r'(rtx|gtx)\s*(\d{4})\s*(ti|super)?',
+        r'rx\s*(\d{4})\s*(xt|xtx)?',
+        r'arc\s*(a\d{3})',
+    ]
+    
+    for pattern in gpu_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            # Собираем название GPU
+            if 'rtx' in pattern or 'gtx' in pattern:
+                gpu_name = f"{match[0]} {match[1]}"
+                if len(match) > 2 and match[2]:
+                    gpu_name += f" {match[2]}"
+            elif 'rx' in pattern:
+                gpu_name = f"rx {match[0]}"
+                if len(match) > 1 and match[1]:
+                    gpu_name += f" {match[1]}"
+            elif 'arc' in pattern:
+                gpu_name = f"arc {match[0]}"
+            else:
+                continue
+            
+            gpu_info = knowledge_base.get_gpu(gpu_name)
+            if gpu_info:
+                info_parts.append(knowledge_base.format_gpu_info(gpu_info))
+    
+    # Ищем упоминания процессоров
+    cpu_patterns = [
+        r'(ryzen\s*[579]\s*\d{4}x?3?d?)',  # Ryzen 5 9600X, Ryzen 7 9800X3D
+        r'(i[3579]-\d{4,5}k?f?)',  # i5-14600K, i7-14700KF
+        r'(core\s*ultra\s*[579]\s*\d{3}k?)',  # Core Ultra 9 285K
+        r'(threadripper\s*\d{4}x?)',  # Threadripper 9980X
+    ]
+    
+    for pattern in cpu_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            cpu_name = match.strip()
+            cpu_info = knowledge_base.get_cpu(cpu_name)
+            if cpu_info:
+                info_parts.append(knowledge_base.format_cpu_info(cpu_info))
+    
+    # Ищем упоминания архитектур
+    arch_keywords = [
+        "ampere", "ada", "lovelace", "turing", "pascal", "maxwell", "blackwell",
+        "rdna", "rdna 2", "rdna 3", "rdna 4", "zen", "zen 2", "zen 3", "zen 4", "zen 5",
+        "alder lake", "raptor lake", "meteor lake", "arrow lake"
+    ]
+    
+    for arch in arch_keywords:
+        if arch in text_lower:
+            arch_info = knowledge_base.get_architecture(arch)
+            if arch_info:
+                info_parts.append(
+                    f"{arch.title()}: {arch_info['vendor']}, {arch_info['year']}, {arch_info['process']}"
+                )
+    
+    # Ищем упоминания платформ
+    platform_keywords = ["am5", "am4", "lga1700", "lga1851", "trx50"]
+    for platform in platform_keywords:
+        if platform in text_lower:
+            platform_info = knowledge_base.get_platform(platform)
+            if platform_info:
+                info_parts.append(knowledge_base.format_platform_info(platform_info))
+    
+    # Проверяем на запрос сравнения GPU
+    if "vs" in text_lower or "или" in text_lower or "против" in text_lower:
+        # Пытаемся найти две GPU для сравнения
+        all_gpus = re.findall(r'((?:rtx|gtx|rx|arc)\s*\w+(?:\s*(?:ti|super|xt|xtx))?)', text_lower)
+        if len(all_gpus) >= 2:
+            comparison = knowledge_base.compare_gpus(all_gpus[0], all_gpus[1])
+            if comparison:
+                info_parts.append(comparison)
+    
+    # Проверяем на общие вопросы о сборках
+    build_keywords = {
+        "бюджетн": "gaming_budget",
+        "средн": "gaming_mid",
+        "хай-энд": "gaming_high",
+        "high-end": "gaming_high",
+        "рабоч": "workstation",
+        "workstation": "workstation",
+    }
+    
+    if "сборк" in text_lower or "собрать" in text_lower or "build" in text_lower:
+        for keyword, tier in build_keywords.items():
+            if keyword in text_lower:
+                build_rec = knowledge_base.format_build_recommendation(tier)
+                if build_rec:
+                    info_parts.append(build_rec)
+                break
+    
+    # Если спрашивают про актуальное железо в целом
+    if any(kw in text_lower for kw in ["актуальн", "2025", "сейчас", "база", "что брать"]):
+        if "платформ" in text_lower or "сокет" in text_lower:
+            info_parts.append("\n".join(knowledge_base.get_current_platforms()))
+        elif "процессор" in text_lower or "cpu" in text_lower:
+            info_parts.append("\n".join(knowledge_base.get_gaming_cpu_recommendations()))
+    
+    if info_parts:
+        return "\n\n".join(info_parts)
+    
+    return None
 
 
 async def generate_private_reply(user_text: str, username: str | None, user_id: int,

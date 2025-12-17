@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     ollama_cache_max_size: int = Field(default=128, ge=10, description="Max cache size")
     ollama_web_search_enabled: bool = Field(default=True, description="Enable web search tool for LLM")
     
+    # Web Search (anti-hallucination)
+    brave_search_api_key: Optional[str] = Field(default=None, description="Brave Search API key (free tier: 2000 req/month)")
+    
     # Fallback models (локальные модели когда cloud недоступен)
     ollama_fallback_enabled: bool = Field(default=True, description="Enable fallback to local models when cloud unavailable")
     ollama_fallback_model: str = Field(default="qwen3:8b", description="Fallback model for text generation")

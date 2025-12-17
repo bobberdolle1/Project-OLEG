@@ -786,6 +786,76 @@ async def _execute_web_search(query: str) -> str:
         return f"Не удалось выполнить поиск: {str(e)}"
 
 
+def _detect_non_cyrillic_text(text: str) -> bool:
+    """Проверяет, содержит ли текст значительную долю не-кириллических символов."""
+    if not text:
+        return False
+    
+    # Считаем буквы
+    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+    latin = sum(1 for c in text if 'a' <= c.lower() <= 'z')
+    other_scripts = sum(1 for c in text if ord(c) > 0x4E00)  # CJK и другие
+    
+    total_letters = cyrillic + latin + other_scripts
+    if total_letters < 10:
+        return False
+    
+    # Если больше 50% не-кириллица — подозрительно
+    return (latin + other_scripts) / total_letters > 0.5
+
+
+def _check_suspicious_patterns(text: str) -> bool:
+    """Проверяет подозрительные паттерны: base64, много капса, спецсимволы."""
+    import re
+    import base64
+    
+    # Проверка на base64 (часто используется для обхода фильтров)
+    base64_pattern = r'[A-Za-z0-9+/]{20,}={0,2}'
+    if re.search(base64_pattern, text):
+        try:
+            # Пробуем декодировать
+            match = re.search(base64_pattern, text)
+            if match:
+                decoded = base64.b64decode(match.group()).decode('utf-8', errors='ignore').lower()
+                # Проверяем декодированный текст на injection
+                injection_keywords = ['ignore', 'forget', 'instruction', 'system', 'prompt', 'забудь', 'игнорируй']
+                if any(kw in decoded for kw in injection_keywords):
+                    logger.warning(f"Base64 injection attempt detected: {decoded[:50]}...")
+                    return True
+        except Exception:
+            pass
+    
+    # Проверка на много капса (часто используется для "ВАЖНЫХ ИНСТРУКЦИЙ")
+    if len(text) > 20:
+        upper_ratio = sum(1 for c in text if c.isupper()) / len(text)
+        if upper_ratio > 0.7:
+            # Много капса + ключевые слова = подозрительно
+            suspicious_caps_words = ['important', 'urgent', 'critical', 'must', 'важно', 'срочно', 'обязательно']
+            if any(word in text.lower() for word in suspicious_caps_words):
+                logger.warning(f"Suspicious caps pattern detected: {text[:50]}...")
+                return True
+    
+    # Проверка на Unicode-трюки (невидимые символы, lookalikes)
+    # Zero-width characters часто используются для обхода фильтров
+    zero_width = ['\u200b', '\u200c', '\u200d', '\u2060', '\ufeff']
+    if any(zw in text for zw in zero_width):
+        logger.warning(f"Zero-width character injection attempt detected")
+        return True
+    
+    # Проверка на markdown/code injection
+    code_injection_patterns = [
+        r'```system', r'```instruction', r'```prompt',
+        r'<\|system\|>', r'<\|user\|>', r'<\|assistant\|>',
+        r'\[INST\]', r'\[/INST\]', r'<<SYS>>', r'<</SYS>>',
+    ]
+    for pattern in code_injection_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            logger.warning(f"Code injection pattern detected: {pattern}")
+            return True
+    
+    return False
+
+
 def _contains_prompt_injection(text: str) -> bool:
     """
     Проверяет, содержит ли текст потенциальную промпт-инъекцию.
@@ -796,6 +866,10 @@ def _contains_prompt_injection(text: str) -> bool:
     Returns:
         True, если обнаружена потенциальная промпт-инъекция
     """
+    # Сначала проверяем подозрительные паттерны (base64, капс, спецсимволы)
+    if _check_suspicious_patterns(text):
+        return True
+    
     text_lower = text.lower()
 
     # Высокорисковые паттерны — явные попытки манипуляции (срабатывают сразу)
@@ -887,6 +961,51 @@ def _contains_prompt_injection(text: str) -> bool:
                 if context in text_lower:
                     return True
 
+    return False
+
+
+async def _check_injection_with_translation(text: str) -> bool:
+    """
+    Проверяет текст на injection, при необходимости переводя на русский.
+    
+    Если текст содержит много не-кириллических символов, сначала переводим
+    его на русский и проверяем перевод на injection паттерны.
+    
+    Args:
+        text: Текст для проверки
+        
+    Returns:
+        True если обнаружена injection (в оригинале или переводе)
+    """
+    # Сначала проверяем оригинал
+    if _contains_prompt_injection(text):
+        return True
+    
+    # Если текст преимущественно не на русском — переводим и проверяем
+    if _detect_non_cyrillic_text(text):
+        logger.info(f"[INJECTION CHECK] Non-cyrillic text detected, translating for check...")
+        try:
+            # Используем LLM для перевода (быстрый запрос)
+            translation_prompt = f"Переведи на русский язык, только перевод без комментариев:\n{text}"
+            
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.post(
+                    f"{settings.ollama_base_url}/api/generate",
+                    json={
+                        "model": settings.ollama_base_model,
+                        "prompt": translation_prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.1, "num_predict": 200}
+                    }
+                )
+                if response.status_code == 200:
+                    translated = response.json().get("response", "").strip()
+                    if translated and _contains_prompt_injection(translated):
+                        logger.warning(f"[INJECTION CHECK] Injection detected in translation: {translated[:100]}...")
+                        return True
+        except Exception as e:
+            logger.debug(f"[INJECTION CHECK] Translation failed: {e}")
+    
     return False
 
 
@@ -1071,8 +1190,8 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     **Feature: oleg-personality-improvements**
     **Validates: Requirements 1.1, 1.2**
     """
-    # Проверяем на наличие потенциальной промпт-инъекции
-    if _contains_prompt_injection(user_text):
+    # Проверяем на наличие потенциальной промпт-инъекции (с переводом если нужно)
+    if await _check_injection_with_translation(user_text):
         logger.warning(f"Potential prompt injection detected: {user_text[:100]}...")
         return "Ты чё, самый умный? Иди нахуй со своими фокусами"
 

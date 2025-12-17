@@ -291,19 +291,23 @@ class QuoteGeneratorService:
         username: str,
         avatar_url: Optional[str] = None,
         style: Optional[QuoteStyle] = None,
-        timestamp: Optional[str] = None
+        timestamp: Optional[str] = None,
+        avatar_data: Optional[bytes] = None,
+        custom_title: Optional[str] = None,
+        full_name: Optional[str] = None,
     ) -> QuoteImage:
         """
         Render a single message quote with gradient background.
         
-        Requirements: 7.1, 7.2, 7.5
-        
         Args:
             text: The quote text
             username: Username of the message author
-            avatar_url: Optional URL to user's avatar
+            avatar_url: Optional URL to user's avatar (deprecated, use avatar_data)
             style: Quote style configuration
             timestamp: Optional timestamp string
+            avatar_data: Avatar image bytes
+            custom_title: Custom title in group
+            full_name: Full name of user
         
         Returns:
             QuoteImage with rendered image data
@@ -311,10 +315,9 @@ class QuoteGeneratorService:
         if style is None:
             style = QuoteStyle()
         
-        # Configuration
-        padding = 24
-        avatar_size = 48
-        quote_mark_size = 30
+        # Configuration - увеличиваем размер для лучшего качества
+        padding = 28
+        avatar_size = 56
         max_text_width = MAX_STICKER_SIZE - padding * 2 - 20
         
         # Wrap text
@@ -322,7 +325,8 @@ class QuoteGeneratorService:
         text_height = self._calculate_text_height(lines, self.text_font)
         
         # Calculate image dimensions
-        content_height = avatar_size + 15 + text_height + 30  # avatar + gap + text + footer
+        title_height = 18 if custom_title else 0
+        content_height = avatar_size + 15 + text_height + 30 + title_height
         height = min(MAX_STICKER_SIZE, padding * 2 + content_height)
         width = MAX_STICKER_SIZE
         
@@ -333,52 +337,77 @@ class QuoteGeneratorService:
         
         # Draw decorative quote mark "
         quote_color = (88, 101, 242, 80) if style.theme != QuoteTheme.LIGHT else (66, 133, 244, 80)
-        draw.text(
-            (width - padding - 40, padding - 5),
-            "❝",
-            font=self.text_font,
-            fill=(255, 255, 255, 40)
-        )
-        
-        # Draw rounded rectangle border with glow effect
+        # Draw rounded rectangle border
         border_color = (88, 101, 242) if style.theme != QuoteTheme.LIGHT else (66, 133, 244)
-        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 12, border_color)
+        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 14, border_color)
         
-        # Draw avatar at top
-        avatar_x = padding + 5
-        avatar_y = padding + 5
-        self._draw_avatar(draw, avatar_x, avatar_y, avatar_size, username, style)
+        # Draw avatar at top - реальная аватарка или placeholder
+        avatar_x = padding + 8
+        avatar_y = padding + 8
+        if avatar_data:
+            self._draw_real_avatar(img, avatar_x, avatar_y, avatar_size, avatar_data)
+        else:
+            self._draw_avatar(draw, avatar_x, avatar_y, avatar_size, username, style)
         
-        # Draw username next to avatar
+        # Draw username and full name next to avatar
         text_color = self._get_text_color(style)
         secondary_color = self._get_secondary_color(style)
-        username_display = f"@{username}" if username and not username.startswith("@") else username or "Anonymous"
+        
+        # Full name (bold)
+        display_name = full_name or username or "Anonymous"
         draw.text(
-            (avatar_x + avatar_size + 12, avatar_y + 8),
-            username_display,
+            (avatar_x + avatar_size + 14, avatar_y + 4),
+            display_name,
             font=self.username_font,
             fill=text_color
         )
         
-        # Draw timestamp next to username
+        # Username (@) and custom title
+        info_y = avatar_y + 22
+        if username:
+            username_display = f"@{username}" if not username.startswith("@") else username
+            draw.text(
+                (avatar_x + avatar_size + 14, info_y),
+                username_display,
+                font=self.timestamp_font,
+                fill=secondary_color
+            )
+        
+        # Custom title (if exists)
+        if custom_title:
+            title_x = avatar_x + avatar_size + 14
+            if username:
+                # Рисуем после username
+                try:
+                    username_width = self.timestamp_font.getbbox(f"@{username}")[2]
+                except AttributeError:
+                    username_width = len(username) * 6
+                title_x += username_width + 10
+            draw.text(
+                (title_x, info_y),
+                f"• {custom_title}",
+                font=self.timestamp_font,
+                fill=(136, 153, 166)  # Серый цвет для титула
+            )
+        
+        # Timestamp
         if timestamp:
             draw.text(
-                (avatar_x + avatar_size + 12, avatar_y + 28),
+                (avatar_x + avatar_size + 14, info_y + 14),
                 timestamp,
                 font=self.timestamp_font,
                 fill=secondary_color
             )
         
         # Draw message text below avatar with left quote line
-        text_start_y = avatar_y + avatar_size + 15
-        text_x = padding + 15
+        text_start_y = avatar_y + avatar_size + 18
+        text_x = padding + 18
         
         # Draw vertical quote line
-        line_color = border_color
         draw.line(
-            [(padding + 5, text_start_y), (padding + 5, text_start_y + text_height)],
-            fill=line_color,
-            width=3
+            [(padding + 6, text_start_y), (padding + 6, text_start_y + text_height)],
+            fill=border_color,
+            width=4
         )
         
         try:
@@ -397,9 +426,9 @@ class QuoteGeneratorService:
             )
             text_y += line_height
         
-        # Convert to WebP
+        # Convert to WebP with high quality
         output = BytesIO()
-        img.save(output, format='WEBP', quality=90)
+        img.save(output, format='WEBP', quality=95, method=6)
         output.seek(0)
         
         return QuoteImage(
@@ -408,6 +437,26 @@ class QuoteGeneratorService:
             width=width,
             height=height
         )
+    
+    def _draw_real_avatar(self, img: Image.Image, x: int, y: int, size: int, avatar_data: bytes):
+        """Draw real avatar from bytes with circular mask."""
+        try:
+            avatar_img = Image.open(BytesIO(avatar_data))
+            avatar_img = avatar_img.convert('RGBA')
+            avatar_img = avatar_img.resize((size, size), Image.Resampling.LANCZOS)
+            
+            # Create circular mask
+            mask = Image.new('L', (size, size), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.ellipse([0, 0, size, size], fill=255)
+            
+            # Apply mask
+            avatar_img.putalpha(mask)
+            
+            # Paste onto main image
+            img.paste(avatar_img, (x, y), avatar_img)
+        except Exception as e:
+            logger.warning(f"Failed to draw real avatar: {e}")
     
     def _draw_rounded_rect(
         self, 

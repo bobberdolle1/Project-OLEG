@@ -46,17 +46,62 @@ def build_quote_keyboard(quote_id: int, likes: int = 0, dislikes: int = 0) -> In
     return kb.as_markup()
 
 
-async def create_quote_image(text: str, username: str, timestamp: Optional[str] = None) -> BytesIO:
+async def get_user_avatar(bot, user_id: int) -> Optional[bytes]:
+    """Загружает аватарку пользователя из Telegram."""
+    try:
+        photos = await bot.get_user_profile_photos(user_id, limit=1)
+        if photos.total_count > 0:
+            photo = photos.photos[0][-1]  # Берём самое большое фото
+            file = await bot.get_file(photo.file_id)
+            file_bytes = await bot.download_file(file.file_path)
+            return file_bytes.read()
+    except Exception as e:
+        logger.debug(f"Failed to get avatar for user {user_id}: {e}")
+    return None
+
+
+async def get_user_info(bot, chat_id: int, user) -> dict:
+    """Получает расширенную информацию о пользователе."""
+    info = {
+        "username": user.username or user.first_name,
+        "full_name": user.full_name,
+        "premium_emoji": None,
+        "custom_title": None,
+    }
+    
+    # Получаем премиум эмодзи статус
+    if hasattr(user, 'emoji_status') and user.emoji_status:
+        info["premium_emoji"] = user.emoji_status.custom_emoji_id
+    
+    # Получаем кастомный титул в группе
+    try:
+        member = await bot.get_chat_member(chat_id, user.id)
+        if hasattr(member, 'custom_title') and member.custom_title:
+            info["custom_title"] = member.custom_title
+    except Exception as e:
+        logger.debug(f"Failed to get custom title for user {user.id}: {e}")
+    
+    return info
+
+
+async def create_quote_image(
+    text: str,
+    username: str,
+    timestamp: Optional[str] = None,
+    avatar_data: Optional[bytes] = None,
+    custom_title: Optional[str] = None,
+    full_name: Optional[str] = None,
+) -> BytesIO:
     """
     Создает изображение цитаты с текстом и именем пользователя.
     
-    Fortress Update: Uses new QuoteGeneratorService with gradient backgrounds.
-    Requirements: 7.1, 7.2, 7.5
-    
     Args:
         text: Текст цитаты
-        username: Имя пользователя
+        username: Имя пользователя (@username)
         timestamp: Опциональная временная метка
+        avatar_data: Байты аватарки пользователя
+        custom_title: Кастомный титул в группе
+        full_name: Полное имя пользователя
     
     Returns:
         BytesIO объект с изображением в формате WebP
@@ -66,7 +111,10 @@ async def create_quote_image(text: str, username: str, timestamp: Optional[str] 
         text=text,
         username=username,
         style=style,
-        timestamp=timestamp
+        timestamp=timestamp,
+        avatar_data=avatar_data,
+        custom_title=custom_title,
+        full_name=full_name,
     )
     
     return BytesIO(quote_image.image_data)
@@ -173,6 +221,7 @@ async def _generate_single_message_quote(msg: Message):
     """
     logger.info(f"[QUOTE] _generate_single_message_quote called for chat {msg.chat.id}")
     original_msg = msg.reply_to_message
+    user = original_msg.from_user
     
     # Извлекаем текст из сообщения
     text = extract_message_text(original_msg)
@@ -181,8 +230,9 @@ async def _generate_single_message_quote(msg: Message):
         await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
         return
     
-    username = original_msg.from_user.username or original_msg.from_user.first_name
-    logger.info(f"[QUOTE] Username: {username}")
+    username = user.username or user.first_name
+    full_name = user.full_name
+    logger.info(f"[QUOTE] Username: {username}, Full name: {full_name}")
     
     # Get timestamp if available
     timestamp = None
@@ -190,7 +240,6 @@ async def _generate_single_message_quote(msg: Message):
         timestamp = original_msg.date.strftime("%H:%M")
     
     # Start Alive UI status for quote rendering
-    # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
     thread_id = getattr(msg, 'message_thread_id', None)
     try:
@@ -198,24 +247,37 @@ async def _generate_single_message_quote(msg: Message):
             msg.chat.id, "quote", msg.bot, message_thread_id=thread_id
         )
         
-        # Создаем изображение цитаты (Requirement 7.1, 7.2, 7.5)
-        image_io = await create_quote_image(text, username, timestamp)
+        # Загружаем аватарку пользователя
+        avatar_data = await get_user_avatar(msg.bot, user.id)
+        
+        # Получаем кастомный титул в группе
+        user_info = await get_user_info(msg.bot, msg.chat.id, user)
+        custom_title = user_info.get("custom_title")
+        
+        # Создаем изображение цитаты
+        image_io = await create_quote_image(
+            text=text,
+            username=username,
+            timestamp=timestamp,
+            avatar_data=avatar_data,
+            custom_title=custom_title,
+            full_name=full_name,
+        )
         
         # Clean up status message before sending response
-        # **Property 32: Status cleanup**
         if status:
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
-        # Подготавливаем изображение для отправки
+        # Подготавливаем изображение для отправки как стикер
         image_io.seek(0)
         image_data = image_io.read()
-        photo_file = BufferedInputFile(image_data, filename="quote.webp")
+        sticker_file = BufferedInputFile(image_data, filename="quote.webp")
         
         # Сначала сохраняем в БД чтобы получить ID для кнопок
         image_io.seek(0)
         quote_id = await save_quote_to_db(
-            user_id=original_msg.from_user.id,
+            user_id=user.id,
             text=text,
             username=username,
             image_io=image_io,
@@ -226,12 +288,10 @@ async def _generate_single_message_quote(msg: Message):
         # Создаём клавиатуру с кнопками
         keyboard = build_quote_keyboard(quote_id)
         
-        # Отправляем изображение как фото с кнопками
-        sent_msg = await msg.answer_photo(
-            photo=photo_file,
-            caption=f"💬 <b>{username}</b>",
+        # Отправляем как стикер
+        sent_msg = await msg.answer_sticker(
+            sticker=sticker_file,
             reply_markup=keyboard,
-            parse_mode="HTML"
         )
         
         # Обновляем message_id в БД

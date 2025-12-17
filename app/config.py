@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     voice_recognition_enabled: bool = Field(default=True, description="Enable voice message recognition (STT)")
     whisper_model: str = Field(default="base", description="Whisper model size: tiny, base, small, medium, large")
     content_download_enabled: bool = Field(default=True, description="Enable auto-download of media from links")
+    huggingface_mirror: str = Field(default="", description="HuggingFace mirror URL (e.g. https://hf-mirror.com for Russia)")
 
     @field_validator("log_level")
     @classmethod

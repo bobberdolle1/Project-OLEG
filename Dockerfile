@@ -49,4 +49,9 @@ COPY . .
 
 RUN mkdir -p /app/data
 
+# Предзагрузка модели Whisper через зеркало (чтобы не качать при каждом запуске)
+ENV HF_ENDPOINT=https://hf-mirror.com
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')" || \
+    echo "Warning: Failed to preload Whisper model, will download on first use"
+
 CMD ["python", "-m", "app.main"]

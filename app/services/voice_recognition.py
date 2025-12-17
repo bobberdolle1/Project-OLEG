@@ -31,6 +31,12 @@ async def init_whisper():
         from app.config import settings
         model_name = settings.whisper_model
         
+        # Устанавливаем зеркало HuggingFace если указано (для РФ)
+        hf_mirror = getattr(settings, 'huggingface_mirror', None) or os.environ.get('HF_ENDPOINT')
+        if hf_mirror:
+            os.environ['HF_ENDPOINT'] = hf_mirror
+            logger.info(f"Используется зеркало HuggingFace: {hf_mirror}")
+        
         logger.info(f"Загрузка модели faster-whisper: {model_name}...")
         # CPU mode, int8 для скорости
         _whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
@@ -38,6 +44,7 @@ async def init_whisper():
         return True
     except Exception as e:
         logger.error(f"Ошибка при загрузке модели faster-whisper: {e}")
+        logger.error("Если HuggingFace недоступен, установи HF_ENDPOINT=https://hf-mirror.com в .env")
         return False
 
 

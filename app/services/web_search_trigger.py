@@ -36,15 +36,25 @@ WEB_SEARCH_TRIGGER_KEYWORDS = [
 ]
 
 
+import re
+
+# Паттерны для номеров видеокарт (780M, 4070, 3060 Ti, RX 7900 и т.д.)
+GPU_MODEL_PATTERNS = [
+    r'\b\d{3,4}m?\b',  # 780, 780M, 4070, 3060
+    r'\b\d{3,4}\s*ti\b',  # 3060 Ti, 4070 Ti
+    r'\brx\s*\d{4}\b',  # RX 7900, RX 6800
+    r'\bi\d-\d{4,5}\b',  # i5-12400, i7-13700
+    r'\bryzen\s*\d\s*\d{4}\b',  # Ryzen 5 5600, Ryzen 7 7800
+]
+
+
 def should_trigger_web_search(text: str) -> bool:
     """
     Определяет, нужен ли веб-поиск для ответа на вопрос.
     
-    Триггерит поиск если текст содержит ключевые слова о:
-    - Релизах и новостях
-    - Ценах и покупках  
-    - Характеристиках и сравнениях
-    - Актуальной информации
+    Триггерит поиск если текст содержит:
+    - Ключевые слова о релизах, ценах, характеристиках
+    - Номера моделей видеокарт/процессоров (780M, 4070, i7-13700)
     
     Args:
         text: Текст сообщения пользователя
@@ -59,9 +69,16 @@ def should_trigger_web_search(text: str) -> bool:
     
     text_lower = text.lower()
     
+    # Проверяем ключевые слова
     for keyword in WEB_SEARCH_TRIGGER_KEYWORDS:
         if keyword in text_lower:
             logger.debug(f"Web search triggered by keyword: '{keyword}' in text: '{text[:50]}...'")
+            return True
+    
+    # Проверяем паттерны номеров моделей железа
+    for pattern in GPU_MODEL_PATTERNS:
+        if re.search(pattern, text_lower):
+            logger.debug(f"Web search triggered by GPU/CPU model pattern in text: '{text[:50]}...'")
             return True
     
     return False

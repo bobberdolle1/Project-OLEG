@@ -1,134 +1,195 @@
 """
-Unit tests for Web Search Trigger v2 (anti-hallucination).
+Unit tests for Smart Web Search Trigger.
 
-**Feature: anti-hallucination-v1**
+**Feature: anti-hallucination-v2**
 """
 
 import pytest
 from app.services.web_search_trigger import (
+    get_search_priority,
     should_trigger_web_search,
     should_trigger_web_search_simple,
-    HIGH_PRIORITY_TRIGGERS,
+    parse_self_assessment,
+    is_question_about_current_info,
+    SearchPriority,
 )
 
 
-class TestWebSearchTrigger:
-    """Tests for web search trigger detection."""
+class TestSearchPriority:
+    """Tests for search priority detection."""
+    
+    # NEVER search - болтовня
+    @pytest.mark.parametrize("text", [
+        "привет",
+        "как дела?",
+        "спасибо",
+        "пока",
+        "лол",
+        "да",
+        "ок",
+    ])
+    def test_never_search_chatter(self, text):
+        """Should never search for casual chatter."""
+        priority, _ = get_search_priority(text)
+        assert priority == SearchPriority.NEVER
+    
+    # NEVER search - вопросы про бота
+    @pytest.mark.parametrize("text", [
+        "кто ты?",
+        "что ты умеешь?",
+        "расскажи о себе",
+        "твои характеристики",
+    ])
+    def test_never_search_bot_questions(self, text):
+        """Should never search for questions about the bot."""
+        priority, _ = get_search_priority(text)
+        assert priority == SearchPriority.NEVER
+    
+    # CRITICAL - цены
+    @pytest.mark.parametrize("text", [
+        "сколько стоит RTX 5090?",
+        "какая цена на Ryzen 9800X3D?",
+        "почём 4070 Super?",
+        "где купить RX 9070?",
+    ])
+    def test_critical_search_prices(self, text):
+        """Should always search for prices."""
+        priority, _ = get_search_priority(text)
+        assert priority == SearchPriority.CRITICAL
+    
+    # CRITICAL - релизы
+    @pytest.mark.parametrize("text", [
+        "когда выйдет GTA 6?",
+        "вышла ли Windows 12?",
+        "дата выхода RTX 5060",
+        "последние новости про AMD",
+    ])
+    def test_critical_search_releases(self, text):
+        """Should always search for release info."""
+        priority, _ = get_search_priority(text)
+        assert priority == SearchPriority.CRITICAL
+    
+    # HIGH - конкретные модели железа
+    @pytest.mark.parametrize("text", [
+        "RTX 4070 vs RX 7800 XT",
+        "сколько VRAM у RTX 5080?",
+        "какой TDP у Ryzen 9 9950X?",
+        "что лучше RTX 5070 или RX 9070?",
+    ])
+    def test_high_search_hardware_specs(self, text):
+        """Should search for specific hardware specs."""
+        priority, _ = get_search_priority(text)
+        assert priority == SearchPriority.HIGH
+
+
+class TestShouldTriggerWebSearch:
+    """Tests for should_trigger_web_search function."""
     
     def test_triggers_on_price_question(self):
         """Should trigger on price questions."""
-        result, reason = should_trigger_web_search("сколько стоит RTX 4070?")
+        result, reason = should_trigger_web_search("сколько стоит RTX 5090?")
         assert result is True
-        assert "keyword" in reason or "model_pattern" in reason
-    
-    def test_triggers_on_specs_question(self):
-        """Should trigger on specs questions."""
-        result, reason = should_trigger_web_search("какие характеристики у RX 7800 XT?")
-        assert result is True
-    
-    def test_triggers_on_comparison(self):
-        """Should trigger on comparison questions."""
-        result, reason = should_trigger_web_search("что лучше RTX 4070 или RX 7800 XT?")
-        assert result is True
+        assert "always_pattern" in reason or "high_pattern" in reason
     
     def test_triggers_on_release_question(self):
         """Should trigger on release questions."""
-        result, reason = should_trigger_web_search("когда выйдет RTX 5090?")
+        result, reason = should_trigger_web_search("когда выйдет GTA 6?")
         assert result is True
     
-    def test_triggers_on_gpu_model_number(self):
-        """Should trigger on GPU model numbers."""
-        result, reason = should_trigger_web_search("расскажи про 4070 Ti Super")
-        assert result is True
-        assert "model_pattern" in reason
-    
-    def test_triggers_on_cpu_model(self):
-        """Should trigger on CPU model numbers."""
-        result, reason = should_trigger_web_search("какой i7-13700K лучше?")
-        assert result is True
-    
-    def test_triggers_on_architecture(self):
-        """Should trigger on architecture mentions."""
-        result, reason = should_trigger_web_search("что такое RDNA 3?")
-        assert result is True
-    
-    def test_not_triggers_on_bot_question(self):
-        """Should NOT trigger on questions about the bot."""
-        result, reason = should_trigger_web_search("какие твои характеристики?")
+    def test_not_triggers_on_greeting(self):
+        """Should not trigger on greetings."""
+        result, _ = should_trigger_web_search("привет")
         assert result is False
-        assert reason == "question_about_bot"
     
-    def test_not_triggers_on_simple_message(self):
-        """Should NOT trigger on simple messages."""
-        result, reason = should_trigger_web_search("привет, как дела?")
+    def test_not_triggers_on_thanks(self):
+        """Should not trigger on thanks."""
+        result, _ = should_trigger_web_search("спасибо")
         assert result is False
     
     def test_simple_version_returns_bool(self):
-        """Simple version should return just bool."""
-        result = should_trigger_web_search_simple("сколько стоит RTX 4070?")
+        """Simple version should return bool."""
+        result = should_trigger_web_search_simple("сколько стоит видеокарта?")
         assert isinstance(result, bool)
-        assert result is True
 
 
-class TestHighPriorityTriggers:
-    """Tests for high priority trigger patterns."""
+class TestSelfAssessment:
+    """Tests for self-assessment parsing."""
     
-    def test_vram_question(self):
-        """Should trigger on VRAM questions."""
-        result, reason = should_trigger_web_search("сколько vram у RTX 4070?")
-        assert result is True
-        assert "high_priority" in reason
+    def test_parse_confidence_high(self):
+        """Should parse high confidence."""
+        response = "Ответ на вопрос.<!--CONFIDENCE:high--><!--NEEDS_SEARCH:no-->"
+        clean, confidence, needs_search = parse_self_assessment(response)
+        
+        assert clean == "Ответ на вопрос."
+        assert confidence == "high"
+        assert needs_search is False
     
-    def test_architecture_question(self):
-        """Should trigger on architecture questions."""
-        result, reason = should_trigger_web_search("какая архитектура у RTX 4090?")
-        assert result is True
+    def test_parse_confidence_low_needs_search(self):
+        """Should parse low confidence with search needed."""
+        response = "Не уверен.<!--CONFIDENCE:low--><!--NEEDS_SEARCH:yes-->"
+        clean, confidence, needs_search = parse_self_assessment(response)
+        
+        assert clean == "Не уверен."
+        assert confidence == "low"
+        assert needs_search is True
     
-    def test_comparison_vs(self):
-        """Should trigger on 'vs' comparisons."""
-        result, reason = should_trigger_web_search("RTX 4070 vs RX 7800 XT")
-        assert result is True
+    def test_parse_no_metadata(self):
+        """Should handle response without metadata."""
+        response = "Просто ответ без метаданных."
+        clean, confidence, needs_search = parse_self_assessment(response)
+        
+        assert clean == "Просто ответ без метаданных."
+        assert confidence is None
+        assert needs_search is None
     
-    def test_existence_question(self):
-        """Should trigger on existence questions."""
-        result, reason = should_trigger_web_search("существует ли RTX 5090?")
-        assert result is True
+    def test_clean_response_removes_metadata(self):
+        """Should remove all metadata from response."""
+        response = "Текст<!--CONFIDENCE:medium-->ещё текст<!--NEEDS_SEARCH:no-->"
+        clean, _, _ = parse_self_assessment(response)
+        
+        assert "CONFIDENCE" not in clean
+        assert "NEEDS_SEARCH" not in clean
+        assert "<!--" not in clean
 
 
-class TestNewGenModels:
-    """Tests for new generation model detection (RTX 50, RX 9000)."""
+class TestIsQuestionAboutCurrentInfo:
+    """Tests for is_question_about_current_info."""
     
-    @pytest.mark.parametrize("query", [
-        "характеристики RTX 5090",
-        "цена RTX 5080",
-        "обзор RTX 5070",
-        "RX 9070 XT vs RTX 5070",
-        "когда выйдет RX 9070",
+    @pytest.mark.parametrize("text", [
+        "сколько стоит RTX 5090?",
+        "когда выйдет игра?",
+        "последняя версия драйвера",
     ])
-    def test_triggers_on_new_gen_models(self, query):
-        """Should trigger search for new generation models."""
-        result, _ = should_trigger_web_search(query)
-        assert result is True
+    def test_current_info_questions(self, text):
+        """Should detect questions about current info."""
+        assert is_question_about_current_info(text) is True
+    
+    @pytest.mark.parametrize("text", [
+        "привет",
+        "что такое GPU?",
+        "помоги с кодом",
+    ])
+    def test_not_current_info_questions(self, text):
+        """Should not detect non-current info questions."""
+        assert is_question_about_current_info(text) is False
 
 
 class TestEdgeCases:
-    """Tests for edge cases."""
+    """Edge case tests."""
     
     def test_empty_string(self):
         """Should handle empty string."""
-        result, reason = should_trigger_web_search("")
-        assert result is False
-    
-    def test_none_like_behavior(self):
-        """Should handle None-like input."""
-        result, reason = should_trigger_web_search("")
-        assert result is False
-        assert reason == ""
+        priority, _ = get_search_priority("")
+        assert priority == SearchPriority.NEVER
     
     def test_case_insensitive(self):
         """Should be case insensitive."""
-        result1, _ = should_trigger_web_search("RTX 4070")
-        result2, _ = should_trigger_web_search("rtx 4070")
-        result3, _ = should_trigger_web_search("Rtx 4070")
-        
-        assert result1 == result2 == result3
+        result1, _ = should_trigger_web_search("СКОЛЬКО СТОИТ RTX 5090?")
+        result2, _ = should_trigger_web_search("сколько стоит rtx 5090?")
+        assert result1 == result2
+    
+    def test_mixed_content(self):
+        """Should handle mixed content."""
+        # Цена в вопросе должна триггерить поиск
+        result, _ = should_trigger_web_search("привет, сколько стоит видеокарта?")
+        assert result is True

@@ -1,11 +1,12 @@
 """
-Web Search Service — улучшенный веб-поиск с несколькими провайдерами.
+Web Search Service — умный веб-поиск с несколькими провайдерами.
 
-Поддерживает:
-- Brave Search API (рекомендуется, бесплатный tier 2000 запросов/месяц)
-- DuckDuckGo HTML (fallback, без API ключа)
+Приоритет провайдеров:
+1. SearXNG (self-hosted, бесплатно, без лимитов)
+2. Brave Search API (2000 запросов/месяц бесплатно)
+3. DuckDuckGo HTML (fallback, без API)
 
-**Feature: anti-hallucination-v1**
+**Feature: anti-hallucination-v2**
 """
 
 import asyncio
@@ -28,8 +29,8 @@ class SearchResult:
     title: str
     snippet: str
     url: str
-    source: str  # brave, duckduckgo
-    freshness: Optional[str] = None  # дата публикации если есть
+    source: str  # searxng, brave, duckduckgo
+    freshness: Optional[str] = None
 
 
 @dataclass
@@ -44,58 +45,143 @@ class SearchResponse:
 
 class WebSearchService:
     """
-    Сервис веб-поиска с поддержкой нескольких провайдеров.
+    Сервис веб-поиска с несколькими провайдерами.
     
     Приоритет:
-    1. Brave Search API (если есть ключ)
-    2. DuckDuckGo HTML (fallback)
+    1. SearXNG (если настроен) — бесплатно, без лимитов
+    2. Brave Search API (если есть ключ) — 2000/мес
+    3. DuckDuckGo HTML — всегда доступен
     """
     
+    # Публичные SearXNG инстансы (fallback если свой не настроен)
+    PUBLIC_SEARXNG_INSTANCES = [
+        "https://searx.be",
+        "https://search.bus-hit.me", 
+        "https://searx.tiekoetter.com",
+        "https://search.ononoki.org",
+    ]
+    
     def __init__(self):
+        self.searxng_url = getattr(settings, 'searxng_url', None)
         self.brave_api_key = getattr(settings, 'brave_search_api_key', None)
         self._cache: dict[str, tuple[SearchResponse, float]] = {}
-        self._cache_ttl = 300  # 5 минут
+        self._cache_ttl = 600  # 10 минут (увеличил для экономии запросов)
+        self._working_searxng: Optional[str] = None  # Кэш рабочего инстанса
     
     async def search(
         self, 
         query: str, 
-        max_results: int = 10,
-        freshness: str = "month"  # day, week, month, year
+        max_results: int = 8,
+        freshness: str = "month"
     ) -> SearchResponse:
         """
-        Выполняет веб-поиск.
+        Выполняет веб-поиск с автоматическим выбором провайдера.
         
         Args:
             query: Поисковый запрос
             max_results: Максимум результатов
-            freshness: Фильтр по свежести (для Brave)
+            freshness: Фильтр по свежести
             
         Returns:
             SearchResponse с результатами
         """
         # Проверяем кэш
-        cache_key = f"{query}:{max_results}:{freshness}"
+        cache_key = f"{query}:{max_results}"
         if cache_key in self._cache:
             response, timestamp = self._cache[cache_key]
             if (datetime.now().timestamp() - timestamp) < self._cache_ttl:
-                logger.debug(f"[SEARCH] Cache hit for: {query[:30]}...")
+                logger.debug(f"[SEARCH] Cache hit: {query[:30]}...")
                 response.cached = True
                 return response
         
-        # Пробуем Brave если есть ключ
-        if self.brave_api_key:
-            response = await self._search_brave(query, max_results, freshness)
-            if response.results:
-                self._cache[cache_key] = (response, datetime.now().timestamp())
-                return response
-            logger.warning(f"[SEARCH] Brave failed, falling back to DuckDuckGo")
+        # Пробуем провайдеры по приоритету
+        response = await self._try_providers(query, max_results, freshness)
         
-        # Fallback на DuckDuckGo
-        response = await self._search_duckduckgo(query, max_results)
         if response.results:
             self._cache[cache_key] = (response, datetime.now().timestamp())
         
         return response
+    
+    async def _try_providers(
+        self, 
+        query: str, 
+        max_results: int,
+        freshness: str
+    ) -> SearchResponse:
+        """Пробует провайдеры по приоритету."""
+        
+        # 1. SearXNG (свой или публичный)
+        response = await self._search_searxng(query, max_results)
+        if response.results:
+            return response
+        
+        # 2. Brave (если есть ключ)
+        if self.brave_api_key:
+            response = await self._search_brave(query, max_results, freshness)
+            if response.results:
+                return response
+        
+        # 3. DuckDuckGo (fallback)
+        return await self._search_duckduckgo(query, max_results)
+    
+    async def _search_searxng(
+        self, 
+        query: str, 
+        max_results: int
+    ) -> SearchResponse:
+        """Поиск через SearXNG (self-hosted или публичный)."""
+        
+        # Определяем какой инстанс использовать
+        instances_to_try = []
+        
+        if self.searxng_url:
+            instances_to_try.append(self.searxng_url)
+        
+        if self._working_searxng and self._working_searxng not in instances_to_try:
+            instances_to_try.insert(0, self._working_searxng)
+        
+        instances_to_try.extend(self.PUBLIC_SEARXNG_INSTANCES)
+        
+        for instance_url in instances_to_try[:4]:  # Пробуем максимум 4
+            try:
+                async with httpx.AsyncClient(timeout=8) as client:
+                    response = await client.get(
+                        f"{instance_url.rstrip('/')}/search",
+                        params={
+                            "q": query,
+                            "format": "json",
+                            "engines": "google,bing,duckduckgo",
+                            "language": "ru-RU",
+                        },
+                        headers={"Accept": "application/json"}
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    results = []
+                    for item in data.get("results", [])[:max_results]:
+                        results.append(SearchResult(
+                            title=item.get("title", ""),
+                            snippet=item.get("content", ""),
+                            url=item.get("url", ""),
+                            source="searxng",
+                            freshness=item.get("publishedDate"),
+                        ))
+                    
+                    if results:
+                        self._working_searxng = instance_url
+                        logger.info(f"[SEARXNG] {instance_url}: {len(results)} results for: {query[:30]}...")
+                        return SearchResponse(
+                            results=results,
+                            query=query,
+                            provider=f"searxng:{instance_url}"
+                        )
+                        
+            except Exception as e:
+                logger.debug(f"[SEARXNG] {instance_url} failed: {e}")
+                continue
+        
+        return SearchResponse(results=[], query=query, provider="searxng", error="All instances failed")
     
     async def _search_brave(
         self, 
@@ -133,27 +219,18 @@ class WebSearchService:
                     ))
                 
                 logger.info(f"[BRAVE] Found {len(results)} results for: {query[:30]}...")
-                return SearchResponse(
-                    results=results,
-                    query=query,
-                    provider="brave"
-                )
+                return SearchResponse(results=results, query=query, provider="brave")
                 
         except Exception as e:
             logger.warning(f"[BRAVE] Search error: {e}")
-            return SearchResponse(
-                results=[],
-                query=query,
-                provider="brave",
-                error=str(e)
-            )
+            return SearchResponse(results=[], query=query, provider="brave", error=str(e))
     
     async def _search_duckduckgo(
         self, 
         query: str, 
         max_results: int
     ) -> SearchResponse:
-        """Поиск через DuckDuckGo HTML (без API)."""
+        """Поиск через DuckDuckGo HTML."""
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.post(
@@ -168,7 +245,6 @@ class WebSearchService:
                 html = response.text
                 results = []
                 
-                # Парсим результаты
                 snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)<', html)
                 titles = re.findall(r'class="result__a"[^>]*>([^<]+)<', html)
                 urls = re.findall(r'class="result__a"[^>]*href="([^"]+)"', html)
@@ -180,106 +256,30 @@ class WebSearchService:
                     
                     if title and snippet:
                         results.append(SearchResult(
-                            title=title,
-                            snippet=snippet,
-                            url=url,
-                            source="duckduckgo"
+                            title=title, snippet=snippet, url=url, source="duckduckgo"
                         ))
                 
                 logger.info(f"[DDG] Found {len(results)} results for: {query[:30]}...")
-                return SearchResponse(
-                    results=results,
-                    query=query,
-                    provider="duckduckgo"
-                )
+                return SearchResponse(results=results, query=query, provider="duckduckgo")
                 
         except Exception as e:
             logger.warning(f"[DDG] Search error: {e}")
-            return SearchResponse(
-                results=[],
-                query=query,
-                provider="duckduckgo",
-                error=str(e)
-            )
+            return SearchResponse(results=[], query=query, provider="duckduckgo", error=str(e))
     
-    async def search_with_variations(
-        self, 
-        query: str, 
-        max_results: int = 10
-    ) -> SearchResponse:
-        """
-        Поиск с вариациями запроса для лучшего покрытия.
-        
-        Генерирует несколько вариантов запроса и объединяет результаты.
-        """
-        variations = self._generate_variations(query)
-        all_results: list[SearchResult] = []
-        seen_titles: set[str] = set()
-        
-        # Выполняем поиски параллельно
-        tasks = [self.search(q, max_results=7) for q in variations[:3]]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        for response in responses:
-            if isinstance(response, Exception):
-                continue
-            for result in response.results:
-                title_key = result.title.lower()[:50]
-                if title_key not in seen_titles:
-                    seen_titles.add(title_key)
-                    all_results.append(result)
-        
-        return SearchResponse(
-            results=all_results[:max_results],
-            query=query,
-            provider="multi"
-        )
-    
-    def _generate_variations(self, query: str) -> list[str]:
-        """Генерирует вариации поискового запроса."""
-        variations = [query]
-        query_lower = query.lower()
-        
-        # Добавляем год для актуальности
-        current_year = str(datetime.now().year)
-        if current_year not in query:
-            variations.append(f"{query} {current_year}")
-        
-        # Технические переводы
-        tech_terms = {
-            "видеокарта": "GPU",
-            "процессор": "CPU",
-            "характеристики": "specs",
-            "сравнение": "vs comparison",
-            "обзор": "review",
-        }
-        
-        for ru, en in tech_terms.items():
-            if ru in query_lower:
-                variations.append(f"{query} {en}")
-                break
-        
-        return variations[:4]
-    
-    def format_for_prompt(self, response: SearchResponse) -> str:
-        """
-        Форматирует результаты поиска для включения в промпт LLM.
-        
-        Args:
-            response: Ответ поискового сервиса
-            
-        Returns:
-            Отформатированная строка
-        """
+    def format_for_prompt(self, response: SearchResponse, max_chars: int = 2000) -> str:
+        """Форматирует результаты для промпта LLM."""
         if not response.results:
-            return "Поиск не дал результатов."
+            return ""
         
-        lines = [f"Результаты поиска по запросу \"{response.query}\":"]
+        lines = [f"[Результаты поиска: {response.query}]"]
+        total_chars = len(lines[0])
         
         for i, result in enumerate(response.results, 1):
-            freshness_info = f" [{result.freshness}]" if result.freshness else ""
-            lines.append(f"{i}. {result.title}{freshness_info}")
-            lines.append(f"   {result.snippet}")
+            line = f"{i}. {result.title}: {result.snippet}"
+            if total_chars + len(line) > max_chars:
+                break
+            lines.append(line)
+            total_chars += len(line)
         
         return "\n".join(lines)
 

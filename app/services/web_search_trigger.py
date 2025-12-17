@@ -1,197 +1,236 @@
 """
-Web Search Trigger Detection.
+Smart Web Search Trigger — умная система определения когда нужен поиск.
 
-Определяет, когда нужен веб-поиск для ответа на вопрос пользователя.
+Вместо тупых триггеров по словам — категоризация вопросов:
+1. НИКОГДА не искать — болтовня, базовые знания, код
+2. ВОЗМОЖНО искать — если LLM не уверен (self-assessment)
+3. ВСЕГДА искать — цены, релизы, актуальные новости
 
-**Feature: oleg-personality-improvements, Property 1: Search keywords trigger web search**
-**Feature: anti-hallucination-v1**
-**Validates: Requirements 1.3**
+**Feature: anti-hallucination-v2**
 """
 
 import logging
+import re
+from enum import Enum
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Ключевые слова для автоматического триггера веб-поиска
-WEB_SEARCH_TRIGGER_KEYWORDS = [
+
+class SearchPriority(Enum):
+    """Приоритет поиска."""
+    NEVER = "never"           # Никогда не искать
+    LOW = "low"               # Только если LLM не уверен
+    MEDIUM = "medium"         # Искать если есть время
+    HIGH = "high"             # Всегда искать
+    CRITICAL = "critical"     # Критично — без поиска нельзя отвечать
+
+
+# =============================================================================
+# КАТЕГОРИИ ВОПРОСОВ
+# =============================================================================
+
+# НИКОГДА не нужен поиск — болтовня, вопросы про бота, базовые знания
+NEVER_SEARCH_PATTERNS = [
+    # Болтовня
+    r"^(привет|здарова|хай|йо|ку|здравствуй)",
+    r"^как (дела|жизнь|сам|ты)\??$",
+    r"^(спасибо|благодарю|пасиб|спс)",
+    r"^(пока|бб|до свидания|удачи)",
+    r"^(лол|кек|ахах|хаха|ржу|смешно)",
+    r"^(да|нет|ок|окей|понял|ясно|норм)$",
+    # Вопросы про бота
+    r"(кто ты|что ты|ты кто|ты что)",
+    r"(твои характеристики|твоё железо|на чём ты работаешь)",
+    r"(расскажи о себе|что умеешь)",
+    # Базовые знания (не требуют актуальности)
+    r"^что такое (gpu|cpu|ram|ssd|hdd|psu|mobo)\??$",
+    r"^(объясни|расскажи) (что такое|как работает)",
+    r"^в чём разница между .* и .*\?$",  # Концептуальные вопросы
+]
+
+# ВСЕГДА нужен поиск — актуальная информация
+ALWAYS_SEARCH_PATTERNS = [
+    # Цены (меняются постоянно)
+    r"(сколько стоит|цена|ценник|почём|за сколько)",
+    r"(где купить|где заказать|где взять)",
     # Релизы и новости
-    "вышла", "вышел", "вышло", "релиз", "релизнул", "выходит", "выйдет", "когда выйдет",
-    "анонс", "анонсировали", "новости", "что нового", "последние новости",
-    # Цены и покупки
-    "сколько стоит", "цена", "ценник", "где купить", "где заказать",
-    "почём", "за сколько", "бюджет на",
-    # Характеристики и сравнения
-    "характеристики", "спеки", "specs", "benchmark", "бенчмарк", "тест",
-    "сколько памяти", "сколько vram", "какая шина", "какой tdp",
-    "сколько ядер", "сколько потоков", "какой сокет",
-    # Актуальная информация
-    "сейчас", "на данный момент", "актуальн", "свежи", "последн",
-    "в 2024", "в 2025", "на сегодня",
-    # Версии и обновления
-    "версия", "обновление", "патч", "апдейт", "update", "драйвер",
-    # Архитектура и поколения железа — ВАЖНО для фактчекинга
-    "архитектур", "поколени", "какого года", "год выпуска", "когда вышл",
-    "kepler", "maxwell", "pascal", "turing", "ampere", "ada", "lovelace", "blackwell",
-    "zen", "zen2", "zen3", "zen4", "zen5", "skylake", "alder", "raptor", "meteor", "arrow",
-    "rdna", "rdna2", "rdna3", "rdna 2", "rdna 3",
-    # Модели видеокарт (триггер на номера)
-    "gtx", "rtx", "rx ", "radeon", "geforce", "arc a",
-    # Вопросы про факты — когда человек сомневается или уточняет
-    "это правда", "точно ли", "уверен", "проверь", "а не", "разве",
-    "какой там", "какая там", "что там", "сколько там",
-    "правда что", "верно что", "действительно",
-    # Сравнения — часто требуют актуальных данных
-    "что лучше", "что выбрать", "vs", "против", "или",
-    "сравни", "сравнение", "разница между",
-    # Проблемы и баги — нужны актуальные решения
-    "не работает", "баг", "глюк", "проблема с", "ошибка",
-    "как исправить", "как починить", "фикс",
-    # =========================================================================
-    # СОФТ И ТЮНИНГ 2025
-    # =========================================================================
-    # Операционные системы
-    "windows 11", "windows 12", "24h2", "25h1", "win11", "win12",
-    "bazzite", "nobara", "linux gaming", "steamos",
-    # Тюнинг и разгон
-    "разгон", "overclock", "андервольт", "undervolt", "undervolting",
-    "curve optimizer", "pbo", "pbo2", "co", "кривая",
-    "vf curve", "loadline", "ac loadline", "svid offset",
-    # Софт для тюнинга
-    "msi afterburner", "afterburner", "rtss", "rivatuner",
-    "nvidia app", "geforce experience", "gfe",
-    "adrenalin", "radeon software",
-    "fancontrol", "fan control",
-    "winutil", "chris titus", "деблоат",
-    # Мониторинг
-    "hwinfo", "hwinfo64", "capframex", "frametime",
-    "zentimings", "тайминги", "timings",
-    "1% low", "0.1% low", "статтер", "фриз", "микрофриз",
-    # Стресс-тесты
-    "occt", "testmem5", "tm5", "anta777",
-    "cinebench", "y-cruncher", "ycruncher",
-    "corecycler", "prime95", "стресс-тест", "стресс тест",
-    "whea", "whea error",
-    # Драйверы
-    "ddu", "display driver uninstaller",
-    "nvcleanstall", "чистый драйвер",
-    # DDR5 тюнинг
-    "trefi", "trfc", "вторички", "вторичные тайминги",
-    "expo", "xmp", "xmp 3.0",
-    # Термины тюнинга
-    "троттлинг", "throttling", "vrm", "температура vrm",
-    "power limit", "tdp limit", "ecc trap",
-    "resize bar", "rebar", "sam", "smart access memory",
-    "vbs", "memory integrity", "изоляция ядра",
+    r"(когда выйдет|когда релиз|дата выхода)",
+    r"(вышла ли|вышел ли|уже вышла)",
+    r"(последние новости|что нового|новости про)",
+    # Актуальные версии
+    r"(последняя версия|актуальная версия|свежий драйвер)",
+    r"(какой сейчас|на данный момент)",
+    # Конкретные вопросы о существовании
+    r"(существует ли|есть ли|выпустили ли)",
 ]
 
-
-import re
-
-# Паттерны для номеров видеокарт (780M, 4070, 3060 Ti, RX 7900 и т.д.)
-GPU_MODEL_PATTERNS = [
-    r'\b\d{3,4}m\b',  # 780M, 680M (мобильные/iGPU)
-    # Убрали голый \d{4} — слишком много ложных срабатываний
-    # Вместо этого ищем конкретные паттерны видеокарт
-    r'\b[234]\d{3}\b',  # 2060, 3060, 4070 (NVIDIA RTX 20/30/40)
-    r'\b[567]\d{3}\b',  # 5600, 6800, 7900 (AMD RX 5000/6000/7000)
-    r'\b\d{3,4}\s*ti\b',  # 3060 Ti, 4070 Ti
-    r'\b\d{3,4}\s*super\b',  # 4070 Super, 4080 Super
-    r'\brx\s*\d{4}\b',  # RX 7900, RX 6800
-    r'\brx\s*\d{4}\s*xt[x]?\b',  # RX 7900 XT, RX 7900 XTX
-    r'\bradeon\s*\d{3}m?\b',  # Radeon 780M, Radeon 680M (AMD iGPU)
-    r'\bi\d-\d{4,5}[a-z]*\b',  # i5-12400, i7-13700K, i9-14900KS
-    r'\bryzen\s*\d\s*\d{4}[a-z]*\b',  # Ryzen 5 5600X, Ryzen 7 7800X3D
-    r'\brdna\s*\d\b',  # RDNA 3, RDNA 2
-    r'\barc\s*a\d{3}\b',  # Arc A770, Arc A750
-    r'\b50[789]0\b',  # 5070, 5080, 5090 (RTX 50 series)
-    r'\b90[67]0\b',  # 9060, 9070 (RX 9000 series, RDNA 4)
-]
-
-
-# Исключения — когда НЕ нужен веб-поиск (вопросы про самого бота)
-SEARCH_EXCLUSIONS = [
-    "твои характеристики", "твоё железо", "твой процессор", "твоя видеокарта",
-    "на чём ты работаешь", "на чем ты работаешь", "где ты крутишься",
-    "какой ты", "кто ты", "что ты", "расскажи о себе",
-    "твои спеки", "твои specs", "твой сервер",
-]
-
-
-# Высокоприоритетные триггеры — ВСЕГДА требуют поиска
-HIGH_PRIORITY_TRIGGERS = [
-    # Конкретные вопросы о характеристиках
-    r'сколько\s+(vram|памяти|ядер|потоков)',
-    r'какая\s+(архитектура|шина|частота)',
-    r'какой\s+(tdp|техпроцесс|сокет)',
+# ВЫСОКИЙ приоритет — технические вопросы о железе
+HIGH_PRIORITY_PATTERNS = [
+    # Характеристики конкретных моделей
+    r"(rtx|gtx|rx|arc)\s*\d{4}",  # RTX 4070, RX 7900
+    r"(ryzen|core|i[3579]|xeon)\s*\d",  # Ryzen 7, i5, Core
+    r"(сколько|какой|какая)\s*(vram|памяти|ядер|потоков|tdp|частота)",
     # Сравнения конкретных моделей
-    r'(rtx|rx|arc)\s*\d+.*vs',
-    r'(rtx|rx|arc)\s*\d+.*или',
-    r'что лучше.*(rtx|rx|arc)',
-    # Вопросы о существовании
-    r'(есть|существует|вышла?)\s*(rtx|rx)\s*\d+',
-    r'(rtx|rx)\s*\d+.*(есть|существует|вышла?)',
+    r"(rtx|rx|arc)\s*\d+.*(vs|или|против)",
+    r"что лучше.*(rtx|rx|ryzen|intel)",
+    # Бенчмарки и тесты
+    r"(benchmark|бенчмарк|тест|fps в)",
 ]
+
+# СРЕДНИЙ приоритет — может понадобиться поиск
+MEDIUM_PRIORITY_PATTERNS = [
+    # Рекомендации по сборкам
+    r"(собрать|сборка|конфиг).*(пк|комп|компьютер)",
+    r"(что взять|что выбрать|посоветуй)",
+    # Совместимость
+    r"(совместим|подойдёт|будет работать)",
+    # Проблемы (могут быть известные баги)
+    r"(не работает|баг|глюк|проблема|ошибка)",
+]
+
+
+# =============================================================================
+# ПРИМЕРЫ ДЛЯ LLM (self-assessment)
+# =============================================================================
+
+SEARCH_DECISION_EXAMPLES = """
+ПРИМЕРЫ КОГДА НУЖЕН ПОИСК:
+- "сколько стоит RTX 5090?" → НУЖЕН (цены меняются)
+- "когда выйдет GTA 6?" → НУЖЕН (актуальная дата)
+- "какой последний драйвер NVIDIA?" → НУЖЕН (версии обновляются)
+- "вышла ли Windows 12?" → НУЖЕН (факт о релизе)
+- "RTX 5070 vs RX 9070 что лучше?" → НУЖЕН (свежие бенчмарки)
+- "какая архитектура у RTX 5080?" → НУЖЕН (новое железо)
+
+ПРИМЕРЫ КОГДА НЕ НУЖЕН ПОИСК:
+- "привет, как дела?" → НЕ НУЖЕН (болтовня)
+- "что такое GPU?" → НЕ НУЖЕН (базовые знания)
+- "помоги с кодом на Python" → НЕ НУЖЕН (код)
+- "в чём разница между SSD и HDD?" → НЕ НУЖЕН (концепция)
+- "RTX 4070 сколько VRAM?" → НЕ НУЖЕН (есть в базе знаний)
+- "какой процессор для игр?" → ВОЗМОЖНО (общий совет vs конкретные цены)
+
+ПРАВИЛО: Если не уверен в актуальности информации — лучше поискать.
+"""
+
+
+def get_search_priority(text: str) -> tuple[SearchPriority, str]:
+    """
+    Определяет приоритет поиска для вопроса.
+    
+    Returns:
+        (приоритет, причина)
+    """
+    if not text:
+        return SearchPriority.NEVER, "empty"
+    
+    text_lower = text.lower().strip()
+    
+    # 1. СНАЧАЛА проверяем ALWAYS паттерны — они имеют приоритет!
+    for pattern in ALWAYS_SEARCH_PATTERNS:
+        if re.search(pattern, text_lower):
+            return SearchPriority.CRITICAL, f"always_pattern:{pattern[:20]}"
+    
+    # 2. Проверяем HIGH паттерны
+    for pattern in HIGH_PRIORITY_PATTERNS:
+        if re.search(pattern, text_lower):
+            return SearchPriority.HIGH, f"high_pattern:{pattern[:20]}"
+    
+    # 3. Теперь проверяем NEVER паттерны (только если нет важных триггеров)
+    for pattern in NEVER_SEARCH_PATTERNS:
+        if re.search(pattern, text_lower):
+            return SearchPriority.NEVER, f"never_pattern:{pattern[:20]}"
+    
+    # 4. Проверяем MEDIUM паттерны
+    for pattern in MEDIUM_PRIORITY_PATTERNS:
+        if re.search(pattern, text_lower):
+            return SearchPriority.MEDIUM, f"medium_pattern:{pattern[:20]}"
+    
+    # 5. По умолчанию — низкий приоритет (LLM сам решит)
+    return SearchPriority.LOW, "default"
 
 
 def should_trigger_web_search(text: str) -> tuple[bool, str]:
     """
-    Определяет, нужен ли веб-поиск для ответа на вопрос.
+    Определяет, нужен ли веб-поиск.
     
-    Триггерит поиск если текст содержит:
-    - Ключевые слова о релизах, ценах, характеристиках
-    - Номера моделей видеокарт/процессоров (780M, 4070, i7-13700)
-    - Высокоприоритетные паттерны (сравнения, вопросы о существовании)
+    Совместимость со старым API.
     
-    НЕ триггерит если:
-    - Вопрос про самого бота ("твои характеристики", "на чём ты работаешь")
-    
-    Args:
-        text: Текст сообщения пользователя
-        
     Returns:
-        Tuple (нужен_поиск: bool, причина: str)
-        
-    **Validates: Requirements 1.3**
-    **Feature: anti-hallucination-v1**
+        (нужен_поиск, причина)
     """
-    if not text:
-        return False, ""
+    priority, reason = get_search_priority(text)
     
-    text_lower = text.lower()
+    # Триггерим поиск для HIGH и CRITICAL
+    should_search = priority in (SearchPriority.HIGH, SearchPriority.CRITICAL)
     
-    # Сначала проверяем исключения — вопросы про самого бота
-    for exclusion in SEARCH_EXCLUSIONS:
-        if exclusion in text_lower:
-            logger.debug(f"Web search SKIPPED - question about bot: '{exclusion}' in text: '{text[:50]}...'")
-            return False, "question_about_bot"
+    if should_search:
+        logger.info(f"[SEARCH TRIGGER] {priority.value}: {reason} | {text[:50]}...")
     
-    # Высокоприоритетные паттерны — проверяем первыми
-    for pattern in HIGH_PRIORITY_TRIGGERS:
-        if re.search(pattern, text_lower):
-            logger.info(f"Web search triggered by HIGH PRIORITY pattern: '{pattern}' in text: '{text[:50]}...'")
-            return True, f"high_priority:{pattern}"
-    
-    # Проверяем ключевые слова
-    for keyword in WEB_SEARCH_TRIGGER_KEYWORDS:
-        if keyword in text_lower:
-            logger.debug(f"Web search triggered by keyword: '{keyword}' in text: '{text[:50]}...'")
-            return True, f"keyword:{keyword}"
-    
-    # Проверяем паттерны номеров моделей железа
-    for pattern in GPU_MODEL_PATTERNS:
-        if re.search(pattern, text_lower):
-            logger.debug(f"Web search triggered by GPU/CPU model pattern in text: '{text[:50]}...'")
-            return True, f"model_pattern:{pattern}"
-    
-    return False, ""
+    return should_search, reason
 
 
 def should_trigger_web_search_simple(text: str) -> bool:
-    """
-    Упрощённая версия для обратной совместимости.
-    
-    Returns:
-        True если нужен веб-поиск
-    """
+    """Упрощённая версия для обратной совместимости."""
     result, _ = should_trigger_web_search(text)
     return result
+
+
+def get_self_assessment_prompt() -> str:
+    """
+    Возвращает промпт для self-assessment.
+    
+    LLM добавляет в конец ответа оценку уверенности.
+    """
+    return """
+После ответа добавь оценку (НЕ показывай пользователю, это для системы):
+<!--CONFIDENCE:high/medium/low-->
+<!--NEEDS_SEARCH:yes/no-->
+
+high = уверен на 100%, это базовые знания или есть в контексте
+medium = скорее всего правильно, но могу ошибаться
+low = не уверен, нужна проверка
+
+NEEDS_SEARCH=yes если:
+- Вопрос о ценах, релизах, новостях
+- Не уверен в актуальности информации
+- Вопрос о новом железе (2024-2025)
+"""
+
+
+def parse_self_assessment(response: str) -> tuple[str, Optional[str], Optional[bool]]:
+    """
+    Парсит self-assessment из ответа LLM.
+    
+    Returns:
+        (чистый_ответ, confidence, needs_search)
+    """
+    confidence = None
+    needs_search = None
+    
+    # Извлекаем confidence
+    conf_match = re.search(r'<!--CONFIDENCE:(high|medium|low)-->', response)
+    if conf_match:
+        confidence = conf_match.group(1)
+    
+    # Извлекаем needs_search
+    search_match = re.search(r'<!--NEEDS_SEARCH:(yes|no)-->', response)
+    if search_match:
+        needs_search = search_match.group(1) == "yes"
+    
+    # Убираем метаданные из ответа
+    clean_response = re.sub(r'<!--(CONFIDENCE|NEEDS_SEARCH):[^>]+-->', '', response)
+    clean_response = clean_response.strip()
+    
+    return clean_response, confidence, needs_search
+
+
+def is_question_about_current_info(text: str) -> bool:
+    """
+    Проверяет, требует ли вопрос актуальной информации.
+    
+    Используется для решения — искать сразу или дать LLM попробовать.
+    """
+    priority, _ = get_search_priority(text)
+    return priority in (SearchPriority.CRITICAL, SearchPriority.HIGH)

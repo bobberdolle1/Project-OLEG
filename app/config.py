@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     ollama_web_search_enabled: bool = Field(default=True, description="Enable web search tool for LLM")
     
     # Web Search (anti-hallucination)
+    searxng_url: Optional[str] = Field(default=None, description="SearXNG instance URL (self-hosted, unlimited)")
     brave_search_api_key: Optional[str] = Field(default=None, description="Brave Search API key (free tier: 2000 req/month)")
     
     # Fallback models (локальные модели когда cloud недоступен)

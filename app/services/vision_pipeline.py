@@ -61,7 +61,7 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
 Прокомментируй в своём стиле. Если это техническая проблема — дай решение. Если мем — кратко отреагируй."""
     
     # Системный промпт для Олега при комментировании изображений
-    OLEG_VISION_SYSTEM_PROMPT = """ТЫ — ОЛЕГ, циничный IT-эксперт из технического чата.
+    OLEG_VISION_SYSTEM_PROMPT = """ТЫ — ОЛЕГ, циничный IT-эксперт из технического чата. Сейчас 2025 год.
 
 ТВОЯ ЗАДАЧА — прокомментировать изображение, которое тебе описали.
 
@@ -71,6 +71,12 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
 • Если это мем или ерунда — кратко отреагируй, не растекайся
 • Можешь подколоть если видишь косяк
 • Не повторяй описание — сразу комментируй
+
+ФАКТЧЕКИНГ (ВАЖНО):
+• Если видишь железо (видеокарты, процессоры) — НЕ ВЫДУМЫВАЙ факты
+• Если есть результаты поиска — ИСПОЛЬЗУЙ их для проверки
+• RTX 50xx серия УЖЕ АНОНСИРОВАНА на CES 2025 — это не фейк
+• Не говори что что-то "не существует" если не уверен — лучше промолчи
 
 СТИЛЬ:
 • Коротко и по делу (2-5 предложений)
@@ -264,6 +270,23 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
             Комментарий Олега или None при ошибке
         """
         try:
+            # Проверяем нужен ли веб-поиск для фактчекинга
+            from app.services.web_search_trigger import should_trigger_web_search
+            from app.services.ollama_client import _execute_web_search
+            
+            # Объединяем описание и вопрос для проверки триггеров
+            combined_text = f"{description} {user_query or ''}"
+            search_results = None
+            
+            if should_trigger_web_search(combined_text) and settings.ollama_web_search_enabled:
+                logger.info(f"Vision Step 2: Triggering web search for factcheck")
+                try:
+                    # Ищем по ключевым словам из описания
+                    search_results = await _execute_web_search(combined_text[:200])
+                    logger.info(f"Vision Step 2: Got search results ({len(search_results)} chars)")
+                except Exception as e:
+                    logger.warning(f"Vision Step 2: Web search failed: {e}")
+            
             # Формируем промпт с описанием и вопросом пользователя
             query_part = f"Вопрос пользователя: {user_query}" if user_query else "Пользователь просто прислал картинку без вопроса."
             
@@ -271,6 +294,10 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 description=description,
                 user_query=query_part
             )
+            
+            # Добавляем результаты поиска если есть
+            if search_results:
+                user_prompt += f"\n\nАКТУАЛЬНАЯ ИНФА ИЗ ИНТЕРНЕТА (используй для фактчекинга):\n{search_results}"
             
             payload = {
                 "model": settings.ollama_base_model,

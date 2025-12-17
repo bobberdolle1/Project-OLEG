@@ -86,8 +86,9 @@ async def handle_voice_message(msg: Message):
             await msg.reply(f"🎤 <i>{text}</i>", parse_mode="HTML")
             
     except TelegramBadRequest as e:
-        if "message to be replied not found" in str(e).lower() or "message to reply not found" in str(e).lower():
-            logger.warning(f"Voice message was deleted before reply: {e}")
+        error_msg = str(e).lower()
+        if "message to be replied not found" in error_msg or "message to reply not found" in error_msg or "thread not found" in error_msg:
+            logger.warning(f"Voice message: cannot reply - topic/message deleted: {e}")
             return
         logger.error(f"Voice message handling failed: {e}")
     except Exception as e:
@@ -197,8 +198,9 @@ async def handle_video_note(msg: Message):
         await msg.reply(" ".join(reply_parts), parse_mode="HTML")
             
     except TelegramBadRequest as e:
-        if "message to be replied not found" in str(e).lower() or "message to reply not found" in str(e).lower():
-            logger.warning(f"Video note was deleted before reply: {e}")
+        error_msg = str(e).lower()
+        if "message to be replied not found" in error_msg or "message to reply not found" in error_msg or "thread not found" in error_msg:
+            logger.warning(f"Video note: cannot reply - topic/message deleted: {e}")
             return
         logger.error(f"Video note handling failed: {e}")
     except Exception as e:

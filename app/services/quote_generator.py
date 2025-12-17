@@ -1,13 +1,12 @@
 """
 Quote Generator Service for OLEG v6.0 Fortress Update.
 
-Provides enhanced quote rendering with gradient backgrounds, themes,
-quote chains, and roast mode with LLM comments.
-
+Telegram-style message bubbles with high quality rendering.
 Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 """
 
 import logging
+import random
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -38,7 +37,7 @@ class QuoteStyle:
 class QuoteImage:
     """Result of quote rendering."""
     image_data: bytes
-    format: str  # webp
+    format: str
     width: int
     height: int
 
@@ -52,43 +51,40 @@ class MessageData:
     timestamp: Optional[str] = None
 
 
-# Gradient presets for different themes - более яркие и красивые
-GRADIENT_PRESETS = {
-    "dark": [
-        ("#1a1a2e", "#16213e"),  # Deep blue
-        ("#2d1b4e", "#1a1a3e"),  # Purple night
-        ("#1e3a5f", "#0d1b2a"),  # Ocean deep
-        ("#2c3e50", "#1a252f"),  # Slate
-        ("#1f1c2c", "#928dab"),  # Cosmic purple (diagonal feel)
-        ("#0f2027", "#203a43"),  # Dark teal
-        ("#232526", "#414345"),  # Subtle gray
-        ("#000428", "#004e92"),  # Deep space blue
+# Telegram-style colors
+TELEGRAM_COLORS = {
+    "bubble_dark": (33, 33, 33),           # Dark bubble background
+    "bubble_light": (239, 255, 219),       # Light green bubble (outgoing)
+    "bubble_incoming": (255, 255, 255),    # White bubble (incoming)
+    "background_dark": (17, 17, 17),       # Dark mode background
+    "background_light": (230, 235, 240),   # Light mode background
+    "text_dark": (255, 255, 255),          # White text
+    "text_light": (0, 0, 0),               # Black text
+    "username_colors": [                    # Telegram username colors
+        (220, 79, 79),    # Red
+        (245, 166, 35),   # Orange
+        (142, 85, 233),   # Purple
+        (78, 167, 46),    # Green
+        (66, 133, 244),   # Blue
+        (233, 30, 99),    # Pink
+        (0, 188, 212),    # Cyan
+        (255, 152, 0),    # Amber
     ],
-    "light": [
-        ("#f5f5f5", "#e0e0e0"),  # Light gray
-        ("#fff5e6", "#ffe4c4"),  # Warm cream
-        ("#e8f4f8", "#d4e9ed"),  # Light blue
-        ("#f0fff0", "#e0ffe0"),  # Mint
-        ("#fff0f5", "#ffe4e9"),  # Light pink
-    ],
+    "time_dark": (170, 170, 170),          # Gray time text
+    "time_light": (100, 100, 100),
+    "reply_line": (88, 101, 242),          # Blue reply line
 }
 
-# Maximum dimensions for Telegram stickers
-MAX_STICKER_SIZE = 512
+# Increased size for better quality
+MAX_IMAGE_WIDTH = 800
+MAX_IMAGE_HEIGHT = 1200
 MAX_CHAIN_MESSAGES = 10
 
 
 class QuoteGeneratorService:
     """
-    Service for generating quote images.
-    
-    Supports:
-    - Single message quotes with gradient backgrounds
-    - Quote chains (up to 10 messages)
-    - Roast mode with LLM-generated comments
-    - WebP output optimized for Telegram stickers
-    
-    Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
+    Service for generating Telegram-style quote images.
+    High quality rendering with message bubbles.
     """
     
     def __init__(self):
@@ -97,36 +93,25 @@ class QuoteGeneratorService:
     
     def _load_fonts(self):
         """Load fonts for rendering with Unicode/Cyrillic support."""
-        # Font search paths - prioritize project fonts, then system fonts
         font_search_paths = [
-            # Project fonts directory
             "fonts/",
-            # Linux common paths
             "/usr/share/fonts/truetype/dejavu/",
             "/usr/share/fonts/TTF/",
-            # macOS paths
             "/Library/Fonts/",
             "/System/Library/Fonts/",
-            # Windows paths
             "C:/Windows/Fonts/",
         ]
         
-        # Font candidates with Unicode/Cyrillic support
         font_candidates = [
             ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf"),
             ("Arial Unicode.ttf", "Arial Unicode.ttf", "Arial Unicode.ttf"),
-            ("Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf"),
             ("NotoSans-Regular.ttf", "NotoSans-Bold.ttf", "NotoSans-Italic.ttf"),
-            ("FreeSans.ttf", "FreeSansBold.ttf", "FreeSansOblique.ttf"),
         ]
         
         def find_font(font_name: str) -> Optional[str]:
-            """Try to find font in search paths."""
             import os
-            # Try direct path first
             if os.path.exists(font_name):
                 return font_name
-            # Search in paths
             for path in font_search_paths:
                 full_path = os.path.join(path, font_name)
                 if os.path.exists(full_path):
@@ -141,10 +126,12 @@ class QuoteGeneratorService:
             
             if regular_path:
                 try:
-                    self.text_font = ImageFont.truetype(regular_path, 18)
-                    self.username_font = ImageFont.truetype(bold_path or regular_path, 14)
-                    self.comment_font = ImageFont.truetype(italic_path or regular_path, 16)
-                    self.timestamp_font = ImageFont.truetype(regular_path, 10)
+                    # Larger fonts for better quality
+                    self.text_font = ImageFont.truetype(regular_path, 28)
+                    self.text_font_small = ImageFont.truetype(regular_path, 22)
+                    self.username_font = ImageFont.truetype(bold_path or regular_path, 26)
+                    self.time_font = ImageFont.truetype(regular_path, 18)
+                    self.comment_font = ImageFont.truetype(italic_path or regular_path, 24)
                     logger.info(f"Loaded fonts from: {regular_path}")
                     fonts_loaded = True
                     break
@@ -153,63 +140,18 @@ class QuoteGeneratorService:
                     continue
         
         if not fonts_loaded:
-            logger.warning("No Unicode fonts found, using default (may not support Cyrillic)")
+            logger.warning("No Unicode fonts found, using default")
             self.text_font = ImageFont.load_default()
+            self.text_font_small = ImageFont.load_default()
             self.username_font = ImageFont.load_default()
+            self.time_font = ImageFont.load_default()
             self.comment_font = ImageFont.load_default()
-            self.timestamp_font = ImageFont.load_default()
 
-    def _get_gradient_colors(self, style: QuoteStyle) -> Tuple[str, str]:
-        """Get gradient colors based on style."""
-        if style.gradient:
-            return style.gradient
-        
-        import random
-        theme_key = "dark" if style.theme in (QuoteTheme.DARK, QuoteTheme.AUTO) else "light"
-        return random.choice(GRADIENT_PRESETS[theme_key])
-    
-    def _create_gradient_background(
-        self, 
-        width: int, 
-        height: int, 
-        color1: str, 
-        color2: str
-    ) -> Image.Image:
-        """Create a gradient background image."""
-        # Parse hex colors
-        r1, g1, b1 = self._hex_to_rgb(color1)
-        r2, g2, b2 = self._hex_to_rgb(color2)
-        
-        # Create gradient
-        img = Image.new('RGB', (width, height))
-        pixels = img.load()
-        
-        for y in range(height):
-            ratio = y / height
-            r = int(r1 + (r2 - r1) * ratio)
-            g = int(g1 + (g2 - g1) * ratio)
-            b = int(b1 + (b2 - b1) * ratio)
-            for x in range(width):
-                pixels[x, y] = (r, g, b)
-        
-        return img
-    
-    def _hex_to_rgb(self, hex_color: str) -> Tuple[int, int, int]:
-        """Convert hex color to RGB tuple."""
-        hex_color = hex_color.lstrip('#')
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    
-    def _get_text_color(self, style: QuoteStyle) -> Tuple[int, int, int]:
-        """Get text color based on theme."""
-        if style.theme == QuoteTheme.LIGHT:
-            return (33, 33, 33)  # Dark gray for light theme
-        return (255, 255, 255)  # White for dark theme
-    
-    def _get_secondary_color(self, style: QuoteStyle) -> Tuple[int, int, int]:
-        """Get secondary text color based on theme."""
-        if style.theme == QuoteTheme.LIGHT:
-            return (100, 100, 100)  # Gray for light theme
-        return (180, 180, 180)  # Light gray for dark theme
+    def _get_username_color(self, username: str) -> Tuple[int, int, int]:
+        """Get consistent color for username based on hash."""
+        import hashlib
+        hash_val = int(hashlib.md5(username.encode()).hexdigest()[:8], 16)
+        return TELEGRAM_COLORS["username_colors"][hash_val % len(TELEGRAM_COLORS["username_colors"])]
     
     def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
         """Wrap text to fit within max_width."""
@@ -223,67 +165,110 @@ class QuoteGeneratorService:
                 bbox = font.getbbox(test_line)
                 width = bbox[2] - bbox[0]
             except AttributeError:
-                # Fallback for older PIL versions
-                width = font.getlength(test_line) if hasattr(font, 'getlength') else len(test_line) * 8
+                width = len(test_line) * 12
             
             if width <= max_width:
                 current_line.append(word)
             else:
                 if current_line:
                     lines.append(' '.join(current_line))
-                current_line = [word]
+                # Handle very long words
+                if font.getbbox(word)[2] - font.getbbox(word)[0] > max_width:
+                    # Split long word
+                    while word:
+                        for i in range(len(word), 0, -1):
+                            part = word[:i]
+                            if font.getbbox(part)[2] - font.getbbox(part)[0] <= max_width:
+                                lines.append(part)
+                                word = word[i:]
+                                break
+                        else:
+                            lines.append(word[:1])
+                            word = word[1:]
+                    current_line = []
+                else:
+                    current_line = [word]
         
         if current_line:
             lines.append(' '.join(current_line))
         
         return lines if lines else ['']
     
-    def _calculate_text_height(self, lines: List[str], font: ImageFont.FreeTypeFont, line_spacing: int = 4) -> int:
-        """Calculate total height needed for wrapped text."""
+    def _get_text_height(self, lines: List[str], font: ImageFont.FreeTypeFont, spacing: int = 6) -> int:
+        """Calculate total height for text lines."""
         if not lines:
             return 0
-        
         try:
-            bbox = font.getbbox("Ay")
+            bbox = font.getbbox("Ayg")
             line_height = bbox[3] - bbox[1]
         except AttributeError:
-            line_height = 20  # Fallback
-        
-        return len(lines) * line_height + (len(lines) - 1) * line_spacing
+            line_height = 28
+        return len(lines) * line_height + (len(lines) - 1) * spacing
     
-    def _draw_avatar(self, draw: ImageDraw.Draw, x: int, y: int, size: int, username: str, style: QuoteStyle):
-        """Draw a placeholder avatar circle with initial."""
-        # Generate color from username hash
-        import hashlib
-        hash_val = int(hashlib.md5(username.encode()).hexdigest()[:6], 16)
-        hue = hash_val % 360
+    def _draw_rounded_rect_filled(
+        self, 
+        draw: ImageDraw.Draw, 
+        coords: Tuple[int, int, int, int],
+        radius: int, 
+        fill: Tuple[int, int, int]
+    ):
+        """Draw a filled rounded rectangle."""
+        x1, y1, x2, y2 = coords
         
-        # Convert HSL to RGB (simplified)
-        r = int(128 + 64 * ((hash_val >> 16) % 2))
-        g = int(128 + 64 * ((hash_val >> 8) % 2))
-        b = int(128 + 64 * (hash_val % 2))
+        # Draw main rectangles
+        draw.rectangle([x1 + radius, y1, x2 - radius, y2], fill=fill)
+        draw.rectangle([x1, y1 + radius, x2, y2 - radius], fill=fill)
         
-        # Draw circle
-        draw.ellipse([x, y, x + size, y + size], fill=(r, g, b))
+        # Draw corners
+        draw.ellipse([x1, y1, x1 + radius * 2, y1 + radius * 2], fill=fill)
+        draw.ellipse([x2 - radius * 2, y1, x2, y1 + radius * 2], fill=fill)
+        draw.ellipse([x1, y2 - radius * 2, x1 + radius * 2, y2], fill=fill)
+        draw.ellipse([x2 - radius * 2, y2 - radius * 2, x2, y2], fill=fill)
+    
+    def _draw_bubble_tail(self, draw: ImageDraw.Draw, x: int, y: int, fill: Tuple[int, int, int], left: bool = True):
+        """Draw message bubble tail."""
+        if left:
+            points = [(x, y), (x - 12, y + 8), (x, y + 16)]
+        else:
+            points = [(x, y), (x + 12, y + 8), (x, y + 16)]
+        draw.polygon(points, fill=fill)
+
+    def _draw_avatar(self, img: Image.Image, x: int, y: int, size: int, username: str, avatar_data: Optional[bytes] = None):
+        """Draw avatar - real or placeholder."""
+        if avatar_data:
+            try:
+                avatar_img = Image.open(BytesIO(avatar_data))
+                avatar_img = avatar_img.convert('RGBA')
+                avatar_img = avatar_img.resize((size, size), Image.Resampling.LANCZOS)
+                
+                # Create circular mask
+                mask = Image.new('L', (size, size), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.ellipse([0, 0, size, size], fill=255)
+                avatar_img.putalpha(mask)
+                
+                img.paste(avatar_img, (x, y), avatar_img)
+                return
+            except Exception as e:
+                logger.debug(f"Failed to load avatar: {e}")
+        
+        # Draw placeholder
+        draw = ImageDraw.Draw(img)
+        color = self._get_username_color(username)
+        draw.ellipse([x, y, x + size, y + size], fill=color)
         
         # Draw initial
         initial = username[0].upper() if username else "?"
-        text_color = (255, 255, 255)
-        
-        # Use already loaded font instead of hardcoded path
-        initial_font = self.username_font
-        
         try:
-            bbox = initial_font.getbbox(initial)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-        except AttributeError:
-            text_width = size // 3
-            text_height = size // 3
+            bbox = self.username_font.getbbox(initial)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+        except:
+            text_w, text_h = size // 3, size // 3
         
-        text_x = x + (size - text_width) // 2
-        text_y = y + (size - text_height) // 2 - 2
-        draw.text((text_x, text_y), initial, font=initial_font, fill=text_color)
+        text_x = x + (size - text_w) // 2
+        text_y = y + (size - text_h) // 2 - 4
+        draw.text((text_x, text_y), initial, font=self.username_font, fill=(255, 255, 255))
 
     async def render_quote(
         self,
@@ -297,136 +282,116 @@ class QuoteGeneratorService:
         full_name: Optional[str] = None,
     ) -> QuoteImage:
         """
-        Render a single message quote with gradient background.
-        
-        Args:
-            text: The quote text
-            username: Username of the message author
-            avatar_url: Optional URL to user's avatar (deprecated, use avatar_data)
-            style: Quote style configuration
-            timestamp: Optional timestamp string
-            avatar_data: Avatar image bytes
-            custom_title: Custom title in group
-            full_name: Full name of user
-        
-        Returns:
-            QuoteImage with rendered image data
+        Render a Telegram-style message bubble quote.
         """
         if style is None:
             style = QuoteStyle()
         
-        # Configuration - увеличиваем размер для лучшего качества
-        padding = 28
-        avatar_size = 56
-        max_text_width = MAX_STICKER_SIZE - padding * 2 - 20
+        is_dark = style.theme != QuoteTheme.LIGHT
         
-        # Wrap text
+        # Colors
+        bg_color = TELEGRAM_COLORS["background_dark"] if is_dark else TELEGRAM_COLORS["background_light"]
+        bubble_color = TELEGRAM_COLORS["bubble_dark"] if is_dark else TELEGRAM_COLORS["bubble_incoming"]
+        text_color = TELEGRAM_COLORS["text_dark"] if is_dark else TELEGRAM_COLORS["text_light"]
+        time_color = TELEGRAM_COLORS["time_dark"] if is_dark else TELEGRAM_COLORS["time_light"]
+        username_color = self._get_username_color(username)
+        
+        # Layout constants
+        padding = 30
+        avatar_size = 64
+        bubble_padding = 20
+        bubble_radius = 18
+        max_bubble_width = MAX_IMAGE_WIDTH - padding * 2 - avatar_size - 30
+        max_text_width = max_bubble_width - bubble_padding * 2
+        
+        # Calculate text dimensions
         lines = self._wrap_text(text, self.text_font, max_text_width)
-        text_height = self._calculate_text_height(lines, self.text_font)
+        text_height = self._get_text_height(lines, self.text_font)
         
-        # Calculate image dimensions
-        title_height = 18 if custom_title else 0
-        content_height = avatar_size + 15 + text_height + 30 + title_height
-        height = min(MAX_STICKER_SIZE, padding * 2 + content_height)
-        width = MAX_STICKER_SIZE
+        # Calculate bubble dimensions
+        display_name = full_name or username or "Anonymous"
+        try:
+            name_width = self.username_font.getbbox(display_name)[2]
+            name_height = self.username_font.getbbox(display_name)[3]
+        except:
+            name_width, name_height = len(display_name) * 14, 26
         
-        # Create gradient background
-        color1, color2 = self._get_gradient_colors(style)
-        img = self._create_gradient_background(width, height, color1, color2)
+        # Time text
+        time_text = timestamp or "12:00"
+        try:
+            time_width = self.time_font.getbbox(time_text)[2]
+        except:
+            time_width = len(time_text) * 10
+        
+        # Calculate actual text width
+        max_line_width = 0
+        for line in lines:
+            try:
+                line_width = self.text_font.getbbox(line)[2]
+            except:
+                line_width = len(line) * 14
+            max_line_width = max(max_line_width, line_width)
+        
+        bubble_content_width = max(name_width, max_line_width, 200)
+        bubble_width = min(bubble_content_width + bubble_padding * 2, max_bubble_width)
+        bubble_height = name_height + 10 + text_height + 10 + 24  # name + gap + text + gap + time
+        
+        # Image dimensions
+        img_width = min(MAX_IMAGE_WIDTH, padding * 2 + avatar_size + 20 + bubble_width + 20)
+        img_height = min(MAX_IMAGE_HEIGHT, padding * 2 + max(avatar_size, bubble_height))
+        
+        # Create image
+        img = Image.new('RGB', (img_width, img_height), bg_color)
         draw = ImageDraw.Draw(img)
         
-        # Draw decorative quote mark "
-        quote_color = (88, 101, 242, 80) if style.theme != QuoteTheme.LIGHT else (66, 133, 244, 80)
-        # Draw rounded rectangle border
-        border_color = (88, 101, 242) if style.theme != QuoteTheme.LIGHT else (66, 133, 244)
-        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 14, border_color)
+        # Draw avatar
+        avatar_x = padding
+        avatar_y = padding
+        self._draw_avatar(img, avatar_x, avatar_y, avatar_size, username, avatar_data)
         
-        # Draw avatar at top - реальная аватарка или placeholder
-        avatar_x = padding + 8
-        avatar_y = padding + 8
-        if avatar_data:
-            self._draw_real_avatar(img, avatar_x, avatar_y, avatar_size, avatar_data)
-        else:
-            self._draw_avatar(draw, avatar_x, avatar_y, avatar_size, username, style)
+        # Draw bubble
+        bubble_x = avatar_x + avatar_size + 16
+        bubble_y = padding
         
-        # Draw username and full name next to avatar
-        text_color = self._get_text_color(style)
-        secondary_color = self._get_secondary_color(style)
-        
-        # Full name (bold)
-        display_name = full_name or username or "Anonymous"
-        draw.text(
-            (avatar_x + avatar_size + 14, avatar_y + 4),
-            display_name,
-            font=self.username_font,
-            fill=text_color
+        self._draw_rounded_rect_filled(
+            draw,
+            (bubble_x, bubble_y, bubble_x + bubble_width, bubble_y + bubble_height),
+            bubble_radius,
+            bubble_color
         )
         
-        # Username (@) and custom title
-        info_y = avatar_y + 22
-        if username:
-            username_display = f"@{username}" if not username.startswith("@") else username
-            draw.text(
-                (avatar_x + avatar_size + 14, info_y),
-                username_display,
-                font=self.timestamp_font,
-                fill=secondary_color
-            )
+        # Draw bubble tail
+        self._draw_bubble_tail(draw, bubble_x, bubble_y + 20, bubble_color, left=True)
         
-        # Custom title (if exists)
+        # Draw username
+        name_x = bubble_x + bubble_padding
+        name_y = bubble_y + bubble_padding - 5
+        draw.text((name_x, name_y), display_name, font=self.username_font, fill=username_color)
+        
+        # Draw custom title if exists
         if custom_title:
-            title_x = avatar_x + avatar_size + 14
-            if username:
-                # Рисуем после username
-                try:
-                    username_width = self.timestamp_font.getbbox(f"@{username}")[2]
-                except AttributeError:
-                    username_width = len(username) * 6
-                title_x += username_width + 10
-            draw.text(
-                (title_x, info_y),
-                f"• {custom_title}",
-                font=self.timestamp_font,
-                fill=(136, 153, 166)  # Серый цвет для титула
-            )
+            title_x = name_x + name_width + 10
+            draw.text((title_x, name_y + 4), f"• {custom_title}", font=self.time_font, fill=time_color)
         
-        # Timestamp
-        if timestamp:
-            draw.text(
-                (avatar_x + avatar_size + 14, info_y + 14),
-                timestamp,
-                font=self.timestamp_font,
-                fill=secondary_color
-            )
-        
-        # Draw message text below avatar with left quote line
-        text_start_y = avatar_y + avatar_size + 18
-        text_x = padding + 18
-        
-        # Draw vertical quote line
-        draw.line(
-            [(padding + 6, text_start_y), (padding + 6, text_start_y + text_height)],
-            fill=border_color,
-            width=4
-        )
+        # Draw text
+        text_x = bubble_x + bubble_padding
+        text_y = name_y + name_height + 8
         
         try:
-            bbox = self.text_font.getbbox("Ay")
-            line_height = bbox[3] - bbox[1] + 6
-        except AttributeError:
-            line_height = 24
+            line_height = self.text_font.getbbox("Ayg")[3] + 6
+        except:
+            line_height = 34
         
-        text_y = text_start_y
         for line in lines:
-            draw.text(
-                (text_x, text_y),
-                line,
-                font=self.text_font,
-                fill=text_color
-            )
+            draw.text((text_x, text_y), line, font=self.text_font, fill=text_color)
             text_y += line_height
         
-        # Convert to WebP with high quality
+        # Draw time
+        time_x = bubble_x + bubble_width - bubble_padding - time_width
+        time_y = bubble_y + bubble_height - 28
+        draw.text((time_x, time_y), time_text, font=self.time_font, fill=time_color)
+        
+        # Save as high quality WebP
         output = BytesIO()
         img.save(output, format='WEBP', quality=95, method=6)
         output.seek(0)
@@ -434,52 +399,9 @@ class QuoteGeneratorService:
         return QuoteImage(
             image_data=output.getvalue(),
             format='webp',
-            width=width,
-            height=height
+            width=img_width,
+            height=img_height
         )
-    
-    def _draw_real_avatar(self, img: Image.Image, x: int, y: int, size: int, avatar_data: bytes):
-        """Draw real avatar from bytes with circular mask."""
-        try:
-            avatar_img = Image.open(BytesIO(avatar_data))
-            avatar_img = avatar_img.convert('RGBA')
-            avatar_img = avatar_img.resize((size, size), Image.Resampling.LANCZOS)
-            
-            # Create circular mask
-            mask = Image.new('L', (size, size), 0)
-            mask_draw = ImageDraw.Draw(mask)
-            mask_draw.ellipse([0, 0, size, size], fill=255)
-            
-            # Apply mask
-            avatar_img.putalpha(mask)
-            
-            # Paste onto main image
-            img.paste(avatar_img, (x, y), avatar_img)
-        except Exception as e:
-            logger.warning(f"Failed to draw real avatar: {e}")
-    
-    def _draw_rounded_rect(
-        self, 
-        draw: ImageDraw.Draw, 
-        x1: int, 
-        y1: int, 
-        x2: int, 
-        y2: int, 
-        radius: int, 
-        color: Tuple[int, int, int]
-    ):
-        """Draw a rounded rectangle outline."""
-        # Draw lines
-        draw.line([(x1 + radius, y1), (x2 - radius, y1)], fill=color, width=2)
-        draw.line([(x1 + radius, y2), (x2 - radius, y2)], fill=color, width=2)
-        draw.line([(x1, y1 + radius), (x1, y2 - radius)], fill=color, width=2)
-        draw.line([(x2, y1 + radius), (x2, y2 - radius)], fill=color, width=2)
-        
-        # Draw corners
-        draw.arc([x1, y1, x1 + radius * 2, y1 + radius * 2], 180, 270, fill=color, width=2)
-        draw.arc([x2 - radius * 2, y1, x2, y1 + radius * 2], 270, 360, fill=color, width=2)
-        draw.arc([x1, y2 - radius * 2, x1 + radius * 2, y2], 90, 180, fill=color, width=2)
-        draw.arc([x2 - radius * 2, y2 - radius * 2, x2, y2], 0, 90, fill=color, width=2)
 
     async def render_quote_chain(
         self,
@@ -487,114 +409,137 @@ class QuoteGeneratorService:
         style: Optional[QuoteStyle] = None
     ) -> QuoteImage:
         """
-        Render a chain of messages as a single quote image.
-        
-        Requirements: 7.3, 7.5
-        Property 17: Quote chain limit - max 10 messages
-        
-        Args:
-            messages: List of MessageData objects (max 10)
-            style: Quote style configuration
-        
-        Returns:
-            QuoteImage with rendered image data
+        Render a chain of Telegram-style message bubbles.
         """
         if style is None:
             style = QuoteStyle()
         
-        # Enforce maximum chain limit (Property 17)
         if len(messages) > MAX_CHAIN_MESSAGES:
             messages = messages[:MAX_CHAIN_MESSAGES]
         
         if not messages:
-            # Return empty quote if no messages
             return await self.render_quote("(empty)", "System", style=style)
         
-        # Configuration
-        padding = 15
-        avatar_size = 32
-        message_spacing = 10
-        max_text_width = MAX_STICKER_SIZE - padding * 2 - avatar_size - 15
+        is_dark = style.theme != QuoteTheme.LIGHT
         
-        # Calculate total height needed
+        # Colors
+        bg_color = TELEGRAM_COLORS["background_dark"] if is_dark else TELEGRAM_COLORS["background_light"]
+        bubble_color = TELEGRAM_COLORS["bubble_dark"] if is_dark else TELEGRAM_COLORS["bubble_incoming"]
+        text_color = TELEGRAM_COLORS["text_dark"] if is_dark else TELEGRAM_COLORS["text_light"]
+        time_color = TELEGRAM_COLORS["time_dark"] if is_dark else TELEGRAM_COLORS["time_light"]
+        
+        # Layout
+        padding = 25
+        avatar_size = 48
+        bubble_padding = 16
+        bubble_radius = 14
+        message_gap = 12
+        max_bubble_width = MAX_IMAGE_WIDTH - padding * 2 - avatar_size - 30
+        max_text_width = max_bubble_width - bubble_padding * 2
+        
+        # Calculate dimensions for each message
+        message_data = []
         total_height = padding * 2
-        message_heights = []
         
         for msg in messages:
-            lines = self._wrap_text(msg.text, self.text_font, max_text_width)
-            text_height = self._calculate_text_height(lines, self.text_font)
-            msg_height = max(avatar_size, text_height + 20)  # 20 for username
-            message_heights.append((msg_height, lines))
-            total_height += msg_height + message_spacing
+            lines = self._wrap_text(msg.text, self.text_font_small, max_text_width)
+            text_height = self._get_text_height(lines, self.text_font_small, spacing=4)
+            
+            try:
+                name_height = self.username_font.getbbox(msg.username)[3]
+            except:
+                name_height = 24
+            
+            bubble_height = name_height + 6 + text_height + 6 + 20
+            message_data.append({
+                'msg': msg,
+                'lines': lines,
+                'bubble_height': bubble_height,
+                'text_height': text_height,
+                'name_height': name_height,
+            })
+            total_height += bubble_height + message_gap
         
-        total_height -= message_spacing  # Remove last spacing
+        total_height -= message_gap
         
-        # Ensure we don't exceed max size (Property 18)
-        height = min(MAX_STICKER_SIZE, total_height)
-        width = MAX_STICKER_SIZE
+        # Image dimensions
+        img_width = MAX_IMAGE_WIDTH
+        img_height = min(MAX_IMAGE_HEIGHT, total_height)
         
-        # Create gradient background
-        color1, color2 = self._get_gradient_colors(style)
-        img = self._create_gradient_background(width, height, color1, color2)
+        # Create image
+        img = Image.new('RGB', (img_width, img_height), bg_color)
         draw = ImageDraw.Draw(img)
         
-        # Draw border
-        border_color = (88, 101, 242) if style.theme != QuoteTheme.LIGHT else (66, 133, 244)
-        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 10, border_color)
-        
-        # Draw each message
-        text_color = self._get_text_color(style)
         current_y = padding
         
-        try:
-            bbox = self.text_font.getbbox("Ay")
-            line_height = bbox[3] - bbox[1] + 4
-        except AttributeError:
-            line_height = 22
-        
-        for i, msg in enumerate(messages):
-            if current_y >= height - padding:
-                break  # Stop if we've run out of space
+        for data in message_data:
+            if current_y >= img_height - padding:
+                break
             
-            msg_height, lines = message_heights[i]
+            msg = data['msg']
+            lines = data['lines']
+            bubble_height = data['bubble_height']
+            name_height = data['name_height']
+            
+            username_color = self._get_username_color(msg.username)
             
             # Draw avatar
-            self._draw_avatar(draw, padding, current_y, avatar_size, msg.username, style)
+            avatar_x = padding
+            self._draw_avatar(img, avatar_x, current_y, avatar_size, msg.username)
             
-            # Draw username
-            username_display = f"@{msg.username}" if msg.username and not msg.username.startswith("@") else msg.username or "Anonymous"
-            draw.text(
-                (padding + avatar_size + 8, current_y),
-                username_display,
-                font=self.username_font,
-                fill=text_color
+            # Draw bubble
+            bubble_x = avatar_x + avatar_size + 12
+            bubble_width = max_bubble_width
+            
+            self._draw_rounded_rect_filled(
+                draw,
+                (bubble_x, current_y, bubble_x + bubble_width, current_y + bubble_height),
+                bubble_radius,
+                bubble_color
             )
             
-            # Draw message text
-            text_y = current_y + 18
+            # Draw username
+            name_x = bubble_x + bubble_padding
+            name_y = current_y + bubble_padding - 4
+            draw.text((name_x, name_y), msg.username, font=self.username_font, fill=username_color)
+            
+            # Draw text
+            text_x = bubble_x + bubble_padding
+            text_y = name_y + name_height + 4
+            
+            try:
+                line_height = self.text_font_small.getbbox("Ayg")[3] + 4
+            except:
+                line_height = 26
+            
             for line in lines:
-                if text_y >= height - padding:
+                if text_y >= img_height - padding:
                     break
-                draw.text(
-                    (padding + avatar_size + 8, text_y),
-                    line,
-                    font=self.text_font,
-                    fill=text_color
-                )
+                draw.text((text_x, text_y), line, font=self.text_font_small, fill=text_color)
                 text_y += line_height
             
-            current_y += msg_height + message_spacing
+            # Draw time
+            time_text = msg.timestamp or "12:00"
+            try:
+                time_width = self.time_font.getbbox(time_text)[2]
+            except:
+                time_width = 40
+            time_x = bubble_x + bubble_width - bubble_padding - time_width
+            time_y = current_y + bubble_height - 22
+            draw.text((time_x, time_y), time_text, font=self.time_font, fill=time_color)
+            
+            current_y += bubble_height + message_gap
         
-        # Convert to WebP
+        # Save
         output = BytesIO()
-        img.save(output, format='WEBP', quality=90)
+        img.save(output, format='WEBP', quality=95, method=6)
         output.seek(0)
         
         return QuoteImage(
             image_data=output.getvalue(),
             format='webp',
-            width=width,
-            height=height
+            width=img_width,
+            height=img_height
         )
 
     async def render_roast_quote(
@@ -605,18 +550,7 @@ class QuoteGeneratorService:
         style: Optional[QuoteStyle] = None
     ) -> QuoteImage:
         """
-        Render a quote with an LLM-generated roast comment from Oleg.
-        
-        Requirements: 7.4, 7.5
-        
-        Args:
-            text: The quote text
-            username: Username of the message author
-            avatar_url: Optional URL to user's avatar
-            style: Quote style configuration
-        
-        Returns:
-            QuoteImage with rendered image data including roast comment
+        Render a quote with Oleg's roast comment - two message bubbles.
         """
         if style is None:
             style = QuoteStyle()
@@ -624,155 +558,154 @@ class QuoteGeneratorService:
         # Generate roast comment
         comment = await self.generate_roast_comment(text)
         
-        # Configuration
-        padding = 15
-        avatar_size = 36
-        max_text_width = MAX_STICKER_SIZE - padding * 2 - avatar_size - 15
-        divider_height = 2
+        is_dark = style.theme != QuoteTheme.LIGHT
         
-        # Calculate heights
-        quote_lines = self._wrap_text(text, self.text_font, max_text_width)
-        quote_text_height = self._calculate_text_height(quote_lines, self.text_font)
-        quote_section_height = max(avatar_size, quote_text_height + 20)
+        # Colors
+        bg_color = TELEGRAM_COLORS["background_dark"] if is_dark else TELEGRAM_COLORS["background_light"]
+        bubble_color = TELEGRAM_COLORS["bubble_dark"] if is_dark else TELEGRAM_COLORS["bubble_incoming"]
+        oleg_bubble_color = (45, 45, 45) if is_dark else (255, 243, 224)  # Slightly different for Oleg
+        text_color = TELEGRAM_COLORS["text_dark"] if is_dark else TELEGRAM_COLORS["text_light"]
+        time_color = TELEGRAM_COLORS["time_dark"] if is_dark else TELEGRAM_COLORS["time_light"]
+        oleg_color = (255, 193, 7)  # Gold for Oleg
         
-        comment_lines = self._wrap_text(comment, self.comment_font, max_text_width)
-        comment_text_height = self._calculate_text_height(comment_lines, self.comment_font)
-        comment_section_height = max(avatar_size, comment_text_height + 20)
+        # Layout
+        padding = 25
+        avatar_size = 56
+        bubble_padding = 18
+        bubble_radius = 16
+        message_gap = 16
+        max_bubble_width = MAX_IMAGE_WIDTH - padding * 2 - avatar_size - 30
+        max_text_width = max_bubble_width - bubble_padding * 2
         
-        total_height = padding * 2 + quote_section_height + divider_height + 10 + comment_section_height
+        # Calculate original message dimensions
+        lines1 = self._wrap_text(text, self.text_font, max_text_width)
+        text_height1 = self._get_text_height(lines1, self.text_font)
+        try:
+            name_height = self.username_font.getbbox(username)[3]
+        except:
+            name_height = 26
+        bubble_height1 = name_height + 8 + text_height1 + 8 + 24
         
-        # Ensure we don't exceed max size (Property 18)
-        height = min(MAX_STICKER_SIZE, total_height)
-        width = MAX_STICKER_SIZE
+        # Calculate Oleg's comment dimensions
+        lines2 = self._wrap_text(comment, self.comment_font, max_text_width)
+        text_height2 = self._get_text_height(lines2, self.comment_font)
+        bubble_height2 = name_height + 8 + text_height2 + 8 + 24
         
-        # Create gradient background
-        color1, color2 = self._get_gradient_colors(style)
-        img = self._create_gradient_background(width, height, color1, color2)
+        # Image dimensions
+        img_width = MAX_IMAGE_WIDTH
+        img_height = min(MAX_IMAGE_HEIGHT, padding * 2 + bubble_height1 + message_gap + bubble_height2)
+        
+        # Create image
+        img = Image.new('RGB', (img_width, img_height), bg_color)
         draw = ImageDraw.Draw(img)
         
-        # Draw main border
-        border_color = (88, 101, 242) if style.theme != QuoteTheme.LIGHT else (66, 133, 244)
-        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 10, border_color)
+        username_color = self._get_username_color(username)
         
-        text_color = self._get_text_color(style)
-        
-        # Draw original quote section
+        # Draw first message (original)
         current_y = padding
+        avatar_x = padding
+        self._draw_avatar(img, avatar_x, current_y, avatar_size, username)
         
-        # Draw avatar
-        self._draw_avatar(draw, padding, current_y, avatar_size, username, style)
-        
-        # Draw username
-        username_display = f"@{username}" if username and not username.startswith("@") else username or "Anonymous"
-        draw.text(
-            (padding + avatar_size + 8, current_y),
-            username_display,
-            font=self.username_font,
-            fill=text_color
+        bubble_x = avatar_x + avatar_size + 12
+        self._draw_rounded_rect_filled(
+            draw,
+            (bubble_x, current_y, bubble_x + max_bubble_width, current_y + bubble_height1),
+            bubble_radius,
+            bubble_color
         )
+        self._draw_bubble_tail(draw, bubble_x, current_y + 20, bubble_color, left=True)
         
-        # Draw quote text
+        # Username
+        name_x = bubble_x + bubble_padding
+        name_y = current_y + bubble_padding - 4
+        draw.text((name_x, name_y), username, font=self.username_font, fill=username_color)
+        
+        # Text
+        text_y = name_y + name_height + 6
         try:
-            bbox = self.text_font.getbbox("Ay")
-            line_height = bbox[3] - bbox[1] + 4
-        except AttributeError:
-            line_height = 22
-        
-        text_y = current_y + 18
-        for line in quote_lines:
-            draw.text(
-                (padding + avatar_size + 8, text_y),
-                line,
-                font=self.text_font,
-                fill=text_color
-            )
+            line_height = self.text_font.getbbox("Ayg")[3] + 6
+        except:
+            line_height = 34
+        for line in lines1:
+            draw.text((name_x, text_y), line, font=self.text_font, fill=text_color)
             text_y += line_height
         
-        # Draw divider
-        divider_y = padding + quote_section_height + 5
-        draw.line(
-            [(padding + 10, divider_y), (width - padding - 10, divider_y)],
-            fill=(240, 71, 71),  # Red divider for roast
-            width=divider_height
-        )
-        
-        # Draw Oleg's comment section
-        comment_y = divider_y + 10
-        
-        # Draw Oleg's avatar (special)
-        self._draw_oleg_avatar(draw, padding, comment_y, avatar_size)
-        
-        # Draw "Олег:" label
+        # Time
         draw.text(
-            (padding + avatar_size + 8, comment_y),
-            "Олег:",
-            font=self.username_font,
-            fill=(255, 215, 0)  # Gold color for Oleg
+            (bubble_x + max_bubble_width - bubble_padding - 50, current_y + bubble_height1 - 26),
+            "12:00",
+            font=self.time_font,
+            fill=time_color
         )
         
-        # Draw comment text
+        # Draw Oleg's response
+        current_y += bubble_height1 + message_gap
+        
+        # Oleg avatar (red circle with O)
+        oleg_avatar_x = img_width - padding - avatar_size
+        draw.ellipse(
+            [oleg_avatar_x, current_y, oleg_avatar_x + avatar_size, current_y + avatar_size],
+            fill=(220, 53, 69)
+        )
         try:
-            bbox = self.comment_font.getbbox("Ay")
-            comment_line_height = bbox[3] - bbox[1] + 4
-        except AttributeError:
-            comment_line_height = 20
+            o_bbox = self.username_font.getbbox("O")
+            o_w, o_h = o_bbox[2] - o_bbox[0], o_bbox[3] - o_bbox[1]
+        except:
+            o_w, o_h = 20, 20
+        draw.text(
+            (oleg_avatar_x + (avatar_size - o_w) // 2, current_y + (avatar_size - o_h) // 2 - 4),
+            "O",
+            font=self.username_font,
+            fill=(255, 255, 255)
+        )
         
-        comment_text_y = comment_y + 18
-        for line in comment_lines:
-            if comment_text_y >= height - padding:
-                break
-            draw.text(
-                (padding + avatar_size + 8, comment_text_y),
-                line,
-                font=self.comment_font,
-                fill=(255, 215, 0)  # Gold color for Oleg's comment
-            )
-            comment_text_y += comment_line_height
+        # Oleg's bubble (right side)
+        oleg_bubble_x = oleg_avatar_x - 12 - max_bubble_width
+        self._draw_rounded_rect_filled(
+            draw,
+            (oleg_bubble_x, current_y, oleg_bubble_x + max_bubble_width, current_y + bubble_height2),
+            bubble_radius,
+            oleg_bubble_color
+        )
+        self._draw_bubble_tail(draw, oleg_bubble_x + max_bubble_width, current_y + 20, oleg_bubble_color, left=False)
         
-        # Convert to WebP
+        # Oleg name
+        name_x = oleg_bubble_x + bubble_padding
+        name_y = current_y + bubble_padding - 4
+        draw.text((name_x, name_y), "Олег 🔥", font=self.username_font, fill=oleg_color)
+        
+        # Oleg's comment
+        text_y = name_y + name_height + 6
+        try:
+            line_height = self.comment_font.getbbox("Ayg")[3] + 6
+        except:
+            line_height = 30
+        for line in lines2:
+            draw.text((name_x, text_y), line, font=self.comment_font, fill=oleg_color)
+            text_y += line_height
+        
+        # Time
+        draw.text(
+            (oleg_bubble_x + max_bubble_width - bubble_padding - 50, current_y + bubble_height2 - 26),
+            "12:01",
+            font=self.time_font,
+            fill=time_color
+        )
+        
+        # Save
         output = BytesIO()
-        img.save(output, format='WEBP', quality=90)
+        img.save(output, format='WEBP', quality=95, method=6)
         output.seek(0)
         
         return QuoteImage(
             image_data=output.getvalue(),
             format='webp',
-            width=width,
-            height=height
+            width=img_width,
+            height=img_height
         )
-    
-    def _draw_oleg_avatar(self, draw: ImageDraw.Draw, x: int, y: int, size: int):
-        """Draw Oleg's special avatar."""
-        # Red/orange gradient-like circle for Oleg
-        draw.ellipse([x, y, x + size, y + size], fill=(220, 53, 69))
-        
-        # Use already loaded font instead of hardcoded path
-        initial_font = self.username_font
-        
-        try:
-            bbox = initial_font.getbbox("O")
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-        except AttributeError:
-            text_width = size // 3
-            text_height = size // 3
-        
-        text_x = x + (size - text_width) // 2
-        text_y = y + (size - text_height) // 2 - 2
-        draw.text((text_x, text_y), "O", font=initial_font, fill=(255, 255, 255))
 
     async def generate_roast_comment(self, text: str) -> str:
-        """
-        Generate a roast comment from Oleg using LLM.
-        
-        Requirements: 7.4
-        
-        Args:
-            text: The original quote text to roast
-        
-        Returns:
-            A witty roast comment from Oleg
-        """
+        """Generate a roast comment from Oleg using LLM."""
         try:
             from app.services.ollama_client import _ollama_chat
             
@@ -787,9 +720,7 @@ class QuoteGeneratorService:
             system_prompt = (
                 "Ты - Олег, грубоватый, прямолинейный, матерящийся, "
                 "но полезный бот. Говори коротко, по делу, с иронией и сленгом. "
-                "Можешь ругнуться, но без оскорблений по запрещённым признакам. "
-                "Контекст — чаты про технику, разгон, Steam Deck, железо. "
-                "Помогай чётко, без воды."
+                "Можешь ругнуться, но без оскорблений по запрещённым признакам."
             )
             
             messages = [
@@ -799,107 +730,73 @@ class QuoteGeneratorService:
             
             comment = await _ollama_chat(messages, temperature=0.8)
             
-            # Truncate if too long
-            if len(comment) > 150:
-                comment = comment[:147] + "..."
+            if len(comment) > 200:
+                comment = comment[:197] + "..."
             
             return comment
             
         except Exception as e:
             logger.warning(f"Failed to generate roast comment: {e}")
-            # Fallback comments
-            import random
             fallbacks = [
                 "Ну такое себе, честно говоря.",
                 "Это что вообще было?",
                 "Классика жанра, чё.",
                 "Без комментариев... хотя нет, вот он.",
                 "Ладно, записал в архив кринжа.",
+                "Охуенно сказано, запишу.",
+                "Мудрость веков, блять.",
             ]
             return random.choice(fallbacks)
 
-
-    async def queue_quote_task(
+    async def queue_render_task(
         self,
+        chat_id: int,
         text: str,
         username: str,
-        chat_id: int,
-        reply_to: int,
         avatar_url: Optional[str] = None,
         timestamp: Optional[str] = None,
         theme: str = "dark",
         is_chain: bool = False,
-        messages: Optional[List[MessageData]] = None,
+        messages: Optional[List[dict]] = None,
         is_roast: bool = False,
-    ) -> Optional[str]:
-        """
-        Queue quote rendering task for async processing via Arq worker.
-        
-        **Validates: Requirements 14.2**
-        
-        Args:
-            text: Quote text
-            username: Username of author
-            chat_id: Target chat ID
-            reply_to: Message ID to reply to
-            avatar_url: Optional avatar URL
-            timestamp: Optional timestamp
-            theme: Quote theme (dark/light/auto)
-            is_chain: Whether chain quote
-            messages: Messages for chain quote
-            is_roast: Whether roast mode
-            
-        Returns:
-            Task ID if queued successfully, None otherwise
-        """
+    ):
+        """Queue quote rendering task to worker (if available)."""
         try:
             from app.worker import enqueue_quote_render_task
             from app.config import settings
             
-            # Check if worker is enabled
             if not settings.worker_enabled or not settings.redis_enabled:
                 logger.debug(f"Worker not enabled, quote task not queued for chat {chat_id}")
                 return None
             
-            # Convert MessageData to dicts for serialization
-            messages_dicts = None
-            if messages:
-                messages_dicts = [
+            messages_data = None
+            if is_chain and messages:
+                messages_data = [
                     {
-                        "text": msg.text,
-                        "username": msg.username,
-                        "avatar_url": msg.avatar_url,
-                        "timestamp": msg.timestamp,
+                        "text": m.text if hasattr(m, 'text') else m.get("text", ""),
+                        "username": m.username if hasattr(m, 'username') else m.get("username", ""),
+                        "timestamp": m.timestamp if hasattr(m, 'timestamp') else m.get("timestamp"),
                     }
-                    for msg in messages
+                    for m in messages
                 ]
             
             job = await enqueue_quote_render_task(
                 text=text,
                 username=username,
                 chat_id=chat_id,
-                reply_to=reply_to,
+                reply_to=None,
                 avatar_url=avatar_url,
                 timestamp=timestamp,
                 theme=theme,
                 is_chain=is_chain,
-                messages=messages_dicts,
+                messages=messages_data,
                 is_roast=is_roast,
             )
-            
-            if job is not None:
-                logger.info(f"Quote render task queued for chat {chat_id}: {job.job_id}")
-                return job.job_id
-            
-            return None
-            
-        except ImportError:
-            logger.warning("Arq worker module not available")
-            return None
+            return job
         except Exception as e:
             logger.error(f"Failed to queue quote render task: {e}")
             return None
 
 
-# Singleton instance
+# Global service instance
 quote_generator_service = QuoteGeneratorService()

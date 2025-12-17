@@ -189,6 +189,12 @@ async def cmd_quote(msg: Message):
         await msg.reply("❌ Нужно ответить на сообщение, чтобы сделать из него цитату.")
         return
 
+    # Проверяем, не пытаются ли цитировать сообщение бота
+    reply_user = msg.reply_to_message.from_user
+    if reply_user and reply_user.is_bot:
+        await msg.reply("❌ Нельзя цитировать сообщения ботов.")
+        return
+
     # Получаем текст команды
     command_text = msg.text.split(maxsplit=1)
     param = command_text[1].strip() if len(command_text) > 1 else None
@@ -212,6 +218,53 @@ async def cmd_quote(msg: Message):
         await _generate_single_message_quote(msg)
 
 
+def get_quote_author(original_msg: Message) -> tuple:
+    """
+    Определяет автора сообщения для цитаты.
+    Учитывает пересланные сообщения — берёт оригинального автора.
+    
+    Returns:
+        (user_id, username, full_name, user_for_avatar)
+        user_for_avatar может быть None если это forward_sender_name
+    """
+    # Проверяем, пересланное ли это сообщение
+    if original_msg.forward_from:
+        # Пересланное от пользователя (не скрыт)
+        fwd_user = original_msg.forward_from
+        return (
+            fwd_user.id,
+            fwd_user.username or fwd_user.first_name,
+            fwd_user.full_name,
+            fwd_user
+        )
+    elif original_msg.forward_sender_name:
+        # Пересланное от пользователя со скрытым аккаунтом
+        return (
+            None,  # ID недоступен
+            original_msg.forward_sender_name,
+            original_msg.forward_sender_name,
+            None  # Аватарка недоступна
+        )
+    elif original_msg.forward_from_chat:
+        # Пересланное из канала/группы
+        chat = original_msg.forward_from_chat
+        return (
+            chat.id,
+            chat.username or chat.title,
+            chat.title,
+            None  # Для каналов аватарку не грузим
+        )
+    else:
+        # Обычное сообщение — берём from_user
+        user = original_msg.from_user
+        return (
+            user.id,
+            user.username or user.first_name,
+            user.full_name,
+            user
+        )
+
+
 async def _generate_single_message_quote(msg: Message):
     """
     Генерирует цитату из одного сообщения.
@@ -221,7 +274,9 @@ async def _generate_single_message_quote(msg: Message):
     """
     logger.info(f"[QUOTE] _generate_single_message_quote called for chat {msg.chat.id}")
     original_msg = msg.reply_to_message
-    user = original_msg.from_user
+    
+    # Определяем автора (учитываем пересланные сообщения)
+    user_id, username, full_name, user_for_avatar = get_quote_author(original_msg)
     
     # Извлекаем текст из сообщения
     text = extract_message_text(original_msg)
@@ -230,8 +285,6 @@ async def _generate_single_message_quote(msg: Message):
         await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
         return
     
-    username = user.username or user.first_name
-    full_name = user.full_name
     logger.info(f"[QUOTE] Username: {username}, Full name: {full_name}")
     
     # Get timestamp if available
@@ -247,12 +300,14 @@ async def _generate_single_message_quote(msg: Message):
             msg.chat.id, "quote", msg.bot, message_thread_id=thread_id
         )
         
-        # Загружаем аватарку пользователя
-        avatar_data = await get_user_avatar(msg.bot, user.id)
-        
-        # Получаем кастомный титул в группе
-        user_info = await get_user_info(msg.bot, msg.chat.id, user)
-        custom_title = user_info.get("custom_title")
+        # Загружаем аватарку пользователя (если доступен user)
+        avatar_data = None
+        custom_title = None
+        if user_for_avatar and user_id:
+            avatar_data = await get_user_avatar(msg.bot, user_id)
+            # Получаем кастомный титул в группе (только для участников чата)
+            user_info = await get_user_info(msg.bot, msg.chat.id, user_for_avatar)
+            custom_title = user_info.get("custom_title")
         
         # Создаем изображение цитаты
         image_io = await create_quote_image(
@@ -269,15 +324,17 @@ async def _generate_single_message_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
-        # Подготавливаем изображение для отправки как стикер
+        # Подготавливаем изображение для отправки как фото (размер > 512px)
         image_io.seek(0)
         image_data = image_io.read()
-        sticker_file = BufferedInputFile(image_data, filename="quote.webp")
+        photo_file = BufferedInputFile(image_data, filename="quote.webp")
         
         # Сначала сохраняем в БД чтобы получить ID для кнопок
+        # Для пересланных сообщений со скрытым аккаунтом используем ID того, кто переслал
+        save_user_id = user_id if user_id else msg.from_user.id
         image_io.seek(0)
         quote_id = await save_quote_to_db(
-            user_id=user.id,
+            user_id=save_user_id,
             text=text,
             username=username,
             image_io=image_io,
@@ -288,9 +345,9 @@ async def _generate_single_message_quote(msg: Message):
         # Создаём клавиатуру с кнопками
         keyboard = build_quote_keyboard(quote_id)
         
-        # Отправляем как стикер
-        sent_msg = await msg.answer_sticker(
-            sticker=sticker_file,
+        # Отправляем как фото с кнопками
+        sent_msg = await msg.answer_photo(
+            photo=photo_file,
             reply_markup=keyboard,
         )
         
@@ -319,6 +376,27 @@ async def _generate_single_message_quote(msg: Message):
                 pass
 
 
+def get_message_author_for_chain(message: Message) -> tuple:
+    """
+    Получает автора сообщения для цепочки цитат.
+    Учитывает пересланные сообщения.
+    
+    Returns:
+        (username, user_id)
+    """
+    if message.forward_from:
+        fwd = message.forward_from
+        return (fwd.username or fwd.first_name, fwd.id)
+    elif message.forward_sender_name:
+        return (message.forward_sender_name, None)
+    elif message.forward_from_chat:
+        chat = message.forward_from_chat
+        return (chat.username or chat.title, chat.id)
+    elif message.from_user:
+        return (message.from_user.username or message.from_user.first_name, message.from_user.id)
+    return ("Unknown", None)
+
+
 async def _generate_multi_message_quote(msg: Message, count: int):
     """
     Генерирует цитату из нескольких сообщений.
@@ -339,7 +417,8 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
         return
     
-    username = original_msg.from_user.username or original_msg.from_user.first_name
+    # Определяем автора (учитываем пересланные сообщения)
+    username, first_user_id = get_message_author_for_chain(original_msg)
     
     # Build message chain
     # For now, we create a chain with the single message repeated conceptually
@@ -360,8 +439,8 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         reply_msg = current_msg.reply_to_message
         reply_text = extract_message_text(reply_msg)
         
-        if reply_text and reply_msg.from_user:
-            reply_username = reply_msg.from_user.username or reply_msg.from_user.first_name
+        if reply_text:
+            reply_username, _ = get_message_author_for_chain(reply_msg)
             messages.insert(0, MessageData(
                 text=reply_text,
                 username=reply_username,
@@ -385,22 +464,27 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         image_data = image_io.read()
         photo_file = BufferedInputFile(image_data, filename="quote_chain.webp")
         
-        caption = f"💬 Цитата ({len(messages)} сообщ.)"
-        sent_msg = await msg.answer_photo(photo=photo_file, caption=caption)
-        
-        # Сохраняем цитату в базу данных (Requirement 7.6)
-        # Property 19: Quote persistence
-        # Используем ID отправленного сообщения для корректной работы /qs
+        # Сначала сохраняем в БД чтобы получить ID для кнопок
+        save_user_id = first_user_id if first_user_id else msg.from_user.id
         image_io.seek(0)
         combined_text = "\n---\n".join([m.text for m in messages])
         quote_id = await save_quote_to_db(
-            user_id=original_msg.from_user.id,
+            user_id=save_user_id,
             text=combined_text,
             username=username,
             image_io=image_io,
             telegram_chat_id=msg.chat.id,
-            telegram_message_id=sent_msg.message_id
+            telegram_message_id=0  # Обновим после отправки
         )
+        
+        # Создаём клавиатуру с кнопками
+        keyboard = build_quote_keyboard(quote_id)
+        
+        caption = f"💬 Цитата ({len(messages)} сообщ.)"
+        sent_msg = await msg.answer_photo(photo=photo_file, caption=caption, reply_markup=keyboard)
+        
+        # Обновляем message_id в БД
+        await update_quote_message_id(quote_id, sent_msg.message_id)
         logger.info(f"Quote chain saved with ID {quote_id}")
         
     except TelegramBadRequest as e:
@@ -431,7 +515,8 @@ async def _generate_roast_quote(msg: Message):
         await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
         return
     
-    username = original_msg.from_user.username or original_msg.from_user.first_name
+    # Определяем автора (учитываем пересланные сообщения)
+    user_id, username, full_name, _ = get_quote_author(original_msg)
     
     # Start Alive UI status for roast quote (uses thinking category for LLM)
     # **Validates: Requirements 12.1, 12.2, 12.3**
@@ -457,22 +542,31 @@ async def _generate_roast_quote(msg: Message):
         image_data = image_io.read()
         photo_file = BufferedInputFile(image_data, filename="quote_roast.webp")
         
-        # Отправляем изображение как фото и сохраняем ID отправленного сообщения
-        sent_msg = await msg.answer_photo(photo=photo_file, caption="🔥 Режим прожарки активирован")
-        
-        # Сохраняем цитату в базу данных (Requirement 7.6)
-        # Property 19: Quote persistence
-        # Используем ID отправленного сообщения для корректной работы /qs
+        # Сначала сохраняем в БД чтобы получить ID для кнопок
+        save_user_id = user_id if user_id else msg.from_user.id
         image_io.seek(0)
         quote_id = await save_quote_to_db(
-            user_id=original_msg.from_user.id,
+            user_id=save_user_id,
             text=text,
             username=username,
             image_io=image_io,
             comment="[roast mode]",  # Comment is embedded in image
             telegram_chat_id=msg.chat.id,
-            telegram_message_id=sent_msg.message_id
+            telegram_message_id=0  # Обновим после отправки
         )
+        
+        # Создаём клавиатуру с кнопками
+        keyboard = build_quote_keyboard(quote_id)
+        
+        # Отправляем изображение как фото
+        sent_msg = await msg.answer_photo(
+            photo=photo_file,
+            caption="🔥 Режим прожарки активирован",
+            reply_markup=keyboard
+        )
+        
+        # Обновляем message_id в БД
+        await update_quote_message_id(quote_id, sent_msg.message_id)
         logger.info(f"Roast quote saved with ID {quote_id}")
         
     except TelegramBadRequest as e:

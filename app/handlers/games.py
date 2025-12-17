@@ -702,8 +702,7 @@ async def cmd_grow(msg: Message):
             f"Ранг: {size_rank}\n"
             f"Место: #{rank}/{len(all_stats)}\n"
             f"Кулдаун: {cooldown_hours}ч\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"📋 /top · /pvp · /casino · /profile"
+            f"📋 /games"
         )
         
         # Send with sparkline image if available (Requirements 7.1)
@@ -792,8 +791,7 @@ async def cmd_top(msg: Message):
         
         await msg.reply(
             "🏆 Топ-10:\n" + "\n".join(lines) + smallest_line +
-            "\n━━━━━━━━━━━━━━━\n"
-            "📋 /grow · /pvp · /casino · /profile"
+            "\n📋 /games"
         )
 
 
@@ -811,8 +809,7 @@ async def cmd_top_rep(msg: Message):
             lines.append(f"{i}. {name}: {s.reputation} репутации")
         await msg.reply(
             "⭐ Топ-10 по репутации:\n" + "\n".join(lines) +
-            "\n━━━━━━━━━━━━━━━\n"
-            "📋 /grow · /pvp · /casino · /profile"
+            "\n📋 /games"
         )
 
 
@@ -901,8 +898,7 @@ async def cmd_profile(msg: Message, bot: Bot):
                     achievements_text += f" (+{len(user_achievements) - 3})"
                 caption_parts.append(f"🏆 {achievements_text}")
             
-            caption_parts.append("━━━━━━━━━━━━━━━")
-            caption_parts.append("📋 /grow · /pvp · /casino · /top")
+            caption_parts.append("📋 /games")
             
             caption = "\n".join(caption_parts) if caption_parts else None
             
@@ -954,7 +950,7 @@ async def _send_text_profile(msg: Message, user, game_stat, wallet, league, elo,
             status = "Выполнено" if uq.completed_at else f"Прогресс: {uq.progress}/{uq.quest.target_value}"
             profile_text += f"  - {uq.quest.name} ({status})\n"
 
-    profile_text += "\n━━━━━━━━━━━━━━━\n📋 /grow · /pvp · /casino · /top"
+    profile_text += "\n📋 /games"
     await msg.reply(profile_text, parse_mode="HTML")
 
 
@@ -1054,24 +1050,21 @@ async def cmd_casino(msg: Message):
                 f"🎰 {board}\n"
                 f"🎉 Джекпот! Выигрыш: {win} монет\n"
                 f"💰 Баланс: {w.balance}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"📋 /grow · /pvp · /top · /profile"
+                f"📋 /games"
             )
         elif mult == 2:
             text = (
                 f"🎰 {board}\n"
                 f"✨ Норм, удвоил! Выигрыш: {win} монет\n"
                 f"💰 Баланс: {w.balance}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"📋 /grow · /pvp · /top · /profile"
+                f"📋 /games"
             )
         else:
             text = (
                 f"🎰 {board}\n"
                 f"😢 Мимо, дружище\n"
                 f"💰 Баланс: {w.balance}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"📋 /grow · /pvp · /top · /profile"
+                f"📋 /games"
             )
         
         await session.commit()
@@ -1195,8 +1188,7 @@ async def cmd_roulette(msg: Message):
         f"{result_emoji}\n\n"
         f"{result.message}\n\n"
         f"💰 Баланс: {result.new_balance} очков\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📋 /grow · /pvp · /casino · /profile",
+        f"📋 /games",
         parse_mode="HTML"
     )
 
@@ -1323,7 +1315,6 @@ async def cmd_coinflip(msg: Message):
         f"{emoji} {outcome}\n\n"
         f"{result.message}\n\n"
         f"💰 Баланс: {result.new_balance} очков\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📋 /grow · /pvp · /casino · /roulette",
+        f"📋 /games",
         parse_mode="HTML"
     )

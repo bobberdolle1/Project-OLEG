@@ -486,7 +486,7 @@ async def callback_blackjack_action(callback: CallbackQuery):
             final_message += "\n\n🔄 Ставка возвращена"
         
         final_message += f"\n💰 Баланс: {final_balance} монет"
-        final_message += "\n\n━━━━━━━━━━━━━━━\n📋 /bj · /casino · /roulette · /profile"
+        final_message += "\n📋 /games"
         
         await callback.message.edit_text(
             final_message,

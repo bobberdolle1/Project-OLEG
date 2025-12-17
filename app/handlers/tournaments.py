@@ -53,8 +53,7 @@ async def cmd_tournament(msg: Message):
             lines.append(tournament_service.format_tournament_info(tournament_info))
             lines.append("")
         
-        lines.append("━━━━━━━━━━━━━━━")
-        lines.append("📋 /grow · /pvp · /roulette · /profile")
+        lines.append("📋 /games")
         
         await msg.reply("\n".join(lines), parse_mode="HTML")
         
@@ -136,8 +135,7 @@ async def _show_tournament_standings(
                 lines.append("  Нет участников")
             lines.append("")
         
-        lines.append("━━━━━━━━━━━━━━━")
-        lines.append("📋 /tournament · /grow · /pvp · /roulette")
+        lines.append("📋 /games")
         
         await msg.reply("\n".join(lines), parse_mode="HTML")
         

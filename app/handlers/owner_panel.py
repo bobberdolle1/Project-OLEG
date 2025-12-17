@@ -1151,7 +1151,7 @@ async def cb_owner_top_users(callback: CallbackQuery):
         
         # Топ по размеру (grow)
         size_result = await session.execute(
-            select(GameStat).order_by(GameStat.grow_size.desc()).limit(10)
+            select(GameStat).order_by(GameStat.size_cm.desc()).limit(10)
         )
         top_size = size_result.scalars().all()
         
@@ -1169,11 +1169,112 @@ async def cb_owner_top_users(callback: CallbackQuery):
     
     text += "\n<b>📏 Топ по размеру:</b>\n"
     for i, stat in enumerate(top_size, 1):
-        # Нужно получить username
-        text += f"{i}. user_id:{stat.user_id} — {stat.grow_size} см\n"
+        name = f"@{stat.username}" if stat.username else f"id:{stat.tg_user_id}"
+        text += f"{i}. {name} — {stat.size_cm} см\n"
     
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data="owner_top_users")
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(2)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_stats")
+async def cb_owner_stats(callback: CallbackQuery):
+    """Показать общую статистику бота."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await callback.answer("📊 Загружаю статистику...", show_alert=False)
+    
+    async_session = get_session()
+    async with async_session() as session:
+        from app.database.models import GameStat, Quote, MessageLog
+        from datetime import timedelta
+        
+        # Общее количество пользователей
+        total_users = await session.scalar(select(func.count(User.id)))
+        
+        # Количество групп
+        total_groups = await session.scalar(select(func.count(Chat.id)))
+        
+        # Количество приватных чатов
+        total_private = await session.scalar(
+            select(func.count(PrivateChat.user_id))
+            .where(PrivateChat.is_blocked == False)
+        )
+        
+        # Всего сообщений
+        total_messages = await session.scalar(select(func.count(MessageLog.id)))
+        
+        # Сообщений за сегодня
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        messages_today = await session.scalar(
+            select(func.count(MessageLog.id))
+            .where(MessageLog.created_at >= today)
+        )
+        
+        # Сообщений за неделю
+        week_ago = today - timedelta(days=7)
+        messages_week = await session.scalar(
+            select(func.count(MessageLog.id))
+            .where(MessageLog.created_at >= week_ago)
+        )
+        
+        # Активных пользователей сегодня (уникальные user_id в сообщениях)
+        active_today = await session.scalar(
+            select(func.count(func.distinct(MessageLog.user_id)))
+            .where(MessageLog.created_at >= today)
+        )
+        
+        # Игровая статистика
+        total_players = await session.scalar(select(func.count(GameStat.user_id)))
+        
+        # Сумма всех размеров
+        total_size = await session.scalar(select(func.sum(GameStat.size_cm))) or 0
+        
+        # Всего PvP побед
+        total_pvp_wins = await session.scalar(select(func.sum(GameStat.pvp_wins))) or 0
+        
+        # Всего grow операций
+        total_grows = await session.scalar(select(func.sum(GameStat.grow_count))) or 0
+        
+        # Количество цитат
+        total_quotes = await session.scalar(select(func.count(Quote.id)))
+        
+        # Лайков на цитатах
+        total_likes = await session.scalar(select(func.sum(Quote.likes_count))) or 0
+    
+    text = "📈 <b>Общая статистика бота</b>\n\n"
+    
+    text += "<b>👥 Пользователи:</b>\n"
+    text += f"├ Всего: {total_users or 0}\n"
+    text += f"├ Активных сегодня: {active_today or 0}\n"
+    text += f"└ Приватных чатов: {total_private or 0}\n\n"
+    
+    text += "<b>💬 Сообщения:</b>\n"
+    text += f"├ Всего: {total_messages or 0:,}\n"
+    text += f"├ За сегодня: {messages_today or 0:,}\n"
+    text += f"└ За неделю: {messages_week or 0:,}\n\n"
+    
+    text += "<b>👥 Группы:</b>\n"
+    text += f"└ Всего: {total_groups or 0}\n\n"
+    
+    text += "<b>🎮 Игры:</b>\n"
+    text += f"├ Игроков: {total_players or 0}\n"
+    text += f"├ Общий размер: {total_size:,} см\n"
+    text += f"├ PvP побед: {total_pvp_wins:,}\n"
+    text += f"└ Grow операций: {total_grows:,}\n\n"
+    
+    text += "<b>💬 Цитаты:</b>\n"
+    text += f"├ Всего: {total_quotes or 0}\n"
+    text += f"└ Лайков: {total_likes:,}\n"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data="owner_stats")
     kb.button(text="🔙 Назад", callback_data="owner_main")
     kb.adjust(2)
     
@@ -1192,11 +1293,12 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb.button(text="⚙️ Функции бота", callback_data="owner_features")
     kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
     kb.button(text="📊 Статус системы", callback_data="owner_status")
+    kb.button(text="📈 Общая статистика", callback_data="owner_stats")
     kb.button(text="💬 Управление чатами", callback_data="owner_chats")
     kb.button(text="👥 Список групп", callback_data="owner_groups_list")
     kb.button(text="🏆 Топ пользователей", callback_data="owner_top_users")
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     kb.button(text="🚨 Экстренные действия", callback_data="owner_emergency")
     
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb

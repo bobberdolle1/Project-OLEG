@@ -364,16 +364,39 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
     for status in services_status:
         text += f"├ {status}\n"
     
-    text += f"\n<b>Модели:</b>\n"
+    # Определяем используется ли fallback
+    using_fallback = False
+    try:
+        from app.services.ollama_client import check_model_available
+        primary_ok = await check_model_available(settings.ollama_base_model)
+        if not primary_ok and settings.ollama_fallback_enabled:
+            fallback_ok = await check_model_available(settings.ollama_fallback_model)
+            if fallback_ok:
+                using_fallback = True
+    except Exception:
+        pass
+    
+    # Текущий режим работы
+    if using_fallback:
+        text += f"\n🔄 <b>РЕЖИМ: FALLBACK</b>\n"
+        text += f"├ Используется: {settings.ollama_fallback_model}\n"
+        text += f"└ Основная недоступна: {settings.ollama_base_model}\n"
+    else:
+        text += f"\n✅ <b>РЕЖИМ: ОСНОВНОЙ</b>\n"
+        text += f"└ Используется: {settings.ollama_base_model}\n"
+    
+    text += f"\n<b>Настроенные модели:</b>\n"
     text += f"├ Base: {settings.ollama_base_model}\n"
     text += f"├ Vision: {settings.ollama_vision_model}\n"
     text += f"└ Memory: {settings.ollama_memory_model}\n"
     
     if settings.ollama_fallback_enabled:
-        text += f"\n<b>Fallback модели:</b>\n"
+        text += f"\n<b>Fallback модели (резерв):</b>\n"
         text += f"├ Base: {settings.ollama_fallback_model}\n"
         text += f"├ Vision: {settings.ollama_fallback_vision_model}\n"
         text += f"└ Memory: {settings.ollama_fallback_memory_model}\n"
+    else:
+        text += f"\n⏸ <b>Fallback отключен</b>\n"
     
     # Предупреждение о критических проблемах
     if has_critical_issues:

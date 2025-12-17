@@ -1,7 +1,7 @@
 """Add inventory and fishing stats tables
 
 Revision ID: 20251209_inv_fish
-Revises: 
+Revises: 007_games_v75
 Create Date: 2025-12-09
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20251209_inv_fish'
-down_revision = None
+down_revision = '007_games_v75'
 branch_labels = None
 depends_on = None
 

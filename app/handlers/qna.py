@@ -460,6 +460,11 @@ async def general_qna(msg: Message):
                 topic_id=topic_id  # Передаём ID топика для корректной работы памяти
             )
 
+        # Если reply None - ошибка уже была показана недавно, не спамим
+        if reply is None:
+            logger.debug(f"Suppressed duplicate error response for chat {msg.chat.id}")
+            return
+
         # Check if we should auto-voice this response (0.1% chance)
         # **Validates: Requirements 5.2**
         voice_sent = False

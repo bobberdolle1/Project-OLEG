@@ -22,6 +22,29 @@ _ollama_available: bool | None = None
 _ollama_check_time: float = 0
 _OLLAMA_CHECK_INTERVAL = 30  # Проверять доступность каждые 30 секунд
 
+# Кэш ошибок чтобы не спамить одинаковыми сообщениями (TTL 5 минут)
+_error_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
+
+
+def _get_error_response(error_type: str, message: str) -> str | None:
+    """
+    Возвращает сообщение об ошибке, но только если такая ошибка не была недавно.
+    Предотвращает спам одинаковыми сообщениями об ошибках.
+    
+    Args:
+        error_type: Тип ошибки (timeout, http_error, connection, unknown)
+        message: Текст сообщения об ошибке
+        
+    Returns:
+        Сообщение об ошибке или None если ошибка уже была показана недавно
+    """
+    if error_type in _error_cache:
+        logger.debug(f"Suppressing duplicate error message: {error_type}")
+        return None
+    
+    _error_cache[error_type] = True
+    return message
+
 
 async def is_ollama_available() -> bool:
     """
@@ -771,7 +794,7 @@ def format_chat_history_for_prompt(messages: list[dict]) -> str:
 
 async def generate_text_reply(user_text: str, username: str | None, chat_context: str | None = None,
                               conversation_history: list[dict] | None = None,
-                              force_web_search: bool = False) -> str:
+                              force_web_search: bool = False) -> str | None:
     """
     Сгенерировать текстовый ответ от Олега на сообщение пользователя.
 
@@ -827,20 +850,20 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
         return await _ollama_chat(messages, model=settings.ollama_base_model, enable_tools=True)
     except httpx.TimeoutException:
         logger.error("Ollama timeout - server not responding")
-        return "Сервер ИИ тупит. Попробуй позже, чемпион."
+        return _get_error_response("timeout", "Сервер ИИ тупит. Попробуй позже, чемпион.")
     except httpx.HTTPStatusError as e:
         logger.error(f"Ollama HTTP error: {e.response.status_code}")
-        return "Сервер ИИ сломался. Админы уже в курсе (наверное)."
+        return _get_error_response("http_error", "Сервер ИИ сломался. Админы уже в курсе (наверное).")
     except httpx.RequestError as e:
         logger.error(f"Ollama connection error: {e}")
-        return "Не могу достучаться до сервера ИИ. Проверь, запущен ли Ollama."
+        return _get_error_response("connection", "Не могу достучаться до сервера ИИ. Проверь, запущен ли Ollama.")
     except Exception as e:
         logger.error(f"Unexpected error in generate_text_reply: {e}")
-        return "Что-то пошло не так. Попробуй ещё раз или обратись к админу."
+        return _get_error_response("unknown", "Что-то пошло не так. Попробуй ещё раз или обратись к админу.")
 
 
 async def generate_private_reply(user_text: str, username: str | None, user_id: int,
-                                  chat_context: str | None = None) -> str:
+                                  chat_context: str | None = None) -> str | None:
     """
     Генерирует ответ для личных сообщений с учётом истории диалога.
     
@@ -1289,7 +1312,7 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
 async def generate_reply_with_context(user_text: str, username: str | None,
                                    chat_id: int, chat_context: str | None = None,
                                    topic_id: int = None,
-                                   include_chat_history: bool = True) -> str:
+                                   include_chat_history: bool = True) -> str | None:
     """
     Генерирует ответ с учетом контекста из памяти и истории чата.
 

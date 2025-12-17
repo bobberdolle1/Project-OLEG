@@ -326,6 +326,7 @@ class Quote(Base):
     image_data: Mapped[bytes] = mapped_column(LargeBinary)  # Изображение цитаты в байтах
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Комментарий Олега
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
+    dislikes_count: Mapped[int] = mapped_column(Integer, default=0)  # Счётчик дизлайков
     is_golden_fund: Mapped[bool] = mapped_column(Boolean, default=False)  # В "золотом фонде" или нет
     is_sticker: Mapped[bool] = mapped_column(Boolean, default=False)  # Является ли стикером
     sticker_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # ID файла стикера в Telegram
@@ -337,6 +338,24 @@ class Quote(Base):
 
     user: Mapped["User"] = relationship(back_populates="quotes")
     sticker_pack: Mapped[Optional["StickerPack"]] = relationship(back_populates="quotes")
+    votes: Mapped[List["QuoteVote"]] = relationship(back_populates="quote", cascade="all, delete-orphan")
+
+
+class QuoteVote(Base):
+    """Голоса за цитаты (лайки/дизлайки)."""
+    __tablename__ = "quote_votes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    quote_id: Mapped[int] = mapped_column(ForeignKey("quotes.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # Telegram user ID
+    vote_type: Mapped[str] = mapped_column(String(10))  # "like" или "dislike"
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    quote: Mapped["Quote"] = relationship(back_populates="votes")
+    
+    __table_args__ = (
+        # Один голос на пользователя на цитату
+        {"sqlite_autoincrement": True},
+    )
 
 
 class ModerationConfig(Base):

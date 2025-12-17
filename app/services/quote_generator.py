@@ -52,14 +52,17 @@ class MessageData:
     timestamp: Optional[str] = None
 
 
-# Gradient presets for different themes
+# Gradient presets for different themes - более яркие и красивые
 GRADIENT_PRESETS = {
     "dark": [
         ("#1a1a2e", "#16213e"),  # Deep blue
-        ("#0f0f23", "#1a1a3e"),  # Dark purple
-        ("#1e1e1e", "#2d2d2d"),  # Charcoal
-        ("#0d1117", "#161b22"),  # GitHub dark
-        ("#1a1b26", "#24283b"),  # Tokyo night
+        ("#2d1b4e", "#1a1a3e"),  # Purple night
+        ("#1e3a5f", "#0d1b2a"),  # Ocean deep
+        ("#2c3e50", "#1a252f"),  # Slate
+        ("#1f1c2c", "#928dab"),  # Cosmic purple (diagonal feel)
+        ("#0f2027", "#203a43"),  # Dark teal
+        ("#232526", "#414345"),  # Subtle gray
+        ("#000428", "#004e92"),  # Deep space blue
     ],
     "light": [
         ("#f5f5f5", "#e0e0e0"),  # Light gray
@@ -309,17 +312,18 @@ class QuoteGeneratorService:
             style = QuoteStyle()
         
         # Configuration
-        padding = 20
-        avatar_size = 40
-        max_text_width = MAX_STICKER_SIZE - padding * 2 - avatar_size - 15
+        padding = 24
+        avatar_size = 48
+        quote_mark_size = 30
+        max_text_width = MAX_STICKER_SIZE - padding * 2 - 20
         
         # Wrap text
         lines = self._wrap_text(text, self.text_font, max_text_width)
         text_height = self._calculate_text_height(lines, self.text_font)
         
         # Calculate image dimensions
-        content_height = max(avatar_size, text_height + 25)  # 25 for username
-        height = min(MAX_STICKER_SIZE, padding * 2 + content_height + (20 if timestamp else 0))
+        content_height = avatar_size + 15 + text_height + 30  # avatar + gap + text + footer
+        height = min(MAX_STICKER_SIZE, padding * 2 + content_height)
         width = MAX_STICKER_SIZE
         
         # Create gradient background
@@ -327,51 +331,71 @@ class QuoteGeneratorService:
         img = self._create_gradient_background(width, height, color1, color2)
         draw = ImageDraw.Draw(img)
         
-        # Draw rounded rectangle border
-        border_color = (88, 101, 242) if style.theme != QuoteTheme.LIGHT else (66, 133, 244)
-        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 10, border_color)
+        # Draw decorative quote mark "
+        quote_color = (88, 101, 242, 80) if style.theme != QuoteTheme.LIGHT else (66, 133, 244, 80)
+        draw.text(
+            (width - padding - 40, padding - 5),
+            "❝",
+            font=self.text_font,
+            fill=(255, 255, 255, 40)
+        )
         
-        # Draw avatar
-        avatar_x = padding
-        avatar_y = padding
+        # Draw rounded rectangle border with glow effect
+        border_color = (88, 101, 242) if style.theme != QuoteTheme.LIGHT else (66, 133, 244)
+        self._draw_rounded_rect(draw, padding - 5, padding - 5, width - padding + 5, height - padding + 5, 12, border_color)
+        
+        # Draw avatar at top
+        avatar_x = padding + 5
+        avatar_y = padding + 5
         self._draw_avatar(draw, avatar_x, avatar_y, avatar_size, username, style)
         
-        # Draw username
+        # Draw username next to avatar
         text_color = self._get_text_color(style)
         secondary_color = self._get_secondary_color(style)
         username_display = f"@{username}" if username and not username.startswith("@") else username or "Anonymous"
         draw.text(
-            (avatar_x + avatar_size + 10, avatar_y),
+            (avatar_x + avatar_size + 12, avatar_y + 8),
             username_display,
             font=self.username_font,
             fill=text_color
         )
         
-        # Draw message text
-        text_y = avatar_y + 22
+        # Draw timestamp next to username
+        if timestamp:
+            draw.text(
+                (avatar_x + avatar_size + 12, avatar_y + 28),
+                timestamp,
+                font=self.timestamp_font,
+                fill=secondary_color
+            )
+        
+        # Draw message text below avatar with left quote line
+        text_start_y = avatar_y + avatar_size + 15
+        text_x = padding + 15
+        
+        # Draw vertical quote line
+        line_color = border_color
+        draw.line(
+            [(padding + 5, text_start_y), (padding + 5, text_start_y + text_height)],
+            fill=line_color,
+            width=3
+        )
+        
         try:
             bbox = self.text_font.getbbox("Ay")
-            line_height = bbox[3] - bbox[1] + 4
+            line_height = bbox[3] - bbox[1] + 6
         except AttributeError:
-            line_height = 22
+            line_height = 24
         
+        text_y = text_start_y
         for line in lines:
             draw.text(
-                (avatar_x + avatar_size + 10, text_y),
+                (text_x, text_y),
                 line,
                 font=self.text_font,
                 fill=text_color
             )
             text_y += line_height
-        
-        # Draw timestamp if provided
-        if timestamp:
-            draw.text(
-                (width - padding - 60, height - padding - 10),
-                timestamp,
-                font=self.timestamp_font,
-                fill=secondary_color
-            )
         
         # Convert to WebP
         output = BytesIO()

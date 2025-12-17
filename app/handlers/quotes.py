@@ -12,9 +12,10 @@ from io import BytesIO
 from typing import List, Optional
 
 from aiogram import Router, F
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import Message, BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.database.session import get_session
 from app.database.models import User
@@ -31,6 +32,18 @@ from app.services.alive_ui import alive_ui_service
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+def build_quote_keyboard(quote_id: int, likes: int = 0, dislikes: int = 0) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру с кнопками лайк/дизлайк для цитаты."""
+    kb = InlineKeyboardBuilder()
+    like_text = f"👍 {likes}" if likes > 0 else "👍"
+    dislike_text = f"👎 {dislikes}" if dislikes > 0 else "👎"
+    kb.button(text=like_text, callback_data=f"quote_like:{quote_id}")
+    kb.button(text=dislike_text, callback_data=f"quote_dislike:{quote_id}")
+    kb.button(text="📦 В стикерпак", callback_data=f"quote_sticker:{quote_id}")
+    kb.adjust(2, 1)
+    return kb.as_markup()
 
 
 async def create_quote_image(text: str, username: str, timestamp: Optional[str] = None) -> BytesIO:
@@ -199,21 +212,30 @@ async def _generate_single_message_quote(msg: Message):
         image_data = image_io.read()
         photo_file = BufferedInputFile(image_data, filename="quote.webp")
         
-        # Отправляем изображение как фото и сохраняем ID отправленного сообщения
-        sent_msg = await msg.answer_photo(photo=photo_file, caption="💬 Цитата создана")
-        
-        # Сохраняем цитату в базу данных (Requirement 7.6)
-        # Property 19: Quote persistence
-        # Используем ID отправленного сообщения для корректной работы /qs
-        image_io.seek(0)  # Reset position for saving
+        # Сначала сохраняем в БД чтобы получить ID для кнопок
+        image_io.seek(0)
         quote_id = await save_quote_to_db(
             user_id=original_msg.from_user.id,
             text=text,
             username=username,
             image_io=image_io,
             telegram_chat_id=msg.chat.id,
-            telegram_message_id=sent_msg.message_id
+            telegram_message_id=0  # Обновим после отправки
         )
+        
+        # Создаём клавиатуру с кнопками
+        keyboard = build_quote_keyboard(quote_id)
+        
+        # Отправляем изображение как фото с кнопками
+        sent_msg = await msg.answer_photo(
+            photo=photo_file,
+            caption=f"💬 <b>{username}</b>",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        
+        # Обновляем message_id в БД
+        await update_quote_message_id(quote_id, sent_msg.message_id)
         logger.info(f"Quote saved with ID {quote_id}")
         
     except TelegramBadRequest as e:
@@ -491,6 +513,142 @@ async def save_quote_to_db(user_id: int, text: str, username: str, image_io: Byt
         # Обновляем объект, чтобы получить ID
         await session.refresh(new_quote)
         return new_quote.id
+
+
+async def update_quote_message_id(quote_id: int, message_id: int):
+    """Обновляет telegram_message_id для цитаты."""
+    async_session = get_session()
+    async with async_session() as session:
+        from sqlalchemy import update
+        from app.database.models import Quote
+        await session.execute(
+            update(Quote).where(Quote.id == quote_id).values(telegram_message_id=message_id)
+        )
+        await session.commit()
+
+
+@router.callback_query(F.data.startswith("quote_like:"))
+async def cb_quote_like(callback: CallbackQuery):
+    """Обработчик лайка цитаты."""
+    quote_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    
+    async_session = get_session()
+    async with async_session() as session:
+        from sqlalchemy import select
+        from app.database.models import Quote, QuoteVote
+        
+        # Проверяем, голосовал ли уже
+        existing_vote = await session.execute(
+            select(QuoteVote).filter_by(quote_id=quote_id, user_id=user_id)
+        )
+        vote = existing_vote.scalars().first()
+        
+        quote_res = await session.execute(select(Quote).filter_by(id=quote_id))
+        quote = quote_res.scalars().first()
+        
+        if not quote:
+            await callback.answer("Цитата не найдена", show_alert=True)
+            return
+        
+        if vote:
+            if vote.vote_type == "like":
+                await callback.answer("Ты уже лайкнул эту цитату")
+                return
+            else:
+                # Меняем дизлайк на лайк
+                vote.vote_type = "like"
+                quote.likes_count += 1
+                quote.dislikes_count = max(0, (quote.dislikes_count or 0) - 1)
+        else:
+            # Новый лайк
+            new_vote = QuoteVote(quote_id=quote_id, user_id=user_id, vote_type="like")
+            session.add(new_vote)
+            quote.likes_count += 1
+        
+        await session.commit()
+        
+        # Обновляем клавиатуру
+        keyboard = build_quote_keyboard(quote_id, quote.likes_count, quote.dislikes_count or 0)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=keyboard)
+        except TelegramBadRequest:
+            pass
+        
+        await callback.answer("👍 Лайк!")
+
+
+@router.callback_query(F.data.startswith("quote_dislike:"))
+async def cb_quote_dislike(callback: CallbackQuery):
+    """Обработчик дизлайка цитаты."""
+    quote_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    
+    async_session = get_session()
+    async with async_session() as session:
+        from sqlalchemy import select
+        from app.database.models import Quote, QuoteVote
+        
+        # Проверяем, голосовал ли уже
+        existing_vote = await session.execute(
+            select(QuoteVote).filter_by(quote_id=quote_id, user_id=user_id)
+        )
+        vote = existing_vote.scalars().first()
+        
+        quote_res = await session.execute(select(Quote).filter_by(id=quote_id))
+        quote = quote_res.scalars().first()
+        
+        if not quote:
+            await callback.answer("Цитата не найдена", show_alert=True)
+            return
+        
+        if vote:
+            if vote.vote_type == "dislike":
+                await callback.answer("Ты уже дизлайкнул эту цитату")
+                return
+            else:
+                # Меняем лайк на дизлайк
+                vote.vote_type = "dislike"
+                quote.likes_count = max(0, quote.likes_count - 1)
+                quote.dislikes_count = (quote.dislikes_count or 0) + 1
+        else:
+            # Новый дизлайк
+            new_vote = QuoteVote(quote_id=quote_id, user_id=user_id, vote_type="dislike")
+            session.add(new_vote)
+            quote.dislikes_count = (quote.dislikes_count or 0) + 1
+        
+        await session.commit()
+        
+        # Обновляем клавиатуру
+        keyboard = build_quote_keyboard(quote_id, quote.likes_count, quote.dislikes_count or 0)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=keyboard)
+        except TelegramBadRequest:
+            pass
+        
+        await callback.answer("👎 Дизлайк!")
+
+
+@router.callback_query(F.data.startswith("quote_sticker:"))
+async def cb_quote_sticker(callback: CallbackQuery):
+    """Обработчик добавления цитаты в стикерпак."""
+    quote_id = int(callback.data.split(":")[1])
+    
+    # Проверяем права админа
+    try:
+        chat_member = await callback.bot.get_chat_member(
+            chat_id=callback.message.chat.id,
+            user_id=callback.from_user.id
+        )
+        if chat_member.status not in ["administrator", "creator"]:
+            await callback.answer("Только админы могут добавлять в стикерпак", show_alert=True)
+            return
+    except Exception:
+        await callback.answer("Ошибка проверки прав", show_alert=True)
+        return
+    
+    # TODO: Реализовать добавление в стикерпак через Telegram API
+    await callback.answer("📦 Функция стикерпака в разработке", show_alert=True)
 
 
 @router.message(Command("qs"))

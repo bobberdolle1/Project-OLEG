@@ -409,7 +409,11 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
     kb.button(text="🔙 Назад", callback_data="owner_main")
     kb.adjust(2)
     
-    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    try:
+        await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:
+        # Игнорируем ошибку "message is not modified"
+        await callback.answer("Статус не изменился", show_alert=False)
 
 
 @router.callback_query(F.data == "owner_test_notify")

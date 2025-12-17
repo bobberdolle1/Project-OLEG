@@ -1,14 +1,14 @@
 """Add quote votes table and dislikes_count
 
 Revision ID: 20251217_quote_votes
-Revises: 
+Revises: 20251211_topic_id
 Create Date: 2025-12-17
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = '20251217_quote_votes'
-down_revision = None
+down_revision = '20251211_topic_id'
 branch_labels = None
 depends_on = None
 

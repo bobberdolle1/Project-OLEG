@@ -25,6 +25,56 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+async def _get_chat_context(msg: Message) -> str | None:
+    """
+    Получает контекст чата для передачи в LLM.
+    
+    Включает: название чата, описание (если есть), тип чата.
+    Это помогает боту понимать где он находится и адаптировать ответы.
+    
+    Args:
+        msg: Сообщение из чата
+        
+    Returns:
+        Строка с контекстом чата или None для личных сообщений
+    """
+    if msg.chat.type == "private":
+        return None
+    
+    context_parts = []
+    
+    # Название чата
+    if msg.chat.title:
+        context_parts.append(f"Название чата: «{msg.chat.title}»")
+    
+    # Тип чата
+    chat_type_map = {
+        "group": "обычная группа",
+        "supergroup": "супергруппа",
+    }
+    chat_type = chat_type_map.get(msg.chat.type, msg.chat.type)
+    if msg.chat.is_forum:
+        chat_type = "форум с топиками"
+    context_parts.append(f"Тип: {chat_type}")
+    
+    # Пробуем получить описание чата
+    try:
+        full_chat = await msg.bot.get_chat(msg.chat.id)
+        if full_chat.description:
+            # Обрезаем если слишком длинное
+            desc = full_chat.description[:200]
+            if len(full_chat.description) > 200:
+                desc += "..."
+            context_parts.append(f"Описание: {desc}")
+    except Exception:
+        pass  # Не критично если не получилось
+    
+    if not context_parts:
+        return None
+    
+    return "ИНФОРМАЦИЯ О ЧАТЕ: " + " | ".join(context_parts)
+
+
 async def _log_bot_response(chat_id: int, message_id: int, text: str, bot_username: str | None = "oleg_bot"):
     """
     Логирует ответ бота в базу данных для сохранения истории диалога.
@@ -389,8 +439,17 @@ async def general_qna(msg: Message):
     logger.info(f"[QNA PROCESS] Обрабатываем от {user_tag}: \"{text[:50]}...\"")
 
     try:
+        # Получаем контекст чата (название, описание, тип)
+        chat_info_context = await _get_chat_context(msg)
+        
         # Проверяем, спрашивает ли про игры — даём контекст ИИ
         games_context = GAMES_AI_CONTEXT if _is_games_help_request(text) else None
+        
+        # Объединяем контексты
+        full_chat_context = None
+        if chat_info_context or games_context:
+            parts = [p for p in [chat_info_context, games_context] if p]
+            full_chat_context = "\n".join(parts)
 
         # Inject reply context if this message is a reply to another message
         # **Validates: Requirements 14.1, 14.2, 14.3, 14.4**
@@ -446,7 +505,7 @@ async def general_qna(msg: Message):
                 user_text=text_with_context,
                 username=msg.from_user.username,
                 user_id=msg.from_user.id,
-                chat_context=games_context
+                chat_context=full_chat_context
             )
         else:
             # Для групповых чатов используем функцию с контекстом из памяти
@@ -456,7 +515,7 @@ async def general_qna(msg: Message):
                 user_text=text_with_context,
                 username=msg.from_user.username,
                 chat_id=msg.chat.id,
-                chat_context=games_context,
+                chat_context=full_chat_context,
                 topic_id=topic_id  # Передаём ID топика для корректной работы памяти
             )
 

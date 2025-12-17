@@ -23,6 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 from app.services.gif_patrol import gif_patrol_service, GIFAnalysisResult
 from app.services.alive_ui import alive_ui_service
 from app.services.ollama_client import is_ollama_available
+from app.utils import safe_reply
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +373,7 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
     
     if not animation_bytes:
         if not is_auto_reply:
-            await message.reply("Не удалось загрузить гифку 😕")
+            await safe_reply(message, "Не удалось загрузить гифку 😕")
         return
     
     # Извлекаем первый кадр для анализа
@@ -389,7 +390,7 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
     if not frame_bytes:
         logger.warning("Failed to extract frames from animation, cannot analyze")
         if not is_auto_reply:
-            await message.reply("Не смог разобрать эту гифку — формат не поддерживается 😕")
+            await safe_reply(message, "Не смог разобрать эту гифку — формат не поддерживается 😕")
         return
     
     # Используем caption как user_query
@@ -398,26 +399,18 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
     if not is_auto_reply and caption.strip():
         user_query = caption.strip()
     
-    processing_msg = None
     try:
         # Для авто-ответов не показываем индикатор процесса
         if not is_auto_reply:
-            processing_msg = await message.reply("👀 Разглядываю гифку...")
+            await safe_reply(message, "👀 Разглядываю гифку...")
         
         # Анализируем кадр через Vision Pipeline
         analysis_result = await vision_pipeline.analyze(frame_bytes, user_query=user_query)
         
-        # Удаляем сообщение о процессе
-        if processing_msg:
-            try:
-                await processing_msg.delete()
-            except:
-                pass
-        
         # Проверяем на пустой результат
         if not analysis_result or not analysis_result.strip():
             if not is_auto_reply:
-                await message.reply("Хм, модель молчит. Попробуй другую гифку.")
+                await safe_reply(message, "Хм, модель молчит. Попробуй другую гифку.")
             return
         
         # Обрезаем результат если слишком длинный
@@ -430,27 +423,8 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
             prefixes = ["👀 ", "🤔 ", "Хм, ", "О, гифка! ", ""]
             analysis_result = random.choice(prefixes) + analysis_result
         
-        # Используем reply_parameters для форумов (работает со старыми топиками)
-        is_forum = getattr(message.chat, 'is_forum', False)
-        if is_forum:
-            import httpx
-            bot_token = bot.token
-            api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            payload = {
-                "chat_id": message.chat.id,
-                "text": analysis_result,
-                "reply_parameters": {
-                    "message_id": message.message_id,
-                    "chat_id": message.chat.id
-                }
-            }
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(api_url, json=payload)
-                result = resp.json()
-                if not result.get("ok"):
-                    logger.error(f"[GIF] API error: {result.get('description')}")
-        else:
-            await message.reply(analysis_result)
+        # Используем safe_reply для корректной работы в старых топиках форума
+        await safe_reply(message, analysis_result)
         
         if is_auto_reply:
             logger.info(f"Auto-reply to GIF in chat {message.chat.id}")
@@ -463,7 +437,4 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
     except Exception as e:
         logger.error(f"Ошибка при обработке GIF: {e}")
         if not is_auto_reply:
-            try:
-                await message.reply("Не смог разглядеть гифку 😕")
-            except:
-                pass
+            await safe_reply(message, "Не смог разглядеть гифку 😕")

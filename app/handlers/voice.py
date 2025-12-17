@@ -23,6 +23,7 @@ from app.services.tts_edge import edge_tts_service
 from app.services.alive_ui import alive_ui_service
 from app.services.voice_recognition import transcribe_voice_message, transcribe_video_note, is_available as stt_available
 from app.services.ollama_client import generate_reply_with_context, is_ollama_available
+from app.utils import safe_reply
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ async def handle_voice_message(msg: Message):
         text = await transcribe_voice_message(msg.bot, msg.voice.file_id)
         
         if not text:
-            await msg.reply("🎤 Не удалось распознать голосовое сообщение")
+            await safe_reply(msg, "🎤 Не удалось распознать голосовое сообщение")
             return
         
         logger.info(f"Transcribed: {text[:100]}...")
@@ -80,10 +81,10 @@ async def handle_voice_message(msg: Message):
         if response:
             # Reply with transcription and response
             reply_text = f"🎤 <i>{text}</i>\n\n{response}"
-            await msg.reply(reply_text, parse_mode="HTML")
+            await safe_reply(msg, reply_text, parse_mode="HTML")
         else:
             # Just show transcription if no response
-            await msg.reply(f"🎤 <i>{text}</i>", parse_mode="HTML")
+            await safe_reply(msg, f"🎤 <i>{text}</i>", parse_mode="HTML")
             
     except TelegramBadRequest as e:
         error_msg = str(e).lower()
@@ -165,7 +166,7 @@ async def handle_video_note(msg: Message):
         
         # 3. Формируем контекст для ответа
         if not transcribed_text and not visual_description:
-            await msg.reply("🎥 Не удалось обработать кружочек — ни речь, ни картинку")
+            await safe_reply(msg, "🎥 Не удалось обработать кружочек — ни речь, ни картинку")
             return
         
         # Собираем полный контекст
@@ -195,7 +196,7 @@ async def handle_video_note(msg: Message):
         if response:
             reply_parts.append(f"\n\n{response}")
         
-        await msg.reply(" ".join(reply_parts), parse_mode="HTML")
+        await safe_reply(msg, " ".join(reply_parts), parse_mode="HTML")
             
     except TelegramBadRequest as e:
         error_msg = str(e).lower()

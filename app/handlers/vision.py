@@ -15,6 +15,7 @@ from aiogram.filters import Command
 
 from app.services.vision_pipeline import vision_pipeline
 from app.services.ollama_client import is_ollama_available
+from app.utils import safe_reply
 
 logger = logging.getLogger(__name__)
 
@@ -202,24 +203,18 @@ async def handle_image_message(msg: Message):
     try:
         # Для авто-ответов не показываем индикатор процесса
         if not is_auto_reply:
-            processing_msg = await msg.reply("👀 Разглядываю...")
+            # Используем safe_reply для индикатора процесса
+            await safe_reply(msg, "👀 Разглядываю...")
 
         # Анализируем изображение через 2-step Vision Pipeline
         # Step 1: Vision model описывает изображение (скрыто от пользователя)
         # Step 2: Oleg LLM комментирует описание в своём стиле
         analysis_result = await vision_pipeline.analyze(image_bytes, user_query=user_query)
 
-        # Удаляем сообщение о процессе
-        if processing_msg:
-            try:
-                await processing_msg.delete()
-            except:
-                pass  # Игнорируем ошибку при удалении
-
         # Проверяем на пустой результат
         if not analysis_result or not analysis_result.strip():
             if not is_auto_reply:
-                await msg.reply("Хм, модель молчит. Попробуй другую картинку или спроси текстом.")
+                await safe_reply(msg, "Хм, модель молчит. Попробуй другую картинку или спроси текстом.")
             return
 
         # Обрезаем результат если слишком длинный (лимит Telegram - 4096 символов)
@@ -232,8 +227,8 @@ async def handle_image_message(msg: Message):
             prefixes = ["👀 ", "🤔 ", "Хм, ", "О, ", ""]
             analysis_result = random.choice(prefixes) + analysis_result
 
-        # Отправляем результат
-        await msg.reply(analysis_result)
+        # Отправляем результат через safe_reply (работает в старых топиках)
+        await safe_reply(msg, analysis_result)
         
         if is_auto_reply:
             logger.info(f"Auto-reply to image in chat {msg.chat.id}")
@@ -247,10 +242,7 @@ async def handle_image_message(msg: Message):
     except Exception as e:
         logger.error(f"Ошибка при обработке изображения: {e}")
         if not is_auto_reply:
-            try:
-                await msg.reply("Глаза мои разлюбили. Не могу разглядеть, что там на скрине.")
-            except:
-                pass  # Если не можем ответить - просто игнорируем
+            await safe_reply(msg, "Глаза мои разлюбили. Не могу разглядеть, что там на скрине.")
 
 
 # Команда для проверки работы модуля зрения

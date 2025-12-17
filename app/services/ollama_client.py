@@ -154,6 +154,10 @@ async def get_active_model(model_type: str = "base") -> str:
     
     # Проверяем доступность основной модели
     if await check_model_available(primary):
+        # Если были на fallback - уведомляем о восстановлении
+        if _current_active_model == fallback:
+            logger.info(f"Primary model {primary} restored! Switching back from {fallback}")
+            await notify_owner_model_restored(primary, fallback)
         if _current_active_model != primary:
             _current_active_model = primary
             logger.info(f"Using primary model: {primary}")
@@ -206,6 +210,36 @@ async def notify_owner_model_switch(primary: str, fallback: str):
         logger.info(f"Owner notified about model switch: {primary} -> {fallback}")
     except Exception as e:
         logger.error(f"Failed to notify owner about model switch: {e}")
+
+
+async def notify_owner_model_restored(primary: str, fallback: str):
+    """Уведомить владельца о восстановлении основной модели."""
+    # Удаляем кэш переключения чтобы можно было снова уведомить если опять упадёт
+    cache_key = f"switch_{primary}_{fallback}"
+    if cache_key in _owner_notified_cache:
+        del _owner_notified_cache[cache_key]
+    
+    if not settings.owner_id:
+        return
+    
+    try:
+        from aiogram import Bot
+        bot = Bot(token=settings.telegram_bot_token)
+        await bot.send_message(
+            chat_id=settings.owner_id,
+            text=(
+                f"✅ <b>Модель восстановлена!</b>\n\n"
+                f"Основная модель снова доступна:\n"
+                f"✅ <code>{primary}</code>\n\n"
+                f"Переключился обратно с резервной:\n"
+                f"⬅️ <code>{fallback}</code>"
+            ),
+            parse_mode="HTML"
+        )
+        await bot.session.close()
+        logger.info(f"Owner notified about model restore: {fallback} -> {primary}")
+    except Exception as e:
+        logger.error(f"Failed to notify owner about model restore: {e}")
 
 
 async def notify_owner_service_down(service: str, details: str = ""):

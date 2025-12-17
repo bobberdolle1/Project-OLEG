@@ -329,13 +329,19 @@ async def cb_owner_status(callback: CallbackQuery, bot: Bot):
     # ChromaDB
     try:
         from app.services.vector_db import vector_db
-        if vector_db.collection:
-            services_status.append("✅ ChromaDB")
+        if vector_db.client:
+            # Пробуем сделать heartbeat запрос
+            try:
+                vector_db.client.heartbeat()
+                services_status.append("✅ ChromaDB")
+            except Exception:
+                services_status.append("⚠️ ChromaDB (нет связи)")
+                has_critical_issues = True
         else:
             services_status.append("⚠️ ChromaDB (не инициализирован)")
             has_critical_issues = True
-    except Exception:
-        services_status.append("❌ ChromaDB")
+    except Exception as e:
+        services_status.append(f"❌ ChromaDB ({e})")
         has_critical_issues = True
     
     # Whisper (faster-whisper)

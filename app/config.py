@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     # ChromaDB (RAG)
     chromadb_persist_dir: str = Field(default="./data/chroma", description="ChromaDB persistence directory")
     chromadb_collection_name: str = Field(default="oleg_kb", description="ChromaDB collection name")
+    chromadb_host: str = Field(default="", description="ChromaDB server host (empty for local persistent)")
+    chromadb_port: int = Field(default=8000, description="ChromaDB server port")
 
     # Vector store
     embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model name")

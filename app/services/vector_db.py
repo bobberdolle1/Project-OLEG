@@ -88,15 +88,25 @@ class VectorDB:
         """Инициализирует соединение с ChromaDB."""
         try:
             from app.config import settings
-            # Используем PersistentClient для сохранения данных на диск
-            self.client = chromadb.PersistentClient(
-                path=settings.chromadb_persist_dir,
-                settings=Settings(anonymized_telemetry=False)
-            )
-            logger.info(f"ChromaDB успешно инициализирована (путь: {settings.chromadb_persist_dir})")
+            
+            # Если указан хост - подключаемся к серверу через HTTP
+            if settings.chromadb_host:
+                self.client = chromadb.HttpClient(
+                    host=settings.chromadb_host,
+                    port=settings.chromadb_port,
+                    settings=Settings(anonymized_telemetry=False)
+                )
+                logger.info(f"ChromaDB подключена к серверу {settings.chromadb_host}:{settings.chromadb_port}")
+            else:
+                # Используем PersistentClient для локального хранения
+                self.client = chromadb.PersistentClient(
+                    path=settings.chromadb_persist_dir,
+                    settings=Settings(anonymized_telemetry=False)
+                )
+                logger.info(f"ChromaDB инициализирована локально (путь: {settings.chromadb_persist_dir})")
         except Exception as e:
             logger.error(f"Ошибка при инициализации ChromaDB: {e}")
-            raise
+            self.client = None  # Не падаем, просто отключаем
     
     def get_or_create_collection(self, name: str):
         """Получает или создает коллекцию."""

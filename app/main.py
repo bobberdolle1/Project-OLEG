@@ -173,6 +173,7 @@ def build_dp() -> Dispatcher:
         voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
         tips_router,  # Роутер для советов владельцам чатов (/советы, /tips)
+        quotes.router,  # Цитатник (до qna, чтобы /q не перехватывался general_qna)
         qna.router,
         achievements.router,
         trading.router,
@@ -182,7 +183,6 @@ def build_dp() -> Dispatcher:
         team_wars.router,
         duos.router,
         statistics.router,
-        quotes.router,
         gif_patrol_router,  # GIF Patrol - анализ GIF на запрещённый контент (до vision)
         vision.router,  # Роутер для обработки изображений
         random_responses.router,  # Роутер для рандомных ответов

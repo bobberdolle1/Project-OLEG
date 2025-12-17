@@ -99,6 +99,31 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # SearXNG - метапоисковик для веб-поиска (Anti-Hallucination)
+  searxng:
+    image: searxng/searxng:latest
+    container_name: oleg-searxng
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - searxng-data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080
+    networks:
+      - oleg-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
   # Redis для кэширования и rate limiting
   redis:
     image: redis:7-alpine
@@ -201,6 +226,8 @@ volumes:
   redis-data:
     driver: local
   whisper-cache:
+    driver: local
+  searxng-data:
     driver: local
   # postgres-data:
   #   driver: local

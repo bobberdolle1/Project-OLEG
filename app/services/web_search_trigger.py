@@ -51,6 +51,15 @@ GPU_MODEL_PATTERNS = [
 ]
 
 
+# Исключения — когда НЕ нужен веб-поиск (вопросы про самого бота)
+SEARCH_EXCLUSIONS = [
+    "твои характеристики", "твоё железо", "твой процессор", "твоя видеокарта",
+    "на чём ты работаешь", "на чем ты работаешь", "где ты крутишься",
+    "какой ты", "кто ты", "что ты", "расскажи о себе",
+    "твои спеки", "твои specs", "твой сервер",
+]
+
+
 def should_trigger_web_search(text: str) -> bool:
     """
     Определяет, нужен ли веб-поиск для ответа на вопрос.
@@ -58,6 +67,9 @@ def should_trigger_web_search(text: str) -> bool:
     Триггерит поиск если текст содержит:
     - Ключевые слова о релизах, ценах, характеристиках
     - Номера моделей видеокарт/процессоров (780M, 4070, i7-13700)
+    
+    НЕ триггерит если:
+    - Вопрос про самого бота ("твои характеристики", "на чём ты работаешь")
     
     Args:
         text: Текст сообщения пользователя
@@ -71,6 +83,12 @@ def should_trigger_web_search(text: str) -> bool:
         return False
     
     text_lower = text.lower()
+    
+    # Сначала проверяем исключения — вопросы про самого бота
+    for exclusion in SEARCH_EXCLUSIONS:
+        if exclusion in text_lower:
+            logger.debug(f"Web search SKIPPED - question about bot: '{exclusion}' in text: '{text[:50]}...'")
+            return False
     
     # Проверяем ключевые слова
     for keyword in WEB_SEARCH_TRIGGER_KEYWORDS:

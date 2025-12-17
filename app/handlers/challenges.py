@@ -613,35 +613,47 @@ async def callback_accept_challenge(callback: CallbackQuery):
         "p2_defend": None,
         "p1_phase": "attack",  # attack -> defend -> done
         "p2_phase": "attack",
+        # Message IDs for each player's buttons
+        "p1_msg_id": None,
+        "p2_msg_id": None,
     }
     
-    # Build initial message
+    # Build initial status message (без кнопок)
     duel_text = render_pvp_status(pvp_duels[duel_id])
     duel_text += (
         f"\n\n⚔️ <b>Раунд 1</b>\n"
-        f"Оба игрока: выберите зону АТАКИ!\n\n"
-        f"👤 {challenger_name}: ожидание...\n"
-        f"👤 {acceptor_name}: ожидание..."
+        f"Оба игрока выбирают атаку..."
     )
     
-    # Send message to both players via bot
-    await callback.message.edit_text(
-        duel_text,
-        reply_markup=create_pvp_move_keyboard(duel_id, acceptor_id, "attack"),
-        parse_mode="HTML"
-    )
+    # Обновляем сообщение с вызовом — убираем кнопки принять/отклонить
+    await callback.message.edit_text(duel_text, parse_mode="HTML")
     
-    # Send separate message to challenger
+    # Отправляем ОТДЕЛЬНЫЕ сообщения каждому игроку
+    bot = callback.bot
+    
+    # Сообщение для challenger (игрок 1)
     try:
-        await callback.message.answer(
-            f"⚔️ <b>Дуэль началась!</b>\n\n"
-            f"Ты vs @{acceptor_name}\n\n"
-            f"🎯 Выбери зону АТАКИ:",
+        p1_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=f"🎯 <b>{challenger_name}</b>, выбери зону АТАКИ:",
             reply_markup=create_pvp_move_keyboard(duel_id, challenge.challenger_id, "attack"),
             parse_mode="HTML"
         )
+        pvp_duels[duel_id]["p1_msg_id"] = p1_msg.message_id
     except Exception as e:
         logger.warning(f"Failed to send challenger message: {e}")
+    
+    # Сообщение для acceptor (игрок 2)
+    try:
+        p2_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=f"🎯 <b>{acceptor_name}</b>, выбери зону АТАКИ:",
+            reply_markup=create_pvp_move_keyboard(duel_id, acceptor_id, "attack"),
+            parse_mode="HTML"
+        )
+        pvp_duels[duel_id]["p2_msg_id"] = p2_msg.message_id
+    except Exception as e:
+        logger.warning(f"Failed to send acceptor message: {e}")
     
     await callback.answer("⚔️ Бой начался!")
     logger.info(f"PvP duel started: {duel_id} - {challenger_name} vs {acceptor_name}")
@@ -758,32 +770,38 @@ async def callback_pvp_move(callback: CallbackQuery):
         return
     
     # Record the move
+    player_name = duel["player1_name"] if is_player1 else duel["player2_name"]
+    
     if phase == "attack":
         duel[f"{player_prefix}_attack"] = zone
         duel[f"{player_prefix}_phase"] = "defend"
         
-        # Update message to show defend selection
-        await callback.message.edit_text(
-            f"⚔️ Атака: {ZONE_NAMES[Zone(zone)]}\n\n"
-            f"🛡️ <b>Теперь выбери зону ЗАЩИТЫ:</b>",
-            reply_markup=create_pvp_move_keyboard(duel_id, user_id, "defend"),
-            parse_mode="HTML"
-        )
-        await callback.answer(f"⚔️ Атака: {ZONE_NAMES[Zone(zone)]}")
+        # Update THIS player's message to show defend selection
+        try:
+            await callback.message.edit_text(
+                f"⚔️ <b>{player_name}</b>\n"
+                f"Атака: {ZONE_NAMES[Zone(zone)]}\n\n"
+                f"🛡️ <b>Теперь выбери зону ЗАЩИТЫ:</b>",
+                reply_markup=create_pvp_move_keyboard(duel_id, user_id, "defend"),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit attack message: {e}")
+        await callback.answer(f"⚔️ Атака выбрана!")
         
     elif phase == "defend":
         duel[f"{player_prefix}_defend"] = zone
         duel[f"{player_prefix}_phase"] = "done"
         
-        # Show waiting message
-        await callback.message.edit_text(
-            f"✅ <b>Ход сделан!</b>\n\n"
-            f"⚔️ Атака: {ZONE_NAMES[Zone(duel[f'{player_prefix}_attack'])]}\n"
-            f"🛡️ Защита: {ZONE_NAMES[Zone(zone)]}\n\n"
-            f"⏳ Ожидаем соперника...",
-            reply_markup=create_pvp_waiting_keyboard(duel_id),
-            parse_mode="HTML"
-        )
+        # Show waiting message for THIS player
+        try:
+            await callback.message.edit_text(
+                f"✅ <b>{player_name} — ход сделан!</b>\n\n"
+                f"⏳ Ожидаем соперника...",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to edit defend message: {e}")
         await callback.answer("✅ Ход сделан!")
         
         # Check if both players are done
@@ -845,37 +863,50 @@ async def process_pvp_round(callback: CallbackQuery, duel_id: str):
     duel["p1_phase"] = "attack"
     duel["p2_phase"] = "attack"
     
-    # Send new round message with direct zone buttons
-    round_msg = (
+    # Сохраняем message_id для обоих игроков
+    duel["p1_msg_id"] = None
+    duel["p2_msg_id"] = None
+    
+    # Общее сообщение с результатом раунда (без кнопок)
+    status_msg = (
         f"⚔️ <b>Раунд {duel['round']}</b>\n\n"
         f"{render_pvp_status(duel)}\n\n"
         f"📜 Раунд {duel['round'] - 1}: {round_result}\n\n"
-        f"🎯 Выберите зону АТАКИ!"
+        f"🎯 Игроки выбирают атаку..."
     )
     
-    # Create keyboard with direct zone selection for both players
-    # Each player sees their own buttons
-    both_players_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🎯 Голова", callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:head"),
-            InlineKeyboardButton(text="💪 Тело", callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:body"),
-            InlineKeyboardButton(text="🦵 Ноги", callback_data=f"pvp:{duel_id}:{duel['player1_id']}:attack:legs"),
-        ],
-        [
-            InlineKeyboardButton(text="🎯 Голова", callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:head"),
-            InlineKeyboardButton(text="💪 Тело", callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:body"),
-            InlineKeyboardButton(text="🦵 Ноги", callback_data=f"pvp:{duel_id}:{duel['player2_id']}:attack:legs"),
-        ],
-    ])
-    
     try:
-        await callback.message.answer(
-            round_msg,
-            reply_markup=both_players_keyboard,
+        await callback.message.answer(status_msg, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to send status message: {e}")
+    
+    # Отправляем ОТДЕЛЬНЫЕ сообщения каждому игроку с их кнопками
+    bot = callback.bot
+    chat_id = duel["chat_id"]
+    
+    # Сообщение для игрока 1
+    try:
+        p1_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=f"🎯 <b>{duel['player1_name']}</b>, выбери зону АТАКИ:",
+            reply_markup=create_pvp_move_keyboard(duel_id, duel["player1_id"], "attack"),
             parse_mode="HTML"
         )
+        duel["p1_msg_id"] = p1_msg.message_id
     except Exception as e:
-        logger.warning(f"Failed to send round message: {e}")
+        logger.warning(f"Failed to send p1 message: {e}")
+    
+    # Сообщение для игрока 2
+    try:
+        p2_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=f"🎯 <b>{duel['player2_name']}</b>, выбери зону АТАКИ:",
+            reply_markup=create_pvp_move_keyboard(duel_id, duel["player2_id"], "attack"),
+            parse_mode="HTML"
+        )
+        duel["p2_msg_id"] = p2_msg.message_id
+    except Exception as e:
+        logger.warning(f"Failed to send p2 message: {e}")
 
 
 async def finish_pvp_duel(callback: CallbackQuery, duel_id: str, last_round: str):

@@ -955,10 +955,102 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
 
 
 # ============================================================================
+# Список групп и топ пользователей
+# ============================================================================
+
+@router.callback_query(F.data == "owner_groups_list")
+async def cb_owner_groups_list(callback: CallbackQuery):
+    """Показать список всех групп где есть бот."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    async_session = get_session()
+    async with async_session() as session:
+        # Получаем все чаты
+        result = await session.execute(select(Chat))
+        chats = result.scalars().all()
+    
+    if not chats:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="🔙 Назад", callback_data="owner_main")
+        await callback.message.edit_text(
+            "📭 Бот пока не добавлен ни в одну группу",
+            reply_markup=kb.as_markup()
+        )
+        await callback.answer()
+        return
+    
+    text = f"👥 <b>Список групп ({len(chats)})</b>\n\n"
+    for i, chat in enumerate(chats[:20], 1):  # Показываем первые 20
+        forum_icon = "📋" if chat.is_forum else "💬"
+        text += f"{i}. {forum_icon} <code>{chat.id}</code>\n   {chat.title}\n"
+    
+    if len(chats) > 20:
+        text += f"\n... и ещё {len(chats) - 20} групп"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data="owner_groups_list")
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(2)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_top_users")
+async def cb_owner_top_users(callback: CallbackQuery):
+    """Показать топ пользователей бота."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    async_session = get_session()
+    async with async_session() as session:
+        from app.database.models import GameStat
+        
+        # Топ по репутации
+        rep_result = await session.execute(
+            select(User).order_by(User.reputation_score.desc()).limit(10)
+        )
+        top_rep = rep_result.scalars().all()
+        
+        # Топ по размеру (grow)
+        size_result = await session.execute(
+            select(GameStat).order_by(GameStat.grow_size.desc()).limit(10)
+        )
+        top_size = size_result.scalars().all()
+        
+        # Общее количество пользователей
+        count_result = await session.execute(select(func.count(User.id)))
+        total_users = count_result.scalar()
+    
+    text = f"🏆 <b>Топ пользователей</b>\n"
+    text += f"📊 Всего: {total_users} пользователей\n\n"
+    
+    text += "<b>🎖 Топ по репутации:</b>\n"
+    for i, user in enumerate(top_rep, 1):
+        name = f"@{user.username}" if user.username else user.first_name or f"id:{user.tg_user_id}"
+        text += f"{i}. {name} — {user.reputation_score} очков\n"
+    
+    text += "\n<b>📏 Топ по размеру:</b>\n"
+    for i, stat in enumerate(top_size, 1):
+        # Нужно получить username
+        text += f"{i}. user_id:{stat.user_id} — {stat.grow_size} см\n"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data="owner_top_users")
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(2)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+# ============================================================================
 # Обновление главного меню с экстренными действиями
 # ============================================================================
 
-# Переопределяем функцию построения меню
 def build_owner_main_menu() -> InlineKeyboardBuilder:
     """Построить главное меню владельца."""
     kb = InlineKeyboardBuilder()
@@ -967,8 +1059,10 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
     kb.button(text="📊 Статус системы", callback_data="owner_status")
     kb.button(text="💬 Управление чатами", callback_data="owner_chats")
+    kb.button(text="👥 Список групп", callback_data="owner_groups_list")
+    kb.button(text="🏆 Топ пользователей", callback_data="owner_top_users")
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     kb.button(text="🚨 Экстренные действия", callback_data="owner_emergency")
     
-    kb.adjust(2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb

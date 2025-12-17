@@ -282,11 +282,13 @@ async def _ollama_chat(
 
     for attempt in range(retry + 1):
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.ollama_timeout
-            ) as client:
-                r = await client.post(url, json=payload)
-                r.raise_for_status()
+            import asyncio
+            async with asyncio.timeout(settings.ollama_timeout):
+                async with httpx.AsyncClient(
+                    timeout=settings.ollama_timeout
+                ) as client:
+                    r = await client.post(url, json=payload)
+                    r.raise_for_status()
                 data = r.json()
                 msg = data.get("message", {})
                 content = msg.get("content") or ""
@@ -357,7 +359,7 @@ async def _ollama_chat(
                     pass
                 
                 return content.strip()
-        except httpx.TimeoutException as e:
+        except (httpx.TimeoutException, asyncio.TimeoutError, TimeoutError) as e:
             duration = time.time() - start_time
             logger.warning(
                 f"[OLLAMA TIMEOUT] model={model_to_use} | attempt={attempt + 1}/{retry + 1} | "
@@ -365,7 +367,7 @@ async def _ollama_chat(
             )
             if attempt == retry:
                 logger.error(f"[OLLAMA FAIL] Timeout после {retry + 1} попыток")
-                raise
+                return "Извини, я завис. Попробуй ещё раз или переформулируй вопрос."
         except httpx.HTTPStatusError as e:
             logger.error(
                 f"[OLLAMA HTTP ERROR] model={model_to_use} | status={e.response.status_code}"

@@ -78,6 +78,11 @@ async def should_process_image(msg: Message) -> tuple[bool, bool]:
         logger.debug(f"Image processing: skipping - Ollama not available")
         return False, False
     
+    # В личных сообщениях всегда обрабатываем изображения
+    if msg.chat.type == "private":
+        logger.debug(f"Image processing: private chat, processing message {msg.message_id}")
+        return True, False
+    
     # Проверяем caption на упоминание бота
     caption = msg.caption or ""
     if _contains_bot_mention(caption, msg.bot):
@@ -91,11 +96,9 @@ async def should_process_image(msg: Message) -> tuple[bool, bool]:
             return True, False
     
     # Авто-ответ на изображения с вероятностью 2-5%
-    # Только в групповых чатах, не в личных сообщениях
-    if msg.chat.type != "private":
-        if random.random() < AUTO_IMAGE_REPLY_PROBABILITY:
-            logger.debug(f"Image processing: auto-reply triggered for message {msg.message_id}")
-            return True, True
+    if random.random() < AUTO_IMAGE_REPLY_PROBABILITY:
+        logger.debug(f"Image processing: auto-reply triggered for message {msg.message_id}")
+        return True, True
     
     logger.debug(f"Image processing: skipping message {msg.message_id} - no explicit mention")
     return False, False

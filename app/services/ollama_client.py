@@ -617,7 +617,7 @@ WEB_SEARCH_TOOL = {
 
 
 async def _ollama_chat(
-    messages: list[dict], temperature: float = 0.7, retry: int = 2, use_cache: bool = True,
+    messages: list[dict], temperature: float = 0.7, retry: int = 3, use_cache: bool = True,
     model: str | None = None, enable_tools: bool = False, final_model: str | None = None
 ) -> str:
     """
@@ -775,9 +775,18 @@ async def _ollama_chat(
                 logger.error(f"[OLLAMA FAIL] Timeout после {retry + 1} попыток")
                 return "Извини, я завис. Попробуй ещё раз или переформулируй вопрос."
         except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
             logger.error(
-                f"[OLLAMA HTTP ERROR] model={model_to_use} | status={e.response.status_code}"
+                f"[OLLAMA HTTP ERROR] model={model_to_use} | status={status_code} | "
+                f"attempt={attempt + 1}/{retry + 1}"
             )
+            
+            # Retry для 429 (Too Many Requests) и 503 (Service Unavailable)
+            if status_code in (429, 503) and attempt < retry:
+                wait_time = (attempt + 1) * 2  # 2, 4, 6 секунд
+                logger.info(f"[OLLAMA RETRY] Ждём {wait_time}s перед повтором...")
+                await asyncio.sleep(wait_time)
+                continue
             if attempt == retry:
                 raise
         except httpx.RequestError as e:
@@ -1404,6 +1413,41 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     kb_info = None
     kb_info = _check_knowledge_base(user_text)
     
+    # Ищем в базе знаний (ChromaDB) релевантные факты
+    # Извлекаем оригинальный текст без "User replies to:" для лучшего поиска
+    search_query = user_text
+    if "User replies to:" in user_text:
+        # Берём текст после контекста реплая
+        parts = user_text.split("\n", 1)
+        if len(parts) > 1:
+            search_query = parts[1].strip()
+        else:
+            # Если нет переноса, пробуем найти конец контекста
+            import re
+            match = re.search(r"User replies to: '[^']*'\s*(.+)", user_text, re.DOTALL)
+            if match:
+                search_query = match.group(1).strip()
+    
+    kb_facts = []
+    try:
+        default_collection = settings.chromadb_collection_name
+        logger.info(f"[KB SEARCH] Ищем в базе знаний: '{search_query[:50]}...'")
+        
+        kb_results = vector_db.search_facts(
+            collection_name=default_collection,
+            query=search_query,
+            n_results=5,
+            where={"source": "default_knowledge"}
+        )
+        
+        if kb_results:
+            kb_facts = [f['text'] for f in kb_results if 'text' in f]
+            logger.info(f"[KB SEARCH] Найдено {len(kb_facts)} фактов из базы знаний")
+            for fact in kb_facts[:3]:
+                logger.info(f"[KB FACT] {fact[:80]}...")
+    except Exception as e:
+        logger.warning(f"[KB SEARCH] Ошибка: {e}")
+    
     # Извлекаем информацию о ссылках в сообщении
     link_context = None
     try:
@@ -1437,7 +1481,18 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
 {kb_info}
 
 Используй эти данные как основу — они проверены и актуальны."""
-        logger.info(f"[KB] Добавлена информация из базы знаний")
+        logger.info(f"[KB] Добавлена информация из статичной базы знаний")
+    
+    # Добавляем факты из ChromaDB если есть
+    if kb_facts:
+        facts_text = "\n".join([f"• {fact}" for fact in kb_facts])
+        system_prompt += f"""
+
+ФАКТЫ ИЗ БАЗЫ ЗНАНИЙ (ИСПОЛЬЗУЙ ИХ!):
+{facts_text}
+
+ВАЖНО: Эти факты проверены и актуальны. Используй их в ответе если релевантны вопросу."""
+        logger.info(f"[KB] Добавлено {len(kb_facts)} фактов из ChromaDB")
     
     # Добавляем результаты поиска в промпт если есть
     if search_results_text:
@@ -2126,28 +2181,27 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
     except Exception as e:
         logger.debug(f"Память чата недоступна: {e}")
     
-    # 2. Дополняем дефолтными знаниями если нужно больше контекста
+    # 2. Дополняем дефолтными знаниями
     try:
-        remaining = n_results - len(context_facts)
-        if remaining > 0:
-            default_collection = settings.chromadb_collection_name
-            default_facts = vector_db.search_facts(
-                collection_name=default_collection,
-                query=query,
-                n_results=remaining + 2,  # Берём чуть больше для лучшего покрытия
-                where={"source": "default_knowledge"}
-            )
-            
-            for fact in default_facts:
-                if 'text' in fact and fact['text'] not in context_facts:
-                    context_facts.append(fact['text'])
-                    if len(context_facts) >= n_results + 2:  # Лимит
-                        break
-            
-            if default_facts:
-                logger.debug(f"Добавлено {len(default_facts)} фактов из базы знаний")
+        default_collection = settings.chromadb_collection_name
+        logger.info(f"[KB SEARCH] Ищем в базе знаний: '{query[:50]}...' (collection={default_collection})")
+        
+        default_facts = vector_db.search_facts(
+            collection_name=default_collection,
+            query=query,
+            n_results=5,  # Берём больше для лучшего покрытия
+            where={"source": "default_knowledge"}
+        )
+        
+        logger.info(f"[KB SEARCH] Найдено {len(default_facts)} фактов")
+        
+        for fact in default_facts:
+            if 'text' in fact and fact['text'] not in context_facts:
+                context_facts.append(fact['text'])
+                logger.info(f"[KB FACT] {fact['text'][:80]}...")
+        
     except Exception as e:
-        logger.debug(f"Дефолтные знания недоступны: {e}")
+        logger.warning(f"[KB SEARCH] Ошибка поиска в базе знаний: {e}")
     
     return context_facts
 
@@ -2170,6 +2224,8 @@ async def generate_reply_with_context(user_text: str, username: str | None,
     **Feature: oleg-personality-improvements**
     **Validates: Requirements 3.1, 3.2**
     """
+    logger.info(f"[CONTEXT GEN] Генерация с контекстом для chat={chat_id}, topic={topic_id}")
+    
     # === НОВОЕ: Загружаем историю последних сообщений чата ===
     # Это позволяет Олегу понимать контекст разговора
     chat_history_context = ""

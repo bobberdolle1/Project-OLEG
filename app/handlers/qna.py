@@ -18,7 +18,7 @@ from app.services.recommendations import generate_recommendation
 from app.services.tts import tts_service
 from app.services.golden_fund import golden_fund_service
 from app.services.reply_context import reply_context_injector
-from app.utils import utc_now
+from app.utils import utc_now, safe_reply
 
 logger = logging.getLogger(__name__)
 
@@ -663,13 +663,17 @@ async def general_qna(msg: Message):
         # Get and send recommendation
         recommendation = await generate_recommendation(session, user, text)
         if recommendation:
-            await msg.answer(f"💡 Рекомендация: {recommendation}")
+            try:
+                await safe_reply(msg, f"💡 Рекомендация: {recommendation}")
+            except Exception:
+                pass  # Игнорируем ошибки отправки рекомендации
 
     except Exception as e:
         logger.error(f"Ошибка при генерации ответа: {e}")
-        await msg.reply(
-            "Сервер сломался. Но только ненадолго, обещаю."
-        )
+        try:
+            await safe_reply(msg, "Сервер сломался. Но только ненадолго, обещаю.")
+        except Exception:
+            pass  # Игнорируем если не можем ответить
 
 
 @router.message(Command("myhistory"))

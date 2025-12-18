@@ -158,7 +158,7 @@ class UserMemoryService:
                 collection_name=collection_name,
                 query=f"user_profile_{user_id}",
                 n_results=1,
-                where={"user_id": user_id, "type": "profile"}
+                where={"$and": [{"user_id": user_id}, {"type": "profile"}]}
             )
             
             if results:

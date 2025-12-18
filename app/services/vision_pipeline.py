@@ -348,16 +348,34 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 
                 data = response.json()
                 message = data.get("message", {})
-                content = message.get("content", "").strip()
+                raw_content = message.get("content", "").strip()
+                
+                # Логируем сырой ответ для диагностики
+                if raw_content:
+                    logger.debug(f"Vision Step 2: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
+                else:
+                    logger.warning(f"Vision Step 2: Model returned empty content")
+                    return None
                 
                 # Фильтруем thinking-теги
-                content = think_filter.filter(content)
+                content = think_filter.filter(raw_content)
                 
                 if content and content != think_filter.fallback_message:
                     logger.info(f"Vision Step 2: Generated comment ({len(content)} chars)")
                     return content
                 
-                logger.warning("Vision Step 2: Empty comment from model")
+                # Если после фильтрации пусто — попробуем извлечь из think-тегов
+                import re
+                think_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+                if think_match:
+                    think_content = think_match.group(1).strip()
+                    # Ищем финальный ответ после think
+                    after_think = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                    if after_think:
+                        logger.info(f"Vision Step 2: Using content after think tags ({len(after_think)} chars)")
+                        return after_think
+                
+                logger.warning(f"Vision Step 2: Empty after filter. Raw was: {raw_content[:100]}...")
                 return None
                 
         except httpx.ConnectError:

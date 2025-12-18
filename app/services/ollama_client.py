@@ -690,10 +690,11 @@ async def _ollama_chat(
                             
                             # Добавляем результат поиска в контекст и делаем повторный запрос
                             messages_with_tool = messages.copy()
-                            messages_with_tool.append(msg)  # Ответ модели с tool_call
+                            
+                            # Используем user role вместо tool — gemma не понимает tool role
                             messages_with_tool.append({
-                                "role": "tool",
-                                "content": search_result_text  # Только текст, не объект
+                                "role": "user",
+                                "content": f"[Результаты поиска по запросу '{query}']\n{search_result_text}\n\n[Теперь ответь на вопрос пользователя, используя эту информацию. Если поиск не дал результатов — используй свои знания или честно скажи что не знаешь.]"
                             })
                             
                             # Рекурсивный вызов без tools чтобы получить финальный ответ
@@ -942,7 +943,7 @@ async def _execute_web_search(query: str) -> tuple[str, SearchResponse | None]:
             return formatted, response
         else:
             logger.warning(f"[SEARCH] No results for: {query[:50]}...")
-            return "Поиск не дал результатов", None
+            return "Поиск не дал результатов. Используй свои знания или скажи что не нашёл актуальной информации.", None
                 
     except Exception as e:
         logger.warning(f"Ошибка веб-поиска: {e}")
@@ -1427,6 +1428,27 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
             match = re.search(r"User replies to: '[^']*'\s*(.+)", user_text, re.DOTALL)
             if match:
                 search_query = match.group(1).strip()
+    
+    # Извлекаем технические термины для лучшего поиска
+    # Ищем слова в верхнем регистре, CamelCase, или известные термины
+    import re
+    tech_terms = []
+    # Слова полностью в верхнем регистре (SDWEAK, GPU, CPU, DDR5)
+    tech_terms.extend(re.findall(r'\b[A-Z][A-Z0-9]{2,}\b', search_query))
+    # CamelCase слова (Gamescope, SteamOS)
+    tech_terms.extend(re.findall(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', search_query))
+    # Слова с цифрами (RTX4090, DDR5, i7-14700K)
+    tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', search_query))
+    # Известные термины (регистронезависимо)
+    known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel']
+    for term in known_terms:
+        if term.lower() in search_query.lower():
+            tech_terms.append(term)
+    
+    # Если нашли технические термины — используем их для поиска
+    if tech_terms:
+        search_query = ' '.join(list(dict.fromkeys(tech_terms)))  # Убираем дубликаты
+        logger.info(f"[KB SEARCH] Извлечены термины: {search_query}")
     
     kb_facts = []
     try:
@@ -2157,6 +2179,41 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
     Returns:
         Список релевантных фактов
     """
+    logger.info(f"[RETRIEVE] Начинаем поиск контекста для: '{query[:50]}...' (chat={chat_id}, topic={topic_id})")
+    
+    # Извлекаем оригинальный текст без "User replies to:" для лучшего поиска
+    search_query = query
+    if "User replies to:" in query:
+        parts = query.split("\n", 1)
+        if len(parts) > 1:
+            search_query = parts[1].strip()
+        else:
+            import re
+            match = re.search(r"User replies to: '[^']*'\s*(.+)", query, re.DOTALL)
+            if match:
+                search_query = match.group(1).strip()
+    
+    # Извлекаем технические термины для лучшего поиска в KB
+    import re
+    tech_terms = []
+    # Слова полностью в верхнем регистре (SDWEAK, GPU, CPU, DDR5)
+    tech_terms.extend(re.findall(r'\b[A-Z][A-Z0-9]{2,}\b', search_query))
+    # CamelCase слова (Gamescope, SteamOS)
+    tech_terms.extend(re.findall(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', search_query))
+    # Слова с цифрами (RTX4090, DDR5, i7-14700K)
+    tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', search_query))
+    # Известные термины (регистронезависимо)
+    known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel', 'ryzen', 'geforce', 'radeon']
+    for term in known_terms:
+        if term.lower() in search_query.lower():
+            tech_terms.append(term)
+    
+    # Если нашли технические термины — используем их для поиска в KB
+    kb_search_query = search_query
+    if tech_terms:
+        kb_search_query = ' '.join(list(dict.fromkeys(tech_terms)))
+        logger.info(f"[RETRIEVE] Извлечены термины для KB: {kb_search_query}")
+    
     context_facts = []
     
     try:
@@ -2170,7 +2227,7 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
         
         facts = vector_db.search_facts(
             collection_name=collection_name,
-            query=query,
+            query=search_query,
             n_results=n_results,
             model=settings.ollama_memory_model,
             where=where_filter
@@ -2181,14 +2238,14 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
     except Exception as e:
         logger.debug(f"Память чата недоступна: {e}")
     
-    # 2. Дополняем дефолтными знаниями
+    # 2. Дополняем дефолтными знаниями (используем извлечённые термины)
     try:
         default_collection = settings.chromadb_collection_name
-        logger.info(f"[KB SEARCH] Ищем в базе знаний: '{query[:50]}...' (collection={default_collection})")
+        logger.info(f"[KB SEARCH] Ищем в базе знаний: '{kb_search_query[:50]}...' (collection={default_collection})")
         
         default_facts = vector_db.search_facts(
             collection_name=default_collection,
-            query=query,
+            query=kb_search_query,
             n_results=5,  # Берём больше для лучшего покрытия
             where={"source": "default_knowledge"}
         )

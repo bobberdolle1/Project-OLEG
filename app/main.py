@@ -131,12 +131,43 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     logger.info("Проверка дефолтных знаний в RAG...")
     try:
         from app.services.vector_db import vector_db
+        import json
+        from pathlib import Path
+        
         if vector_db.client:
             collection_name = settings.chromadb_collection_name
             stats = vector_db.get_default_knowledge_stats(collection_name)
             
-            if stats.get("total", 0) == 0:
-                logger.info("Дефолтные знания не найдены, загружаем...")
+            # Читаем версию из JSON файла
+            json_version = None
+            knowledge_paths = [
+                Path(__file__).parent / "data" / "default_knowledge.json",
+                Path("app/data/default_knowledge.json"),
+            ]
+            for path in knowledge_paths:
+                if path.exists():
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            json_data = json.load(f)
+                            json_version = json_data.get("version", "unknown")
+                            break
+                    except Exception:
+                        pass
+            
+            current_version = stats.get("version", "unknown")
+            needs_reload = (
+                stats.get("total", 0) == 0 or  # Нет фактов
+                (json_version and json_version != current_version)  # Версия изменилась
+            )
+            
+            if needs_reload:
+                if stats.get("total", 0) > 0:
+                    logger.info(f"Версия базы знаний изменилась: {current_version} -> {json_version}, перезагружаем...")
+                    # Очищаем старые знания перед загрузкой новых
+                    vector_db.clear_default_knowledge(collection_name)
+                else:
+                    logger.info("Дефолтные знания не найдены, загружаем...")
+                
                 result = vector_db.load_default_knowledge(collection_name)
                 if result.get("error"):
                     logger.warning(f"Ошибка загрузки дефолтных знаний: {result['error']}")

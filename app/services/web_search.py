@@ -193,9 +193,10 @@ class WebSearchService:
                         )
                         
             except Exception as e:
-                logger.debug(f"[SEARXNG] {instance_url} failed: {e}")
+                logger.warning(f"[SEARXNG] {instance_url} failed: {e}")
                 continue
         
+        logger.warning(f"[SEARXNG] All instances failed for: {query[:30]}...")
         return SearchResponse(results=[], query=query, provider="searxng", error="All instances failed")
     
     async def _search_brave(

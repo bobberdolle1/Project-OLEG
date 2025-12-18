@@ -104,37 +104,39 @@ class OllamaEmbeddingFunction(EmbeddingFunction):
         return self._available
     
     def __call__(self, input: Documents) -> Embeddings:
-        """Генерирует embeddings через Ollama API."""
+        """Генерирует embeddings через Ollama API (batch mode)."""
         if not self._check_available():
             logger.warning(f"Ollama недоступен, используем fallback embeddings")
             # Возвращаем нулевые embeddings как fallback
             return [[0.0] * 768 for _ in input]
         
-        embeddings = []
         try:
-            with httpx.Client(timeout=30) as client:
-                for text in input:
-                    response = client.post(
-                        f"{self.base_url}/api/embed",
-                        json={"model": self.model, "input": text}
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        # Ollama возвращает embeddings в поле "embeddings" (список)
-                        emb = data.get("embeddings", [[]])[0]
-                        if emb:
-                            embeddings.append(emb)
-                        else:
-                            embeddings.append([0.0] * 768)
+            # Ollama поддерживает batch embeddings — отправляем все тексты за один запрос
+            # Увеличиваем таймаут для больших батчей (60 секунд)
+            with httpx.Client(timeout=60) as client:
+                response = client.post(
+                    f"{self.base_url}/api/embed",
+                    json={"model": self.model, "input": input}  # Передаём список текстов
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    # Ollama возвращает embeddings в поле "embeddings" (список списков)
+                    embeddings = data.get("embeddings", [])
+                    if embeddings and len(embeddings) == len(input):
+                        return embeddings
                     else:
-                        logger.warning(f"Ollama embed error: {response.status_code}")
-                        embeddings.append([0.0] * 768)
+                        logger.warning(f"Ollama вернул {len(embeddings)} embeddings для {len(input)} текстов")
+                        # Дополняем нулевыми если не хватает
+                        while len(embeddings) < len(input):
+                            embeddings.append([0.0] * 768)
+                        return embeddings
+                else:
+                    logger.warning(f"Ollama embed error: {response.status_code}")
+                    return [[0.0] * 768 for _ in input]
         except Exception as e:
             logger.error(f"Ошибка при получении embeddings: {e}")
             # Fallback — нулевые embeddings
             return [[0.0] * 768 for _ in input]
-        
-        return embeddings
 
 
 # Глобальный экземпляр embedding function
@@ -783,6 +785,11 @@ class VectorDB:
         
         categories = knowledge_data.get("categories", {})
         
+        # Собираем все факты для batch загрузки
+        all_documents = []
+        all_metadatas = []
+        all_ids = []
+        
         for category_name, category_data in categories.items():
             categories_count += 1
             facts = category_data.get("facts", [])
@@ -809,26 +816,45 @@ class VectorDB:
                 # Уникальный ID для дефолтных знаний
                 doc_id = f"default_{category_name}_{i}"
                 
-                try:
-                    # Проверяем, не существует ли уже этот факт
-                    existing = collection.get(ids=[doc_id])
-                    if existing and existing['ids']:
-                        # Обновляем существующий
-                        collection.update(
-                            ids=[doc_id],
-                            documents=[fact_text],
-                            metadatas=[metadata]
-                        )
-                    else:
-                        # Добавляем новый
+                all_documents.append(fact_text)
+                all_metadatas.append(metadata)
+                all_ids.append(doc_id)
+        
+        # Batch загрузка — добавляем все факты за один раз
+        # Это НАМНОГО быстрее чем по одному (один вызов embeddings вместо 400+)
+        if all_documents:
+            try:
+                # Загружаем батчами по 50 фактов (ChromaDB лимит)
+                batch_size = 50
+                for batch_start in range(0, len(all_documents), batch_size):
+                    batch_end = min(batch_start + batch_size, len(all_documents))
+                    batch_docs = all_documents[batch_start:batch_end]
+                    batch_metas = all_metadatas[batch_start:batch_end]
+                    batch_ids = all_ids[batch_start:batch_end]
+                    
+                    try:
                         collection.add(
-                            documents=[fact_text],
-                            metadatas=[metadata],
-                            ids=[doc_id]
+                            documents=batch_docs,
+                            metadatas=batch_metas,
+                            ids=batch_ids
                         )
-                    loaded_count += 1
-                except Exception as e:
-                    logger.error(f"Ошибка загрузки факта {doc_id}: {e}")
+                        loaded_count += len(batch_docs)
+                        logger.info(f"Загружено {loaded_count}/{len(all_documents)} фактов...")
+                    except Exception as e:
+                        # Если batch не удался, пробуем по одному
+                        logger.warning(f"Batch загрузка не удалась, пробуем по одному: {e}")
+                        for j, (doc, meta, doc_id) in enumerate(zip(batch_docs, batch_metas, batch_ids)):
+                            try:
+                                collection.add(
+                                    documents=[doc],
+                                    metadatas=[meta],
+                                    ids=[doc_id]
+                                )
+                                loaded_count += 1
+                            except Exception as e2:
+                                logger.error(f"Ошибка загрузки факта {doc_id}: {e2}")
+            except Exception as e:
+                logger.error(f"Критическая ошибка при batch загрузке: {e}")
         
         logger.info(f"Загружено {loaded_count} фактов из {categories_count} категорий (версия: {version})")
         

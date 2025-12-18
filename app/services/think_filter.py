@@ -56,7 +56,7 @@ class ThinkTagFilter:
     # # Header → Header
     MARKDOWN_HEADER_PATTERN = re.compile(r'^#{1,6}\s+', re.MULTILINE)
     
-    DEFAULT_FALLBACK = "Олег завис. Перезагружаюсь..."
+    DEFAULT_FALLBACK = "Хм, мысль потерял. Повтори вопрос?"
     
     def __init__(self, fallback_message: Optional[str] = None):
         """

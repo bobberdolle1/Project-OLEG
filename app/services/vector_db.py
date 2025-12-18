@@ -4,11 +4,13 @@ import logging
 import warnings
 import chromadb
 from chromadb.config import Settings
+from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
 from typing import List, Dict, Optional, Tuple, Any
 import json
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
+import httpx
 
 
 @dataclass
@@ -77,6 +79,81 @@ logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 
+
+class OllamaEmbeddingFunction(EmbeddingFunction):
+    """
+    Кастомная embedding function для ChromaDB через Ollama API.
+    Использует nomic-embed-text или другую модель из настроек.
+    """
+    
+    def __init__(self, model: str = "nomic-embed-text", base_url: str = "http://localhost:11434"):
+        self.model = model
+        self.base_url = base_url
+        self._available = None
+    
+    def _check_available(self) -> bool:
+        """Проверяет доступность Ollama."""
+        if self._available is not None:
+            return self._available
+        try:
+            with httpx.Client(timeout=5) as client:
+                response = client.get(f"{self.base_url}/api/tags")
+                self._available = response.status_code == 200
+        except Exception:
+            self._available = False
+        return self._available
+    
+    def __call__(self, input: Documents) -> Embeddings:
+        """Генерирует embeddings через Ollama API."""
+        if not self._check_available():
+            logger.warning(f"Ollama недоступен, используем fallback embeddings")
+            # Возвращаем нулевые embeddings как fallback
+            return [[0.0] * 768 for _ in input]
+        
+        embeddings = []
+        try:
+            with httpx.Client(timeout=30) as client:
+                for text in input:
+                    response = client.post(
+                        f"{self.base_url}/api/embed",
+                        json={"model": self.model, "input": text}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        # Ollama возвращает embeddings в поле "embeddings" (список)
+                        emb = data.get("embeddings", [[]])[0]
+                        if emb:
+                            embeddings.append(emb)
+                        else:
+                            embeddings.append([0.0] * 768)
+                    else:
+                        logger.warning(f"Ollama embed error: {response.status_code}")
+                        embeddings.append([0.0] * 768)
+        except Exception as e:
+            logger.error(f"Ошибка при получении embeddings: {e}")
+            # Fallback — нулевые embeddings
+            return [[0.0] * 768 for _ in input]
+        
+        return embeddings
+
+
+# Глобальный экземпляр embedding function
+_ollama_embedding_fn: Optional[OllamaEmbeddingFunction] = None
+
+
+def get_ollama_embedding_function() -> OllamaEmbeddingFunction:
+    """Получает или создаёт Ollama embedding function."""
+    global _ollama_embedding_fn
+    if _ollama_embedding_fn is None:
+        from app.config import settings
+        _ollama_embedding_fn = OllamaEmbeddingFunction(
+            model=settings.embedding_model,
+            base_url=settings.ollama_base_url
+        )
+        logger.info(f"Ollama embedding function: model={settings.embedding_model}")
+    return _ollama_embedding_fn
+
+
 class VectorDB:
     """Класс для работы с векторной базой данных ChromaDB."""
     
@@ -110,16 +187,21 @@ class VectorDB:
             self.client = None  # Не падаем, просто отключаем
     
     def get_or_create_collection(self, name: str):
-        """Получает или создает коллекцию."""
+        """Получает или создает коллекцию с Ollama embeddings."""
         try:
-            # Всегда используем get_or_create для надёжности
-            self.collections[name] = self.client.get_or_create_collection(name)
+            # Используем Ollama embedding function вместо дефолтной
+            embedding_fn = get_ollama_embedding_function()
+            self.collections[name] = self.client.get_or_create_collection(
+                name=name,
+                embedding_function=embedding_fn
+            )
             return self.collections[name]
         except Exception as e:
             logger.error(f"Ошибка при получении коллекции {name}: {e}")
-            # Пробуем пересоздать
+            # Пробуем без кастомных embeddings как fallback
             try:
-                self.collections[name] = self.client.create_collection(name)
+                logger.warning(f"Fallback: создаём коллекцию {name} с дефолтными embeddings")
+                self.collections[name] = self.client.get_or_create_collection(name)
                 return self.collections[name]
             except Exception as e2:
                 logger.error(f"Не удалось создать коллекцию {name}: {e2}")

@@ -178,10 +178,14 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
         try:
             image_base64 = base64.b64encode(image_data).decode('utf-8')
             
+            # Используем fallback vision модель если основная недоступна
+            from app.services.ollama_client import get_active_model
+            vision_model = await get_active_model("vision")
+            
             # Формат для Ollama vision API
             # Некоторые модели требуют images на уровне сообщения, другие — отдельно
             payload = {
-                "model": settings.ollama_vision_model,
+                "model": vision_model,
                 "messages": [
                     {
                         "role": "user",
@@ -200,7 +204,7 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
             # Логируем размер изображения
             logger.info(f"Vision Step 1: Image size {len(image_data)} bytes, base64 {len(image_base64)} chars")
             
-            logger.info(f"Vision Step 1: Requesting description from {settings.ollama_vision_model}")
+            logger.info(f"Vision Step 1: Requesting description from {vision_model}")
             
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(
@@ -285,12 +289,15 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
             combined_text = f"{description} {user_query or ''}"
             search_results = None
             
-            if should_trigger_web_search(combined_text) and settings.ollama_web_search_enabled:
+            needs_search, _ = should_trigger_web_search(combined_text)
+            if needs_search and settings.ollama_web_search_enabled:
                 logger.info(f"Vision Step 2: Triggering web search for factcheck")
                 try:
                     # Ищем по ключевым словам из описания
-                    search_results = await _execute_web_search(combined_text[:200])
-                    logger.info(f"Vision Step 2: Got search results ({len(search_results)} chars)")
+                    search_results_text, _ = await _execute_web_search(combined_text[:200])
+                    if search_results_text:
+                        search_results = search_results_text
+                        logger.info(f"Vision Step 2: Got search results ({len(search_results)} chars)")
                 except Exception as e:
                     logger.warning(f"Vision Step 2: Web search failed: {e}")
             
@@ -306,8 +313,12 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
             if search_results:
                 user_prompt += f"\n\nАКТУАЛЬНАЯ ИНФА ИЗ ИНТЕРНЕТА (используй для фактчекинга):\n{search_results}"
             
+            # Используем fallback модель если основная недоступна
+            from app.services.ollama_client import get_active_model
+            active_model = await get_active_model("base")
+            
             payload = {
-                "model": settings.ollama_base_model,
+                "model": active_model,
                 "messages": [
                     {
                         "role": "system",
@@ -326,7 +337,7 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 }
             }
             
-            logger.info(f"Vision Step 2: Generating Oleg comment with {settings.ollama_base_model}")
+            logger.info(f"Vision Step 2: Generating Oleg comment with {active_model}")
             
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(

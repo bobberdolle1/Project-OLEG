@@ -75,8 +75,10 @@ class WebSearchService:
     ]
     
     def __init__(self):
-        self.searxng_url = getattr(settings, 'searxng_url', None)
-        self.brave_api_key = getattr(settings, 'brave_search_api_key', None)
+        self.searxng_url = getattr(settings, 'searxng_url', None) or None
+        # Проверяем что API ключ не пустая строка
+        brave_key = getattr(settings, 'brave_search_api_key', None)
+        self.brave_api_key = brave_key if brave_key and brave_key.strip() else None
         self._cache: dict[str, tuple[SearchResponse, float]] = {}
         self._cache_ttl = 600  # 10 минут (увеличил для экономии запросов)
         self._working_searxng: Optional[str] = None  # Кэш рабочего инстанса
@@ -128,8 +130,8 @@ class WebSearchService:
         if response.results:
             return response
         
-        # 2. Brave (если есть ключ)
-        if self.brave_api_key:
+        # 2. Brave (если есть ключ и он не пустой)
+        if self.brave_api_key and self.brave_api_key.strip():
             response = await self._search_brave(query, max_results, freshness)
             if response.results:
                 return response
@@ -204,14 +206,19 @@ class WebSearchService:
     ) -> SearchResponse:
         """Поиск через Brave Search API."""
         try:
+            # Проверяем наличие API ключа
+            if not self.brave_api_key:
+                return SearchResponse(results=[], query=query, provider="brave", error="No API key")
+            
             async with httpx.AsyncClient(timeout=10) as client:
+                # httpx автоматически кодирует параметры в UTF-8
                 response = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={
-                        "q": query,
+                        "q": query,  # httpx сам закодирует кириллицу
                         "count": max_results,
                         "freshness": freshness,
-                        "text_decorations": False,
+                        "text_decorations": "false",
                     },
                     headers={
                         "X-Subscription-Token": self.brave_api_key,

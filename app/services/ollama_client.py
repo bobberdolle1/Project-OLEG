@@ -529,7 +529,7 @@ WEB_SEARCH_TOOL = {
 
 async def _ollama_chat(
     messages: list[dict], temperature: float = 0.7, retry: int = 2, use_cache: bool = True,
-    model: str | None = None, enable_tools: bool = False
+    model: str | None = None, enable_tools: bool = False, final_model: str | None = None
 ) -> str:
     """
     Отправить запрос к Ollama API и получить ответ от модели.
@@ -596,31 +596,57 @@ async def _ollama_chat(
                         if tool_name == "web_search":
                             query = tool_args.get("query", "")
                             logger.info(f"LLM запросил веб-поиск: {query}")
-                            # Выполняем поиск
-                            search_result = await _execute_web_search(query)
+                            # Выполняем поиск (возвращает tuple: текст, SearchResponse)
+                            search_result_text, _ = await _execute_web_search(query)
                             
                             # Добавляем результат поиска в контекст и делаем повторный запрос
                             messages_with_tool = messages.copy()
                             messages_with_tool.append(msg)  # Ответ модели с tool_call
                             messages_with_tool.append({
                                 "role": "tool",
-                                "content": search_result
+                                "content": search_result_text  # Только текст, не объект
                             })
                             
                             # Рекурсивный вызов без tools чтобы получить финальный ответ
+                            # Если указана final_model — используем её для ответа (fallback режим)
+                            response_model = final_model if final_model else model_to_use
                             return await _ollama_chat(
                                 messages_with_tool, 
                                 temperature=temperature, 
                                 retry=retry, 
                                 use_cache=False,
-                                model=model_to_use,
+                                model=response_model,
                                 enable_tools=False
                             )
+                
+                # Если есть final_model и это не она — перенаправляем ответ на final_model
+                # Это нужно когда tool_model решил не использовать tools, но ответ должен быть от другой модели
+                if final_model and model_to_use != final_model and content:
+                    logger.info(f"[FALLBACK] Redirecting response from {model_to_use} to {final_model}")
+                    # Добавляем ответ tool_model как контекст и просим final_model ответить
+                    messages_for_final = messages.copy()
+                    messages_for_final.append({
+                        "role": "assistant",
+                        "content": f"[Информация для ответа: {content}]"
+                    })
+                    messages_for_final.append({
+                        "role": "user", 
+                        "content": "Ответь на основе этой информации в своём стиле, коротко."
+                    })
+                    return await _ollama_chat(
+                        messages_for_final,
+                        temperature=temperature,
+                        retry=1,
+                        use_cache=False,
+                        model=final_model,
+                        enable_tools=False
+                    )
                 
                 # Проверяем на зацикливание и очищаем если нужно
                 is_looped, content = detect_loop_in_text(content)
                 if is_looped:
-                    content += "\n\n[Олег завис, перезагрузился]"
+                    # Не добавляем сообщение о зацикливании — просто обрезаем
+                    logger.warning(f"[LOOP DETECTED] Response truncated, original len={len(content)}")
                 
                 # Фильтруем thinking-теги из ответа LLM (Requirements 1.1, 1.2, 1.3, 1.4)
                 content = think_filter.filter(content)
@@ -1345,9 +1371,23 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     # Получаем активную модель с учётом fallback
     active_model = await get_active_model("base")
     
+    # tool_model используется только в fallback режиме (когда основная модель недоступна)
+    # Основная модель (deepseek, glm) сама поддерживает tools
+    # Fallback модель (gemma) не поддерживает tools, поэтому нужен отдельный tool_model (qwen)
+    tool_model = getattr(settings, 'ollama_tool_model', None)
+    
+    # Проверяем, используем ли мы fallback модель (gemma не поддерживает tools)
+    is_fallback_model = active_model == settings.ollama_fallback_model
+    
     try:
-        # Используем активную модель для текстовых ответов с поддержкой веб-поиска
-        response = await _ollama_chat(messages, model=active_model, enable_tools=True)
+        if is_fallback_model and tool_model:
+            # Fallback режим: используем tool_model для tools, fallback_model для финального ответа
+            # tool_model (qwen) обрабатывает веб-поиск, но ответ генерирует fallback (gemma) с промптом Олега
+            logger.info(f"[FALLBACK MODE] Using {tool_model} for tools, {active_model} for final response")
+            response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=active_model)
+        else:
+            # Основная модель поддерживает tools — используем её для всего
+            response = await _ollama_chat(messages, model=active_model, enable_tools=not is_fallback_model)
         
         # Fact-checking: проверяем ответ на галлюцинации
         if response and (needs_search or kb_info):
@@ -1372,16 +1412,33 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError) as e:
         logger.error(f"Ollama error with {active_model}: {e}")
         
-        # Пробуем fallback если включен и это была основная модель
-        if settings.ollama_fallback_enabled and active_model == settings.ollama_base_model:
-            fallback = settings.ollama_fallback_model
-            logger.warning(f"Trying fallback model: {fallback}")
+        # Пробуем fallback если включен
+        if settings.ollama_fallback_enabled:
+            # Fallback стратегия:
+            # - tool_model (qwen3:8b) используется для tools (поддерживает function calling)
+            # - fallback_model (gemma3:12b) используется для чата (не поддерживает tools)
+            fallback_chat = settings.ollama_fallback_model  # gemma3:12b для чата
+            
+            logger.warning(f"Trying fallback: tool_model={tool_model}, chat_model={fallback_chat}")
             try:
-                await notify_owner_model_switch(active_model, fallback)
-                return await _ollama_chat(messages, model=fallback, enable_tools=True)
+                await notify_owner_model_switch(active_model, f"{tool_model}+{fallback_chat}")
+                
+                if tool_model:
+                    # Используем tool_model для tools, fallback_chat для финального ответа с личностью Олега
+                    response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=fallback_chat)
+                    return response
+                else:
+                    # Нет tool_model — используем fallback без tools
+                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False)
             except Exception as fallback_err:
-                logger.error(f"Fallback model {fallback} also failed: {fallback_err}")
-                await notify_owner_service_down("Ollama", f"Обе модели недоступны: {active_model}, {fallback}")
+                logger.error(f"Fallback with tool_model failed: {fallback_err}")
+                # Последняя попытка — только chat модель без tools
+                try:
+                    logger.warning(f"Last resort: {fallback_chat} without tools")
+                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False)
+                except Exception as last_err:
+                    logger.error(f"All fallbacks failed: {last_err}")
+                    await notify_owner_service_down("Ollama", f"Все модели недоступны")
         
         if isinstance(e, httpx.TimeoutException):
             return _get_error_response("timeout", "Сервер ИИ тупит. Попробуй позже, чемпион.")
@@ -2041,9 +2098,9 @@ async def generate_reply_with_context(user_text: str, username: str | None,
         full_context = (full_context + current_user_context) if full_context else current_user_context
 
     # === НОВОЕ: Проверяем нужен ли веб-поиск ===
-    force_web_search = should_trigger_web_search(user_text)
+    force_web_search, search_reason = should_trigger_web_search(user_text)
     if force_web_search:
-        logger.info(f"[CONTEXT] Принудительный веб-поиск для: {user_text[:50]}...")
+        logger.info(f"[CONTEXT] Принудительный веб-поиск для: {user_text[:50]}... (reason: {search_reason})")
 
     return await generate_text_reply(user_text, username, full_context, force_web_search=force_web_search)
 

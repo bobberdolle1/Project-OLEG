@@ -18,9 +18,9 @@ services:
       - "9090:9090"
     volumes:
       # Сохранение базы данных между перезагрузками
-      - oleg-data:/app/data
-      # Сохранение логов
-      - oleg-logs:/app/logs
+      - ./data:/app/data
+      # Сохранение логов (локальная папка для удобного доступа)
+      - ./logs:/app/logs
       # Данные векторной базы
       - chroma-data:/app/chroma_data
       # Кэш моделей Whisper и Silero TTS (чтобы не скачивать при каждом перезапуске)
@@ -215,10 +215,7 @@ services:
   #     - prometheus
 
 volumes:
-  oleg-data:
-    driver: local
-  oleg-logs:
-    driver: local
+  # oleg-data и oleg-logs теперь bind mounts (./data и ./logs)
   chroma-data:
     driver: local
   clickhouse-data:

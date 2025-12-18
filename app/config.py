@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         default="glm-4.6:cloud",
         description="Model for RAG and memory search"
     )
-    ollama_timeout: int = Field(default=90, ge=10, le=300, description="Ollama request timeout in seconds")
+    ollama_timeout: int = Field(default=120, ge=10, le=300, description="Ollama request timeout in seconds")
     ollama_cache_enabled: bool = Field(default=True, description="Enable response caching")
     ollama_cache_ttl: int = Field(default=3600, ge=60, description="Cache TTL in seconds")
     ollama_cache_max_size: int = Field(default=128, ge=10, description="Max cache size")
@@ -47,9 +47,16 @@ class Settings(BaseSettings):
     searxng_url: Optional[str] = Field(default=None, description="SearXNG instance URL (self-hosted, unlimited)")
     brave_search_api_key: Optional[str] = Field(default=None, description="Brave Search API key (free tier: 2000 req/month)")
     
+    # Tool model (для fallback режима — когда основная модель недоступна)
+    # Используется для function calling (веб-поиск) вместе с fallback_model
+    ollama_tool_model: str = Field(
+        default="qwen3:8b",
+        description="Model for tools in fallback mode (web search). Must support function calling."
+    )
+    
     # Fallback models (локальные модели когда cloud недоступен)
     ollama_fallback_enabled: bool = Field(default=True, description="Enable fallback to local models when cloud unavailable")
-    ollama_fallback_model: str = Field(default="qwen3:8b", description="Fallback model for text generation")
+    ollama_fallback_model: str = Field(default="gemma3:12b", description="Fallback model for text generation")
     ollama_fallback_vision_model: str = Field(default="qwen3-vl:4b-instruct", description="Fallback model for vision")
     ollama_fallback_memory_model: str = Field(default="qwen3:8b", description="Fallback model for memory/RAG")
     
@@ -64,8 +71,8 @@ class Settings(BaseSettings):
     chromadb_port: int = Field(default=8000, description="ChromaDB server port")
 
     # Vector store
-    embedding_model: str = Field(default="all-MiniLM-L6-v2", description="Embedding model name")
-    similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Similarity threshold for RAG")
+    embedding_model: str = Field(default="nomic-embed-text", description="Embedding model name (nomic лучше для русского)")
+    similarity_threshold: float = Field(default=0.65, ge=0.0, le=1.0, description="Similarity threshold for RAG")
 
     # Database
     database_url: str = Field(
@@ -95,7 +102,7 @@ class Settings(BaseSettings):
 
     # Rate limiting
     rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
-    rate_limit_requests: int = Field(default=10, ge=1, description="Max requests per window")
+    rate_limit_requests: int = Field(default=15, ge=1, description="Max requests per window")
     rate_limit_window: int = Field(default=60, ge=1, description="Rate limit window in seconds")
 
     # Metrics

@@ -81,6 +81,7 @@ data/
 
 # Logs
 logs/
+!logs/.gitkeep
 *.log
 
 # Mypy

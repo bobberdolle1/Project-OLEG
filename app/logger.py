@@ -62,6 +62,9 @@ def setup_logging() -> None:
     root_logger.handlers.clear()
     root_logger.setLevel(logging.DEBUG)
     
+    # Отключаем propagate для всех логгеров чтобы избежать дублирования
+    root_logger.propagate = False
+    
     context_filter = ContextFilter()
     
     # Форматы
@@ -122,11 +125,28 @@ def setup_logging() -> None:
     console_handler.addFilter(context_filter)
     root_logger.addHandler(console_handler)
     
-    # Уменьшаем шум от библиотек
+    # Уменьшаем шум от библиотек и отключаем их собственные handlers
+    # ВАЖНО: очищаем handlers ПОСЛЕ добавления наших, чтобы библиотеки не добавили свои позже
+    lib_loggers = [
+        "httpx", "httpcore", "aiogram", "apscheduler", 
+        "sqlalchemy.engine", "chromadb", "urllib3", "asyncio",
+        "aiosqlite", "aiohttp", "arq", "default",  # default - это APScheduler jobs
+        "apscheduler.scheduler", "apscheduler.executors", "apscheduler.executors.default"
+    ]
+    for lib_name in lib_loggers:
+        lib_logger = logging.getLogger(lib_name)
+        lib_logger.handlers.clear()  # Убираем их собственные handlers
+        lib_logger.propagate = True  # Пусть идут через root
+    
+    # Устанавливаем уровни
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("aiogram").setLevel(logging.INFO)
-    logging.getLogger("apscheduler").setLevel(logging.INFO)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)  # Меньше шума от scheduler
+    logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler.executors").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+    logging.getLogger("default").setLevel(logging.WARNING)  # APScheduler jobs
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("chromadb").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)

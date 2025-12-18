@@ -363,7 +363,9 @@ async def _process_gif_patrol(message: Message, bot: Bot, animation) -> None:
 
 async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_reply: bool) -> None:
     """
-    Обрабатывает GIF через vision pipeline (как фото - комментарий).
+    Обрабатывает GIF через vision pipeline.
+    
+    Анализирует 3 кадра (начало, середина, конец) для полного понимания анимации.
     """
     import random
     from app.services.vision_pipeline import vision_pipeline
@@ -376,18 +378,14 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
             await safe_reply(message, "Не удалось загрузить гифку 😕")
         return
     
-    # Извлекаем первый кадр для анализа
-    frame_bytes = None
+    # Извлекаем 3 кадра (начало, середина, конец)
+    frames = []
     try:
         frames = gif_patrol_service.extract_frames(animation_bytes)
-        if frames:
-            frame_bytes = frames[0]
     except Exception as e:
         logger.warning(f"Error extracting GIF frames: {e}")
     
-    # Если не удалось извлечь кадры - возвращаем ошибку
-    # Vision модель не может обработать сырые MP4 байты
-    if not frame_bytes:
+    if not frames:
         logger.warning("Failed to extract frames from animation, cannot analyze")
         if not is_auto_reply:
             await safe_reply(message, "Не смог разобрать эту гифку — формат не поддерживается 😕")
@@ -402,12 +400,35 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
     try:
         # Для авто-ответов не показываем индикатор процесса
         if not is_auto_reply:
-            await safe_reply(message, "👀 Разглядываю гифку...")
+            await safe_reply(message, "👀 Разглядываю гифку (3 кадра)...")
         
-        # Анализируем кадр через Vision Pipeline
-        analysis_result = await vision_pipeline.analyze(frame_bytes, user_query=user_query)
+        # Анализируем все 3 кадра и собираем описания
+        frame_descriptions = []
+        frame_labels = ["начало", "середина", "конец"]
         
-        # Проверяем на пустой результат
+        for idx, frame_bytes in enumerate(frames):
+            try:
+                # Получаем описание кадра напрямую от Vision модели
+                description = await vision_pipeline._get_image_description(frame_bytes)
+                if description:
+                    frame_descriptions.append(f"[{frame_labels[idx]}]: {description}")
+            except Exception as e:
+                logger.warning(f"Error analyzing frame {idx}: {e}")
+        
+        if not frame_descriptions:
+            if not is_auto_reply:
+                await safe_reply(message, "Хм, модель молчит. Попробуй другую гифку.")
+            return
+        
+        # Объединяем описания всех кадров
+        combined_description = "\n".join(frame_descriptions)
+        
+        # Генерируем комментарий Олега на основе всех кадров
+        analysis_result = await vision_pipeline._generate_oleg_comment(
+            f"Это GIF-анимация из {len(frames)} кадров:\n{combined_description}",
+            user_query
+        )
+        
         if not analysis_result or not analysis_result.strip():
             if not is_auto_reply:
                 await safe_reply(message, "Хм, модель молчит. Попробуй другую гифку.")

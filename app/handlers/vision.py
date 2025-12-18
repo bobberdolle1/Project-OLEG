@@ -3,12 +3,17 @@
 Использует 2-step Vision Pipeline для анализа изображений:
 Step 1: Vision model описывает изображение (скрыто от пользователя)
 Step 2: Oleg LLM комментирует описание в своём стиле
+
+Поддерживает:
+- Одиночные фото
+- Media groups (несколько фото за раз) — анализирует все и отвечает одним сообщением
 """
 
+import asyncio
 import logging
 import random
 import re
-from typing import Optional
+from typing import Optional, List, Dict
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -25,6 +30,13 @@ OLEG_TRIGGERS = ["олег", "олега", "олегу", "олегом", "оле
 
 # Вероятность авто-ответа на изображения (2-5%)
 AUTO_IMAGE_REPLY_PROBABILITY = 0.035  # 3.5% базовая вероятность
+
+# Кэш для media_group — собираем фото из одной группы
+# {media_group_id: {"messages": [Message], "processed": bool, "timer_task": Task}}
+_media_group_cache: Dict[str, dict] = {}
+
+# Время ожидания остальных фото из группы (секунды)
+MEDIA_GROUP_WAIT_TIME = 1.0
 
 
 def _contains_bot_mention(text: str, bot) -> bool:
@@ -171,6 +183,8 @@ async def handle_image_message(msg: Message):
     - Ответ на сообщение бота
     - Авто-ответ сработал (2-5% вероятность)
     
+    Поддерживает media_group — несколько фото за раз анализируются вместе.
+    
     **Validates: Requirements 1.1, 1.4**
     """
     # Проверяем, нужно ли обрабатывать изображение
@@ -185,6 +199,153 @@ async def handle_image_message(msg: Message):
     if text and text.startswith('/'):
         return
 
+    # Если это media_group — собираем все фото и обрабатываем вместе
+    if msg.media_group_id:
+        await _handle_media_group(msg, is_auto_reply)
+        return
+
+    # Одиночное фото — обрабатываем сразу
+    await _process_single_image(msg, is_auto_reply)
+
+
+async def _handle_media_group(msg: Message, is_auto_reply: bool) -> None:
+    """
+    Обрабатывает фото из media_group.
+    
+    Собирает все фото из группы и анализирует их вместе.
+    """
+    global _media_group_cache
+    
+    group_id = msg.media_group_id
+    
+    # Добавляем сообщение в кэш группы
+    if group_id not in _media_group_cache:
+        _media_group_cache[group_id] = {
+            "messages": [],
+            "processed": False,
+            "is_auto_reply": is_auto_reply,
+            "timer_task": None
+        }
+    
+    _media_group_cache[group_id]["messages"].append(msg)
+    
+    # Отменяем предыдущий таймер если есть
+    if _media_group_cache[group_id]["timer_task"]:
+        _media_group_cache[group_id]["timer_task"].cancel()
+    
+    # Запускаем таймер для обработки группы
+    async def process_after_delay():
+        await asyncio.sleep(MEDIA_GROUP_WAIT_TIME)
+        await _process_media_group(group_id)
+    
+    _media_group_cache[group_id]["timer_task"] = asyncio.create_task(process_after_delay())
+
+
+async def _process_media_group(group_id: str) -> None:
+    """
+    Обрабатывает собранную media_group.
+    """
+    global _media_group_cache
+    
+    if group_id not in _media_group_cache:
+        return
+    
+    group_data = _media_group_cache[group_id]
+    
+    # Проверяем, не обработана ли уже
+    if group_data["processed"]:
+        return
+    
+    group_data["processed"] = True
+    messages = group_data["messages"]
+    is_auto_reply = group_data["is_auto_reply"]
+    
+    # Очищаем кэш
+    del _media_group_cache[group_id]
+    
+    if not messages:
+        return
+    
+    # Берём первое сообщение для ответа
+    first_msg = messages[0]
+    
+    # Собираем caption из первого сообщения с caption
+    user_query = None
+    for m in messages:
+        if m.caption and m.caption.strip():
+            if not is_auto_reply:
+                user_query = m.caption.strip()
+            break
+    
+    from aiogram.exceptions import TelegramBadRequest
+    
+    try:
+        # Показываем индикатор
+        if not is_auto_reply:
+            await safe_reply(first_msg, f"👀 Разглядываю {len(messages)} фото...")
+        
+        # Извлекаем байты всех изображений
+        image_descriptions = []
+        for idx, m in enumerate(messages, 1):
+            image_bytes = await extract_image_bytes(m)
+            if image_bytes:
+                try:
+                    description = await vision_pipeline._get_image_description(image_bytes)
+                    if description:
+                        image_descriptions.append(f"[Фото {idx}]: {description}")
+                except Exception as e:
+                    logger.warning(f"Error analyzing image {idx} in media_group: {e}")
+        
+        if not image_descriptions:
+            if not is_auto_reply:
+                await safe_reply(first_msg, "Хм, модель молчит. Попробуй другие картинки.")
+            return
+        
+        # Объединяем описания всех фото
+        combined_description = "\n\n".join(image_descriptions)
+        
+        # Генерируем комментарий Олега
+        analysis_result = await vision_pipeline._generate_oleg_comment(
+            f"Пользователь прислал {len(messages)} фото:\n{combined_description}",
+            user_query
+        )
+        
+        if not analysis_result or not analysis_result.strip():
+            if not is_auto_reply:
+                await safe_reply(first_msg, "Хм, модель молчит. Попробуй другие картинки.")
+            return
+        
+        # Обрезаем если слишком длинный
+        max_length = 4000
+        if len(analysis_result) > max_length:
+            analysis_result = analysis_result[:max_length] + "...\n\n[обрезано]"
+        
+        # Для авто-ответов добавляем префикс
+        if is_auto_reply:
+            prefixes = ["👀 ", "🤔 ", "Хм, ", "О, ", ""]
+            analysis_result = random.choice(prefixes) + analysis_result
+        
+        await safe_reply(first_msg, analysis_result)
+        
+        logger.info(f"Processed media_group with {len(messages)} images in chat {first_msg.chat.id}")
+        
+    except TelegramBadRequest as e:
+        if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
+            logger.warning(f"Не удалось ответить на media_group - топик удалён: {e}")
+        else:
+            logger.error(f"Telegram ошибка при обработке media_group: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка при обработке media_group: {e}")
+        if not is_auto_reply:
+            await safe_reply(first_msg, "Глаза мои разлюбили. Не могу разглядеть, что там на скринах.")
+
+
+async def _process_single_image(msg: Message, is_auto_reply: bool) -> None:
+    """
+    Обрабатывает одиночное изображение.
+    """
+    text = msg.caption if msg.caption else ""
+    
     # Проверяем, есть ли изображение
     image_bytes = await extract_image_bytes(msg)
     if not image_bytes:
@@ -192,23 +353,18 @@ async def handle_image_message(msg: Message):
         return
 
     # Используем текст как user_query для VisionPipeline
-    # Для авто-ответов не используем caption как запрос
     user_query = None
     if not is_auto_reply and text and text.strip():
         user_query = text.strip()
 
     from aiogram.exceptions import TelegramBadRequest
 
-    processing_msg = None
     try:
         # Для авто-ответов не показываем индикатор процесса
         if not is_auto_reply:
-            # Используем safe_reply для индикатора процесса
             await safe_reply(msg, "👀 Разглядываю...")
 
         # Анализируем изображение через 2-step Vision Pipeline
-        # Step 1: Vision model описывает изображение (скрыто от пользователя)
-        # Step 2: Oleg LLM комментирует описание в своём стиле
         analysis_result = await vision_pipeline.analyze(image_bytes, user_query=user_query)
 
         # Проверяем на пустой результат
@@ -217,8 +373,8 @@ async def handle_image_message(msg: Message):
                 await safe_reply(msg, "Хм, модель молчит. Попробуй другую картинку или спроси текстом.")
             return
 
-        # Обрезаем результат если слишком длинный (лимит Telegram - 4096 символов)
-        max_length = 4000  # Оставляем запас
+        # Обрезаем результат если слишком длинный
+        max_length = 4000
         if len(analysis_result) > max_length:
             analysis_result = analysis_result[:max_length] + "...\n\n[обрезано, слишком много текста]"
 
@@ -227,14 +383,12 @@ async def handle_image_message(msg: Message):
             prefixes = ["👀 ", "🤔 ", "Хм, ", "О, ", ""]
             analysis_result = random.choice(prefixes) + analysis_result
 
-        # Отправляем результат через safe_reply (работает в старых топиках)
         await safe_reply(msg, analysis_result)
         
         if is_auto_reply:
             logger.info(f"Auto-reply to image in chat {msg.chat.id}")
 
     except TelegramBadRequest as e:
-        # Игнорируем ошибки типа "thread not found" - топик был удалён
         if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():
             logger.warning(f"Не удалось ответить - топик/сообщение удалено: {e}")
         else:

@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/🤖-ОЛЕГ-red?style=for-the-badge&labelColor=black" alt="Oleg Bot"/>
 </p>
 
-<h1 align="center">🎰 ОЛЕГ 7.9.6 — Ollama Embeddings & Fallback Fix 🎰</h1>
+<h1 align="center">🎰 ОЛЕГ 7.9.7 — Logging Fix 🎰</h1>
 
 <p align="center">
   <strong>Цифровой гигачад. Ветеран кремниевых войн. Местный решала.</strong>

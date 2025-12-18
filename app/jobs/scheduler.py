@@ -19,6 +19,12 @@ from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
+# Отключаем дублирующее логирование APScheduler
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.executors").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+
 _scheduler: AsyncIOScheduler | None = None
 
 

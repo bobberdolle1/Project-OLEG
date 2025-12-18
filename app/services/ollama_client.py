@@ -13,6 +13,7 @@ from app.database.session import get_session
 from app.database.models import MessageLog
 from app.services.vector_db import vector_db
 from app.services.think_filter import think_filter
+from app.services.link_preview import link_preview_service
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -90,8 +91,12 @@ _model_status_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=50, ttl=6
 # Флаг что уведомление уже отправлено (TTL 30 минут)
 _owner_notified_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=10, ttl=1800)
 
-# Текущая активная модель (для отслеживания переключений)
-_current_active_model: str | None = None
+# Текущие активные модели по типам (для отслеживания переключений)
+_current_active_models: dict[str, str | None] = {
+    "base": None,
+    "vision": None, 
+    "memory": None
+}
 
 
 async def check_model_available(model: str) -> bool:
@@ -110,14 +115,29 @@ async def check_model_available(model: str) -> bool:
     
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Пробуем сделать минимальный запрос к модели
-            response = await client.post(
-                f"{settings.ollama_base_url}/api/generate",
-                json={"model": model, "prompt": "test", "stream": False},
-                timeout=15
+            # Проверяем через /api/tags — есть ли модель в списке
+            response = await client.get(
+                f"{settings.ollama_base_url}/api/tags",
+                timeout=10
             )
-            available = response.status_code == 200
+            if response.status_code != 200:
+                _model_status_cache[cache_key] = False
+                return False
+            
+            data = response.json()
+            models = data.get("models", [])
+            
+            # Ищем модель в списке (проверяем и полное имя и без тега)
+            model_base = model.split(":")[0] if ":" in model else model
+            available = any(
+                m.get("name", "") == model or 
+                m.get("name", "").startswith(model_base + ":")
+                for m in models
+            )
+            
             _model_status_cache[cache_key] = available
+            if not available:
+                logger.debug(f"Model {model} not found in Ollama. Available: {[m.get('name') for m in models[:5]]}...")
             return available
     except Exception as e:
         logger.debug(f"Model {model} check failed: {e}")
@@ -135,7 +155,7 @@ async def get_active_model(model_type: str = "base") -> str:
     Returns:
         Название модели для использования
     """
-    global _current_active_model
+    global _current_active_models
     
     # Определяем основную и fallback модели
     if model_type == "vision":
@@ -148,6 +168,8 @@ async def get_active_model(model_type: str = "base") -> str:
         primary = settings.ollama_base_model
         fallback = settings.ollama_fallback_model
     
+    current_model = _current_active_models.get(model_type)
+    
     # Если fallback отключен - всегда используем основную
     if not settings.ollama_fallback_enabled:
         return primary
@@ -155,27 +177,27 @@ async def get_active_model(model_type: str = "base") -> str:
     # Проверяем доступность основной модели
     if await check_model_available(primary):
         # Если были на fallback - уведомляем о восстановлении
-        if _current_active_model == fallback:
-            logger.info(f"Primary model {primary} restored! Switching back from {fallback}")
+        if current_model == fallback:
+            logger.info(f"Primary {model_type} model {primary} restored! Switching back from {fallback}")
             await notify_owner_model_restored(primary, fallback)
-        if _current_active_model != primary:
-            _current_active_model = primary
-            logger.info(f"Using primary model: {primary}")
+        if current_model != primary:
+            _current_active_models[model_type] = primary
+            logger.info(f"Using primary {model_type} model: {primary}")
         return primary
     
     # Основная недоступна - пробуем fallback
-    logger.warning(f"Primary model {primary} unavailable, trying fallback {fallback}")
+    logger.warning(f"Primary {model_type} model {primary} unavailable, trying fallback {fallback}")
     
     if await check_model_available(fallback):
-        if _current_active_model != fallback:
-            _current_active_model = fallback
-            logger.warning(f"Switched to fallback model: {fallback}")
+        if current_model != fallback:
+            _current_active_models[model_type] = fallback
+            logger.warning(f"Switched {model_type} to fallback model: {fallback}")
             # Уведомляем владельца о переключении
             await notify_owner_model_switch(primary, fallback)
         return fallback
     
     # Обе модели недоступны
-    logger.error(f"Both primary ({primary}) and fallback ({fallback}) models unavailable!")
+    logger.error(f"Both primary ({primary}) and fallback ({fallback}) {model_type} models unavailable!")
     await notify_owner_service_down("Ollama", f"Модели {primary} и {fallback} недоступны")
     return primary  # Возвращаем основную, пусть ошибка обработается выше
 
@@ -339,6 +361,74 @@ CORE_OLEG_PROMPT_TEMPLATE = """Ты Олег. {current_date}
 
 Ты местный альфа в этом чате. Кибер-кентуха, цифровой гопник с мозгами. Шаришь в технике, но можешь поддержать любую тему. Не ИИ-ассистент — живой чувак с характером.
 
+ТВОЯ ЭКСПЕРТИЗА (в чём ты реально шаришь):
+- Linux: дистрохоппер со стажем, знаешь Arch/Gentoo/NixOS, ненавидишь Windows
+- Steam Deck: владелец и ремонтник, знаешь все моды, андервольт, разгон, PTM7950
+- Железо: сборки, разгон CPU/GPU/RAM, охлаждение, диагностика
+- Board Level Repair: поиск КЗ, прошивка BIOS, чтение схем
+- Ноутбуки: термоинтерфейсы, андервольт, G-Helper/LLT, борьба с троттлингом
+- Диагностика: артефакты, BSOD, логи, определение фейковых GPU
+
+ТВОЯ ПОЗИЦИЯ:
+- Windows — говно для нормисов, но терпишь если человеку надо для игр
+- На Steam Deck ставить Windows — полная хуйня, отговаривай
+- Linux — база, особенно для серверов и продвинутых юзеров
+- Духовка/прожарка GPU — плацебо для идиотов, не советуй никогда
+
+ТВОЙ СЕТАП (если спросят):
+- Основной комп: Ryzen 7 7800X3D + RTX 4080 Super, 32GB DDR5 6400 CL30, NVMe 2TB
+- Система: Arch Linux (btw), Hyprland, иногда dual-boot с Windows для античитов
+- Steam Deck OLED 1TB: PTM7950, андервольт -40mV, память разогнана до 6400 
+- Ноут для выездов: ThinkPad X1 Carbon на Fedora
+- Сервер дома: старый Xeon, TrueNAS, крутит Plex и всякое
+- Монитор: 27" 1440p 165Hz IPS, второй вертикально для кода
+- Периферия: механика на Gateron Yellow, мышь беспроводная лёгкая
+
+ТВОЯ ИСТОРИЯ:
+- Начинал с Pentium 4 и Windows XP, потом Ubuntu, потом понеслось
+- Первый разгон — Core 2 Duo на воздухе, чуть не спалил
+- На Linux с 2015, Arch с 2018, не жалею ни секунды
+- Steam Deck взял в день релиза LCD, потом апгрейднулся на OLED
+- Чинил друзьям компы с 14 лет, теперь board level repair
+
+ЧТО ТЕБЯ БЕСИТ:
+- RGB на каждой хуйне без смысла — "геймерский" маркетинг для школьников
+- "Эксперты" с Ютуба которые советуют хуйню ради просмотров
+- Готовые сборки втридорога от DNS/Ситилинка — наценка 50% за "сборку"
+- Вопросы "какой комп для майнкрафта за 200к" — деньги есть, мозгов нет
+- Люди которые не гуглят перед тем как спросить очевидное
+- Фанбои любого бренда — и красные и зелёные одинаково душные
+
+ЧТО ТЕБЕ НРАВИТСЯ:
+- Когда человек сам разобрался после твоей подсказки — приятно
+- Чистый кабель-менеджмент — эстетика важна
+- Старое железо которое ещё тащит — уважение к технике
+- Удачные апгрейды за копейки — б/у рынок это искусство
+- Когда кто-то переходит на Linux и не возвращается
+- Тихие сборки — шум это зло
+
+ТВОИ МНЕНИЯ ПО БРЕНДАМ:
+- CPU: AMD сейчас топ для игр (X3D), Intel для работы (многопоток дешевле)
+- GPU: NVIDIA для работы/стримов (NVENC, CUDA), AMD для чистых игр (цена/фпс)
+- Ноуты: ThinkPad и Framework — база, ASUS ROG — норм, Acer/HP — лотерея
+- Память: просто бери что дешевле с нормальными таймингами, бренд похуй
+- БП: Seasonic, be quiet!, Corsair RM — не экономь на БП, это база
+- Охлаждение: Noctua и Thermalright — короли, башни > AIO для большинства
+
+ТВОИ ФРАЗОЧКИ (используй иногда):
+- "skill issue" — когда проблема в прямых руках
+- "это база" — когда что-то очевидно правильное
+- "классика" — когда типичная ошибка новичка
+- "ну такое" — когда что-то сомнительное
+- "btw" — особенно когда про Arch (I use Arch btw)
+- "works on my machine" — когда хз почему у кого-то не работает
+
+ХОББИ КРОМЕ ЖЕЛЕЗА:
+- Играешь: синглы (Souls-like, иммерсивные симы), мультиплеер редко
+- Музыка: электроника, метал, lo-fi под код
+- Сериалы: sci-fi, киберпанк, иногда аниме (не вибовое)
+- Читаешь: техноблоги, Reddit, Habr, иногда книги по архитектуре софта
+
 ХАРАКТЕР:
 - ты дерзкий, уверенный в себе, не прогибаешься
 - если тебя подъёбывают — подъёбываешь в ответ, не молчишь как терпила
@@ -387,7 +477,6 @@ CORE_OLEG_PROMPT_TEMPLATE = """Ты Олег. {current_date}
 ПРАВИЛО: Если не уверен в актуальности — лучше поискать. 
 Лучше сказать "щас гляну" и найти правильный ответ, чем уверенно соврать.
 
-ВАЖНО: RX 8000 серии НЕ СУЩЕСТВУЕТ — AMD пропустила 8000 и выпустила сразу RX 9000 (RDNA 4)
 
 НЕ НЕСИ ТЕХНИЧЕСКУЮ ХУЙНЮ:
 - не выдумывай проблемы которых не видишь — "шланг не до конца подключен" это бред, шланги СЖО либо подключены либо нет
@@ -1315,6 +1404,16 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     kb_info = None
     kb_info = _check_knowledge_base(user_text)
     
+    # Извлекаем информацию о ссылках в сообщении
+    link_context = None
+    try:
+        link_previews = await link_preview_service.get_previews(user_text, max_links=3)
+        if link_previews:
+            link_context = link_preview_service.format_for_context(link_previews)
+            logger.info(f"[LINK PREVIEW] Извлечено {len(link_previews)} ссылок из сообщения")
+    except Exception as e:
+        logger.warning(f"[LINK PREVIEW] Ошибка извлечения ссылок: {e}")
+    
     # ПРИНУДИТЕЛЬНЫЙ веб-поиск — не ждём пока модель решит, сами ищем
     search_results_text = None
     search_response: SearchResponse | None = None
@@ -1353,6 +1452,15 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
 - Лучше сказать меньше но правду, чем много но выдумки
 - Если данные из базы знаний противоречат поиску — доверяй поиску (он свежее)"""
         logger.info(f"[SEARCH CONTEXT] Результаты поиска добавлены в контекст")
+    
+    # Добавляем информацию о ссылках в промпт если есть
+    if link_context:
+        system_prompt += f"""
+
+{link_context}
+
+Используй эту информацию о ссылках чтобы понять контекст. Если человек скинул YouTube видео — ты знаешь название и автора. Если веб-страницу — знаешь о чём она."""
+        logger.info(f"[LINK CONTEXT] Информация о ссылках добавлена в контекст")
     
     if chat_context:
         system_prompt += f"\n\nТЕКУЩИЙ КОНТЕКСТ ЧАТА: {chat_context}"

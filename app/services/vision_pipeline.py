@@ -333,7 +333,7 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 "options": {
                     "temperature": 0.7,  # Больше креативности для Олега
                     "num_ctx": 4096,
-                    "num_predict": 256
+                    "num_predict": 512  # Увеличено для полных ответов
                 }
             }
             

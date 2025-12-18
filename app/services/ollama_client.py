@@ -1416,33 +1416,43 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     
     # Ищем в базе знаний (ChromaDB) релевантные факты
     # Извлекаем оригинальный текст без "User replies to:" для лучшего поиска
+    # НО также извлекаем термины из контекста реплая!
     search_query = user_text
+    reply_context = ""
     if "User replies to:" in user_text:
         # Берём текст после контекста реплая
         parts = user_text.split("\n", 1)
         if len(parts) > 1:
             search_query = parts[1].strip()
+            # Извлекаем контекст реплая для поиска терминов
+            import re
+            match = re.search(r"User replies to: '([^']*)'", user_text)
+            if match:
+                reply_context = match.group(1)
         else:
             # Если нет переноса, пробуем найти конец контекста
             import re
-            match = re.search(r"User replies to: '[^']*'\s*(.+)", user_text, re.DOTALL)
+            match = re.search(r"User replies to: '([^']*)'\s*(.+)", user_text, re.DOTALL)
             if match:
-                search_query = match.group(1).strip()
+                reply_context = match.group(1)
+                search_query = match.group(2).strip()
     
     # Извлекаем технические термины для лучшего поиска
-    # Ищем слова в верхнем регистре, CamelCase, или известные термины
+    # Ищем термины И в текущем сообщении И в контексте реплая
     import re
     tech_terms = []
+    full_text_for_terms = f"{search_query} {reply_context}"
+    
     # Слова полностью в верхнем регистре (SDWEAK, GPU, CPU, DDR5)
-    tech_terms.extend(re.findall(r'\b[A-Z][A-Z0-9]{2,}\b', search_query))
+    tech_terms.extend(re.findall(r'\b[A-Z][A-Z0-9]{2,}\b', full_text_for_terms))
     # CamelCase слова (Gamescope, SteamOS)
-    tech_terms.extend(re.findall(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', search_query))
+    tech_terms.extend(re.findall(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', full_text_for_terms))
     # Слова с цифрами (RTX4090, DDR5, i7-14700K)
-    tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', search_query))
+    tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', full_text_for_terms))
     # Известные термины (регистронезависимо)
     known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel', 'ryzen', 'geforce', 'radeon', 'bazzite', 'nobara', 'cachyos']
     for term in known_terms:
-        if term.lower() in search_query.lower():
+        if term.lower() in full_text_for_terms.lower():
             tech_terms.append(term)
     
     # Если нашли технические термины — используем их для поиска
@@ -2003,7 +2013,13 @@ async def _parse_json_with_retry(
 FACT_EXTRACTION_SYSTEM_PROMPT = """Ты — система извлечения фактов для памяти бота Олег.
 
 ТВОЯ ЗАДАЧА:
-Анализировать сообщения из технического чата и извлекать полезные факты, которые стоит запомнить.
+Анализировать сообщения ПОЛЬЗОВАТЕЛЕЙ из технического чата и извлекать полезные факты, которые стоит запомнить.
+
+КРИТИЧЕСКИ ВАЖНО — НЕ ИЗВЛЕКАЙ:
+• Факты из ответов бота Олега — только из сообщений пользователей!
+• Технические определения и описания софта/железа — это НЕ факты о пользователях
+• Информацию которую ты не уверен что правильная
+• Пересказ того что сказал бот
 
 КАКИЕ ФАКТЫ ИЗВЛЕКАТЬ (importance 7-10):
 • Конфигурация железа пользователя: "У @username RTX 4070, Ryzen 5800X, 32GB RAM"
@@ -2016,12 +2032,14 @@ FACT_EXTRACTION_SYSTEM_PROMPT = """Ты — система извлечения 
 • Упоминания игр и софта: "@username играет в Cyberpunk"
 • Планы: "@username собирается апгрейдить видеокарту"
 • Мнения: "@username считает что Linux лучше Windows"
+• Несогласие с ботом: "@username поправил бота, сказав что X на самом деле Y"
 
 ЧТО НЕ ИЗВЛЕКАТЬ (importance 1-3 или пропустить):
 • Общие фразы без конкретики: "круто", "согласен", "лол"
 • Вопросы без контекста: "а что лучше?"
 • Флуд и оффтоп
 • Мемы и шутки (если не содержат реальной инфы)
+• Определения софта/железа (типа "SDWEAK это программа для X") — это НЕ факты о пользователях!
 
 КАТЕГОРИИ:
 • hardware — железо, комплектующие, сборки
@@ -2182,30 +2200,41 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
     logger.info(f"[RETRIEVE] Начинаем поиск контекста для: '{query[:50]}...' (chat={chat_id}, topic={topic_id})")
     
     # Извлекаем оригинальный текст без "User replies to:" для лучшего поиска
+    # НО также извлекаем термины из контекста реплая!
     search_query = query
+    reply_context = ""
     if "User replies to:" in query:
         parts = query.split("\n", 1)
         if len(parts) > 1:
             search_query = parts[1].strip()
+            # Извлекаем контекст реплая для поиска терминов
+            import re
+            match = re.search(r"User replies to: '([^']*)'", query)
+            if match:
+                reply_context = match.group(1)
         else:
             import re
-            match = re.search(r"User replies to: '[^']*'\s*(.+)", query, re.DOTALL)
+            match = re.search(r"User replies to: '([^']*)'\s*(.+)", query, re.DOTALL)
             if match:
-                search_query = match.group(1).strip()
+                reply_context = match.group(1)
+                search_query = match.group(2).strip()
     
     # Извлекаем технические термины для лучшего поиска в KB
+    # Ищем термины И в текущем сообщении И в контексте реплая
     import re
     tech_terms = []
+    full_text_for_terms = f"{search_query} {reply_context}"
+    
     # Слова полностью в верхнем регистре (SDWEAK, GPU, CPU, DDR5)
-    tech_terms.extend(re.findall(r'\b[A-Z][A-Z0-9]{2,}\b', search_query))
+    tech_terms.extend(re.findall(r'\b[A-Z][A-Z0-9]{2,}\b', full_text_for_terms))
     # CamelCase слова (Gamescope, SteamOS)
-    tech_terms.extend(re.findall(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', search_query))
+    tech_terms.extend(re.findall(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', full_text_for_terms))
     # Слова с цифрами (RTX4090, DDR5, i7-14700K)
-    tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', search_query))
+    tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', full_text_for_terms))
     # Известные термины (регистронезависимо)
     known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel', 'ryzen', 'geforce', 'radeon', 'bazzite', 'nobara', 'cachyos']
     for term in known_terms:
-        if term.lower() in search_query.lower():
+        if term.lower() in full_text_for_terms.lower():
             tech_terms.append(term)
     
     # Если нашли технические термины — используем их для поиска в KB

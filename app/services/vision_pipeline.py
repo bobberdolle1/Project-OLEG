@@ -3,21 +3,43 @@ Vision Pipeline - двухэтапный pipeline для анализа изоб
 
 Step 1: Vision model описывает изображение (скрыто от пользователя)
 Step 2: Oleg LLM комментирует описание в своём стиле
+
+Улучшения v2:
+- Определение типа изображения (скриншот, железо, мем)
+- Специализированные промпты для разных типов
+- Кэширование описаний
 """
 
 import base64
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass, asdict
 from typing import Optional
+from enum import Enum
 
 import httpx
+import cachetools
 
 from app.config import settings
 from app.services.think_filter import think_filter
 
 logger = logging.getLogger(__name__)
+
+
+class ImageType(Enum):
+    """Тип изображения для специализированной обработки."""
+    SCREENSHOT = "screenshot"  # Скриншот ОС, игры, ошибки
+    HARDWARE = "hardware"      # Фото железа, сборки
+    BENCHMARK = "benchmark"    # Бенчмарки, графики
+    MEME = "meme"              # Мемы, приколы
+    CODE = "code"              # Код, терминал
+    GENERAL = "general"        # Всё остальное
+
+
+# Кэш описаний изображений (по хешу)
+_description_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=3600)  # 1 час
 
 
 @dataclass
@@ -52,6 +74,37 @@ class VisionPipeline:
 Be factual and descriptive. Do not add opinions or commentary.
 
 IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any internal reasoning tags. Just describe what you see."""
+
+    # Специализированные промпты для разных типов изображений
+    SPECIALIZED_PROMPTS = {
+        ImageType.SCREENSHOT: """Analyze this screenshot. Focus on:
+- Operating system and application visible
+- Any error messages, warnings, or notifications (EXACT TEXT)
+- Settings, configurations, or parameters shown
+- Performance metrics if visible (FPS, temps, usage)
+Describe factually without opinions.""",
+        
+        ImageType.HARDWARE: """Analyze this hardware photo. Focus on:
+- Components visible (GPU, CPU cooler, RAM, motherboard, PSU, cables)
+- Brand and model if readable
+- Installation quality (cable management, thermal paste application)
+- Any visible issues (dust, damage, incorrect installation)
+Describe factually without opinions.""",
+        
+        ImageType.BENCHMARK: """Analyze this benchmark/performance screenshot. Focus on:
+- Benchmark name and version
+- Hardware being tested
+- Scores, FPS, temperatures, frequencies
+- Comparison data if present
+Extract ALL numbers and metrics visible.""",
+        
+        ImageType.CODE: """Analyze this code/terminal screenshot. Focus on:
+- Programming language or shell
+- Error messages or warnings (EXACT TEXT)
+- Code structure and potential issues
+- Command output if terminal
+Describe factually without opinions.""",
+    }
     
     # Промпт для Oleg LLM (Step 2)
     OLEG_COMMENT_TEMPLATE = """Юзер прислал фото. На нем: {description}
@@ -93,10 +146,67 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
     ERROR_VISION_UNAVAILABLE = "Глаза не работают, но уши на месте. Опиши словами что там."
     ERROR_ANALYSIS_FAILED = "Не смог разглядеть что там на картинке. Попробуй другую."
     
+    # Ключевые слова для определения типа изображения из описания
+    TYPE_KEYWORDS = {
+        ImageType.SCREENSHOT: [
+            "screenshot", "screen", "window", "desktop", "taskbar", "menu",
+            "error message", "dialog", "notification", "bsod", "blue screen",
+            "game", "fps", "settings", "options", "скриншот", "экран", "окно"
+        ],
+        ImageType.HARDWARE: [
+            "gpu", "graphics card", "cpu", "processor", "motherboard", "ram",
+            "memory", "psu", "power supply", "cooler", "fan", "cable", "case",
+            "pcb", "heatsink", "thermal", "видеокарта", "процессор", "материнка"
+        ],
+        ImageType.BENCHMARK: [
+            "benchmark", "score", "fps", "framerate", "cinebench", "3dmark",
+            "geekbench", "crystaldisk", "hwinfo", "cpu-z", "gpu-z", "aida64",
+            "бенчмарк", "тест", "результат"
+        ],
+        ImageType.CODE: [
+            "code", "terminal", "console", "command", "script", "function",
+            "error", "exception", "traceback", "syntax", "код", "терминал"
+        ],
+        ImageType.MEME: [
+            "meme", "funny", "joke", "cartoon", "comic", "reaction",
+            "мем", "прикол", "смешно"
+        ],
+    }
+    
     def __init__(self):
         """Инициализация pipeline."""
         self._timeout = settings.ollama_timeout
         self._base_url = settings.ollama_base_url
+    
+    def _detect_image_type(self, description: str, user_query: Optional[str] = None) -> ImageType:
+        """
+        Определяет тип изображения по описанию и запросу пользователя.
+        
+        Args:
+            description: Описание от Vision модели
+            user_query: Вопрос пользователя
+            
+        Returns:
+            Тип изображения
+        """
+        text = f"{description} {user_query or ''}".lower()
+        
+        # Считаем совпадения для каждого типа
+        scores = {}
+        for img_type, keywords in self.TYPE_KEYWORDS.items():
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                scores[img_type] = score
+        
+        if not scores:
+            return ImageType.GENERAL
+        
+        # Возвращаем тип с максимальным счётом
+        return max(scores, key=scores.get)
+    
+    def _get_specialized_prompt(self, img_type: ImageType) -> str:
+        """Возвращает специализированный промпт для типа изображения."""
+        return self.SPECIALIZED_PROMPTS.get(img_type, self.VISION_DESCRIPTION_PROMPT)
     
     async def analyze(self, image_data: bytes, user_query: Optional[str] = None) -> str:
         """
@@ -112,17 +222,35 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
         Returns:
             Комментарий Олега к изображению
         """
-        # Step 1: Получаем описание от Vision модели
+        import time
+        start_time = time.time()
+        
+        # Step 1: Получаем первичное описание для определения типа
         description = await self._get_image_description(image_data)
         
         if not description:
             return self.ERROR_VISION_UNAVAILABLE
         
+        # Определяем тип изображения
+        img_type = self._detect_image_type(description, user_query)
+        logger.info(f"Vision: Detected image type: {img_type.value}")
+        
+        # Если тип специфичный — получаем более детальное описание
+        if img_type != ImageType.GENERAL and img_type in self.SPECIALIZED_PROMPTS:
+            specialized_prompt = self._get_specialized_prompt(img_type)
+            detailed_description = await self._get_image_description(image_data, specialized_prompt)
+            if detailed_description and len(detailed_description) > len(description):
+                description = detailed_description
+                logger.info(f"Vision: Got specialized description ({len(description)} chars)")
+        
         # Step 2: Генерируем комментарий Олега
-        final_response = await self._generate_oleg_comment(description, user_query)
+        final_response = await self._generate_oleg_comment(description, user_query, img_type)
         
         if not final_response:
             return self.ERROR_ANALYSIS_FAILED
+        
+        duration = time.time() - start_time
+        logger.info(f"Vision: Total pipeline time: {duration:.2f}s")
         
         return final_response
     
@@ -165,22 +293,32 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
         
         return final_response, state
     
-    async def _get_image_description(self, image_data: bytes) -> Optional[str]:
+    async def _get_image_description(self, image_data: bytes, specialized_prompt: Optional[str] = None) -> Optional[str]:
         """
         Получает техническое описание от Vision модели.
         
         Args:
             image_data: Байты изображения
+            specialized_prompt: Специализированный промпт (опционально)
             
         Returns:
             Описание изображения или None при ошибке
         """
+        # Проверяем кэш
+        image_hash = hashlib.sha256(image_data).hexdigest()[:16]
+        if image_hash in _description_cache:
+            logger.info(f"Vision Step 1: Cache hit for {image_hash}")
+            return _description_cache[image_hash]
+        
         try:
             image_base64 = base64.b64encode(image_data).decode('utf-8')
             
             # Используем fallback vision модель если основная недоступна
             from app.services.ollama_client import get_active_model
             vision_model = await get_active_model("vision")
+            
+            # Используем специализированный промпт если есть
+            prompt = specialized_prompt or self.VISION_DESCRIPTION_PROMPT
             
             # Формат для Ollama vision API
             # Некоторые модели требуют images на уровне сообщения, другие — отдельно
@@ -189,7 +327,7 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 "messages": [
                     {
                         "role": "user",
-                        "content": self.VISION_DESCRIPTION_PROMPT,
+                        "content": prompt,
                         "images": [image_base64]
                     }
                 ],
@@ -244,6 +382,8 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 
                 if content and content != think_filter.fallback_message:
                     logger.info(f"Vision Step 1: Got description ({len(content)} chars)")
+                    # Сохраняем в кэш
+                    _description_cache[image_hash] = content
                     return content
                 
                 # Если после фильтрации пусто — возможно весь ответ был в think-тегах
@@ -269,13 +409,14 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
             logger.error(f"Vision Step 1: Error getting description: {e}")
             return None
     
-    async def _generate_oleg_comment(self, description: str, user_query: Optional[str] = None) -> Optional[str]:
+    async def _generate_oleg_comment(self, description: str, user_query: Optional[str] = None, img_type: ImageType = ImageType.GENERAL) -> Optional[str]:
         """
         Генерирует комментарий в стиле Олега.
         
         Args:
             description: Описание изображения от Vision модели
             user_query: Опциональный вопрос пользователя
+            img_type: Тип изображения для контекста
             
         Returns:
             Комментарий Олега или None при ошибке
@@ -304,10 +445,26 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
             # Формируем промпт с описанием и вопросом пользователя
             query_part = f"Вопрос пользователя: {user_query}" if user_query else "Пользователь просто прислал картинку без вопроса."
             
+            # Добавляем контекст типа изображения
+            type_context = ""
+            if img_type == ImageType.SCREENSHOT:
+                type_context = "Это скриншот. Если видишь ошибку — дай решение."
+            elif img_type == ImageType.HARDWARE:
+                type_context = "Это фото железа. Оцени сборку, найди косяки если есть."
+            elif img_type == ImageType.BENCHMARK:
+                type_context = "Это бенчмарк. Прокомментируй результаты, сравни с нормой."
+            elif img_type == ImageType.CODE:
+                type_context = "Это код/терминал. Если есть ошибка — объясни и дай решение."
+            elif img_type == ImageType.MEME:
+                type_context = "Это мем. Кратко отреагируй, не растекайся."
+            
             user_prompt = self.OLEG_COMMENT_TEMPLATE.format(
                 description=description,
                 user_query=query_part
             )
+            
+            if type_context:
+                user_prompt = f"{type_context}\n\n{user_prompt}"
             
             # Добавляем результаты поиска если есть
             if search_results:
@@ -331,7 +488,7 @@ IMPORTANT: Respond with the description directly. Do NOT use <think> tags or any
                 ],
                 "stream": False,
                 "options": {
-                    "temperature": 0.7,  # Больше креативности для Олега
+                    "temperature": 0.85,  # Больше креативности и живости
                     "num_ctx": 4096,
                     "num_predict": 512  # Увеличено для полных ответов
                 }

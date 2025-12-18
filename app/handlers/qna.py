@@ -516,7 +516,8 @@ async def general_qna(msg: Message):
                 username=msg.from_user.username,
                 chat_id=msg.chat.id,
                 chat_context=full_chat_context,
-                topic_id=topic_id  # Передаём ID топика для корректной работы памяти
+                topic_id=topic_id,  # Передаём ID топика для корректной работы памяти
+                user_id=msg.from_user.id  # ID пользователя для профиля
             )
 
         # Если reply None - ошибка уже была показана недавно, не спамим
@@ -732,3 +733,175 @@ async def cmd_reset_context(msg: Message):
 
 # Обработчик голосовых перенесён в app/handlers/voice.py
 
+
+
+@router.message(Command("whois"))
+async def cmd_whois(msg: Message):
+    """
+    Показывает профиль пользователя из памяти Олега.
+    Использование: /whois или /whois @username (в ответ на сообщение)
+    """
+    from app.services.user_memory import user_memory
+    
+    # Определяем целевого пользователя
+    target_user = None
+    target_user_id = None
+    
+    if msg.reply_to_message and msg.reply_to_message.from_user:
+        # Если ответ на сообщение — смотрим профиль автора
+        target_user = msg.reply_to_message.from_user
+        target_user_id = target_user.id
+    else:
+        # Иначе — свой профиль
+        target_user = msg.from_user
+        target_user_id = msg.from_user.id
+    
+    if not target_user_id:
+        await msg.reply("Не могу определить пользователя.")
+        return
+    
+    # Получаем профиль
+    profile = await user_memory.get_profile(msg.chat.id, target_user_id)
+    
+    if not profile:
+        username = target_user.username or target_user.first_name
+        await msg.reply(f"🤷 Олег пока ничего не знает о @{username}. Пусть пообщается побольше.")
+        return
+    
+    # Формируем красивый вывод
+    lines = []
+    username = profile.username or target_user.first_name or f"ID:{target_user_id}"
+    lines.append(f"📋 <b>Профиль @{username}</b>\n")
+    
+    # Железо
+    hardware = []
+    if profile.cpu:
+        hardware.append(f"CPU: {profile.cpu}")
+    if profile.gpu:
+        hardware.append(f"GPU: {profile.gpu}")
+    if profile.ram:
+        hardware.append(f"RAM: {profile.ram}")
+    if hardware:
+        lines.append(f"🖥 <b>Сетап:</b> {', '.join(hardware)}")
+    
+    # ОС
+    if profile.os or profile.distro:
+        os_str = profile.distro or profile.os
+        if profile.de:
+            os_str += f" ({profile.de})"
+        lines.append(f"💻 <b>ОС:</b> {os_str}")
+    
+    # Steam Deck
+    if profile.steam_deck:
+        deck_str = "Steam Deck"
+        if profile.steam_deck_mods:
+            deck_str += f" ({', '.join(profile.steam_deck_mods[:3])})"
+        lines.append(f"🎮 {deck_str}")
+    
+    # Ноут
+    if profile.laptop:
+        lines.append(f"💻 <b>Ноут:</b> {profile.laptop}")
+    
+    # Предпочтения
+    if profile.brand_preference:
+        lines.append(f"❤️ <b>Фанат:</b> {profile.brand_preference.upper()}")
+    
+    # Экспертиза
+    if profile.expertise:
+        lines.append(f"🧠 <b>Шарит в:</b> {', '.join(profile.expertise[:5])}")
+    
+    # Проблемы
+    if profile.current_problems:
+        lines.append(f"⚠️ <b>Проблемы:</b> {profile.current_problems[-1][:50]}...")
+    
+    # Консоль (для подкола)
+    if profile.console:
+        lines.append(f"🎮 <b>Консольщик:</b> {profile.console} (сочувствую)")
+    
+    # Статистика
+    if profile.message_count > 0:
+        lines.append(f"\n📊 Сообщений: {profile.message_count}")
+    if profile.first_seen:
+        lines.append(f"📅 Первый раз: {profile.first_seen[:10]}")
+    
+    await msg.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("mood"))
+async def cmd_mood(msg: Message):
+    """
+    Показывает текущее настроение Олега.
+    """
+    from app.services.mood import mood_service
+    
+    mood, trigger = mood_service.get_current_mood()
+    energy = mood_service.get_energy_level()
+    
+    # Эмодзи для энергии
+    if energy >= 0.8:
+        energy_emoji = "⚡"
+        energy_text = "на максимуме"
+    elif energy >= 0.5:
+        energy_emoji = "🔋"
+        energy_text = "норм"
+    else:
+        energy_emoji = "🪫"
+        energy_text = "на нуле"
+    
+    # Эмодзи для настроения
+    mood_emojis = {
+        "сонный": "😴",
+        "бодрый": "😊",
+        "нормальный": "😐",
+        "расслабленный": "😌",
+        "раздражённый": "😤",
+        "весёлый": "😄",
+        "задумчивый": "🤔",
+        "лаконичный": "🤐",
+        "экспертный": "🧐",
+        "дерзкий": "😏",
+    }
+    
+    # Ищем подходящий эмодзи
+    mood_emoji = "🤖"
+    for key, emoji in mood_emojis.items():
+        if key in mood.lower():
+            mood_emoji = emoji
+            break
+    
+    lines = [
+        f"{mood_emoji} <b>Настроение Олега:</b> {mood}",
+        f"{energy_emoji} <b>Энергия:</b> {energy_text} ({int(energy * 100)}%)",
+    ]
+    
+    if trigger:
+        lines.append(f"\n💬 {trigger}")
+    
+    await msg.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("limit"))
+async def cmd_limit(msg: Message):
+    """
+    Показывает лимит запросов.
+    """
+    from app.services.token_limiter import token_limiter
+    from app.config import settings
+    
+    if not settings.antispam_enabled:
+        await msg.reply("Лимиты отключены.")
+        return
+    
+    user_id = msg.from_user.id
+    stats = token_limiter.get_user_stats(user_id)
+    
+    if stats['is_whitelisted']:
+        await msg.reply("✨ У тебя безлимит!")
+        return
+    
+    await msg.reply(
+        f"📊 <b>Лимиты</b>\n"
+        f"В минуту: {stats['minute_requests']}/{stats['burst_limit']} (сброс {stats['minute_reset_secs']}с)\n"
+        f"В час: {stats['hour_requests']}/{stats['hourly_limit']} (сброс {stats['hour_reset_mins']}м)",
+        parse_mode="HTML"
+    )

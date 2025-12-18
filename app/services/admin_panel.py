@@ -39,6 +39,7 @@ class AdminMenuCategory(str, Enum):
     
     **Validates: Requirements 16.3, 16.4, 16.5, 16.6, 16.7, 16.10**
     """
+    BOT = "bot"                    # Auto-reply, feature toggles
     PROTECTION = "protection"      # DEFCON, anti-spam, profanity filter
     NOTIFICATIONS = "notifications"  # Raid alerts, ban notifications, etc.
     GAMES = "games"                # Game commands, tournaments
@@ -49,6 +50,7 @@ class AdminMenuCategory(str, Enum):
 
 # Category display names and emojis
 CATEGORY_DISPLAY = {
+    AdminMenuCategory.BOT: ("🤖", "Бот"),
     AdminMenuCategory.PROTECTION: ("🛡", "Защита"),
     AdminMenuCategory.NOTIFICATIONS: ("🔔", "Уведомления"),
     AdminMenuCategory.GAMES: ("🎮", "Игры"),
@@ -157,14 +159,22 @@ class AdminPanelService:
         WHEN a user tries to access the Admin Panel for a chat they do not own
         THEN the Admin Panel SHALL respond with "У вас нет прав на управление этим чатом"
         
+        Bot owner (OWNER_ID) has access to all chats.
+        
         Args:
             bot: Telegram Bot instance
             user_id: User ID to verify
             chat_id: Chat ID to check ownership
             
         Returns:
-            True if user is owner/creator, False otherwise
+            True if user is owner/creator or bot owner, False otherwise
         """
+        from app.config import settings
+        
+        # Bot owner has access to all chats
+        if settings.owner_id and user_id == settings.owner_id:
+            return True
+        
         try:
             member = await bot.get_chat_member(chat_id, user_id)
             return member.status == 'creator'
@@ -184,6 +194,8 @@ class AdminPanelService:
         WHEN a chat owner sends "/admin" in private messages to the bot
         THEN the Admin Panel SHALL display a list of chats where the user is owner
         
+        Bot owner (OWNER_ID) sees all chats.
+        
         Args:
             bot: Telegram Bot instance
             user_id: User ID to find chats for
@@ -191,9 +203,15 @@ class AdminPanelService:
         Returns:
             List of Chat objects where user is owner
         """
+        from app.config import settings
+        
         async with get_session()() as session:
             result = await session.execute(select(Chat))
             all_chats = result.scalars().all()
+        
+        # Bot owner sees all chats
+        if settings.owner_id and user_id == settings.owner_id:
+            return list(all_chats)
         
         owner_chats = []
         
@@ -365,7 +383,9 @@ class AdminPanelService:
         Returns:
             Tuple of (menu text, InlineKeyboardMarkup)
         """
-        if category == AdminMenuCategory.PROTECTION:
+        if category == AdminMenuCategory.BOT:
+            return await self._build_bot_menu(chat_id, session)
+        elif category == AdminMenuCategory.PROTECTION:
             return await self._build_protection_menu(chat_id, session)
         elif category == AdminMenuCategory.NOTIFICATIONS:
             return await self._build_notifications_menu(chat_id, session)
@@ -379,6 +399,92 @@ class AdminPanelService:
             return await self._build_advanced_menu(chat_id, session)
         else:
             return "Неизвестная категория", self.build_main_menu(chat_id)
+
+    
+    # =========================================================================
+    # Bot Settings Menu
+    # =========================================================================
+    
+    async def _build_bot_menu(
+        self,
+        chat_id: int,
+        session: Optional[AsyncSession] = None
+    ) -> Tuple[str, InlineKeyboardMarkup]:
+        """
+        Build Bot settings menu - auto-reply and feature toggles.
+        """
+        from app.database.models import BotConfig
+        
+        close_session = False
+        if session is None:
+            async_session = get_session()
+            session = async_session()
+            close_session = True
+        
+        try:
+            result = await session.execute(
+                select(BotConfig).filter_by(chat_id=chat_id)
+            )
+            config = result.scalar_one_or_none()
+            
+            if not config:
+                # Дефолтные значения
+                auto_reply = 5
+                quotes = voice = vision = games = True
+            else:
+                auto_reply = config.auto_reply_chance
+                quotes = config.quotes_enabled
+                voice = config.voice_enabled
+                vision = config.vision_enabled
+                games = config.games_enabled
+        finally:
+            if close_session:
+                await session.close()
+        
+        text = (
+            f"🤖 <b>Настройки бота</b>\n\n"
+            f"<b>Автоответ:</b> {auto_reply}%\n"
+            f"Шанс что бот ответит на случайное сообщение.\n\n"
+            f"<b>Функции:</b>\n"
+            f"• Цитаты (/q): {'✅' if quotes else '❌'}\n"
+            f"• Голосовые: {'✅' if voice else '❌'}\n"
+            f"• Картинки: {'✅' if vision else '❌'}\n"
+            f"• Игры: {'✅' if games else '❌'}"
+        )
+        
+        keyboard = InlineKeyboardBuilder()
+        
+        # Автоответ
+        keyboard.button(text="0%", callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_reply_0")
+        keyboard.button(text="5%", callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_reply_5")
+        keyboard.button(text="10%", callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_reply_10")
+        keyboard.button(text="20%", callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_reply_20")
+        
+        # Функции
+        keyboard.button(
+            text=f"{'✅' if quotes else '❌'} Цитаты",
+            callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_quotes"
+        )
+        keyboard.button(
+            text=f"{'✅' if voice else '❌'} Голосовые",
+            callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_voice"
+        )
+        keyboard.button(
+            text=f"{'✅' if vision else '❌'} Картинки",
+            callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_vision"
+        )
+        keyboard.button(
+            text=f"{'✅' if games else '❌'} Игры",
+            callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_games"
+        )
+        
+        keyboard.button(
+            text="🔙 Назад",
+            callback_data=f"{CALLBACK_PREFIX}chat_{chat_id}"
+        )
+        
+        keyboard.adjust(4, 2, 2, 1)
+        return text, keyboard.as_markup()
 
     
     # =========================================================================
@@ -615,8 +721,8 @@ class AdminPanelService:
         text = (
             f"📅 <b>Дейлики</b>\n\n"
             f"Ежедневные автоматические сообщения:\n\n"
-            f"• ☀️ Утренняя сводка (09:00 МСК): {'✅' if config.summary_enabled else '❌'}\n"
-            f"• 🌙 Вечерняя цитата (21:00 МСК): {'✅' if config.quote_enabled else '❌'}\n"
+            f"• 🌆 Вечерняя сводка (20:00 МСК): {'✅' if config.summary_enabled else '❌'}\n"
+            f"• 🌙 Цитата дня (21:00 МСК): {'✅' if config.quote_enabled else '❌'}\n"
             f"• 📊 Статистика дня (21:00 МСК): {'✅' if config.stats_enabled else '❌'}"
         )
         

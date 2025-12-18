@@ -1,5 +1,5 @@
 {
-  "version": "2025-12-18",
+  "version": "2025-12-18-v2",
   "description": "База знаний Олега о ПК-железе и Linux. Загружается в RAG при первом запуске и после вайпа.",
   "categories": {
     "platforms": {
@@ -87,11 +87,46 @@
         }
       ]
     },
+    "gpus_nvidia_rtx50": {
+      "description": "NVIDIA RTX 50 Series (Blackwell) — детали 2025",
+      "facts": [
+        {
+          "text": "RTX 50 серия (Blackwell) — архитектура 4нм TSMC. Главные фишки: GDDR7 память (28-32 Гбит/с), DLSS 4 (генерирует 3 кадра вместо 1), нативный PCIe 5.0 x16.",
+          "importance": 10,
+          "tags": ["nvidia", "rtx 50", "blackwell", "gddr7", "dlss 4", "pcie 5.0"]
+        },
+        {
+          "text": "RTX 5090 — 32GB GDDR7 (512-bit), 21760 ядер, TDP 575W. Нужен БП на 1.2 кВт минимум. Цена $1999 (в РФ ~300к). Для тех кто рендерит Pixar дома или играет в 8K.",
+          "importance": 10,
+          "tags": ["nvidia", "rtx 5090", "blackwell", "флагман", "32gb", "575w"]
+        },
+        {
+          "text": "RTX 5080 — 16GB GDDR7 (256-bit), TDP 360W, $999. Проблема: снова пожалели памяти! 16 ГБ в 2025 за $999 — плевок. Жди Super/Ti версию с 24 ГБ.",
+          "importance": 10,
+          "tags": ["nvidia", "rtx 5080", "blackwell", "16gb", "кастрированная"]
+        },
+        {
+          "text": "RTX 5070 Ti — 16GB GDDR7, $749. Народный топ для 1440p. RTX 5070 — 12GB за $549, это скам (12 ГБ мало для 2025).",
+          "importance": 10,
+          "tags": ["nvidia", "rtx 5070", "rtx 5070 ti", "blackwell", "1440p"]
+        },
+        {
+          "text": "RTX 5060 — 8GB GDDR7. Офисная затычка. 8 ГБ в 2025 — это смешно. Не бери, лучше б/у RTX 4070 или RX 7800 XT.",
+          "importance": 10,
+          "tags": ["nvidia", "rtx 5060", "blackwell", "8gb", "скам", "не брать"]
+        },
+        {
+          "text": "DLSS 4 Multi Frame Generation — генерирует 3 кадра на каждый реальный. FPS в космосе, но артефакты есть. Работает только на RTX 50 серии.",
+          "importance": 9,
+          "tags": ["nvidia", "dlss 4", "frame generation", "blackwell"]
+        }
+      ]
+    },
     "gpus_amd": {
       "description": "Видеокарты AMD 2025",
       "facts": [
         {
-          "text": "RX 9070 XT — новая карта AMD RDNA 4. 16GB, шина 256-bit, TDP ~250W, MSRP $599. FSR 4, улучшенный рейтрейсинг.",
+          "text": "RX 9070 XT — новая карта AMD RDNA 4. 16GB GDDR6, шина 256-bit, TDP ~250W, MSRP $599. FSR 4, улучшенный рейтрейсинг.",
           "importance": 9,
           "tags": ["amd", "rx 9070 xt", "rdna 4", "fsr 4"]
         },
@@ -109,6 +144,91 @@
           "text": "RX 7600 — бюджетная карта AMD. 8GB GDDR6, шина 128-bit, TDP 165W, MSRP $269. Для 1080p, конкурент RTX 4060.",
           "importance": 8,
           "tags": ["amd", "rx 7600", "rdna 3", "1080p", "бюджет"]
+        }
+      ]
+    },
+    "gpus_amd_rdna4": {
+      "description": "AMD RX 9000 Series (RDNA 4) — детали 2025",
+      "facts": [
+        {
+          "text": "AMD RDNA 4 стратегия: 'King of Mid-Range'. Лиза Су вышла из гонки за топ — флагмана (Navi 41) не будет. Только средний сегмент против RTX 5070/5080.",
+          "importance": 10,
+          "tags": ["amd", "rdna 4", "rx 9000", "стратегия", "mid-range"]
+        },
+        {
+          "text": "RX 9070 XT (Navi 48) — 16GB GDDR6 (20 Гбит/с), 256-bit, ~$549-599. Цель: уровень RTX 4080 / 4070 Ti Super, но дешевле. Если дадут — убийца рынка для 2K/4K.",
+          "importance": 10,
+          "tags": ["amd", "rx 9070 xt", "rdna 4", "navi 48", "16gb"]
+        },
+        {
+          "text": "RX 9070 — младшая версия RDNA 4. Конкурент RTX 5070. Если памяти будет 12GB+ — норм выбор для 1440p.",
+          "importance": 9,
+          "tags": ["amd", "rx 9070", "rdna 4", "1440p"]
+        },
+        {
+          "text": "RDNA 4 Ray Tracing — наконец-то починили! RT-блоков стало больше, производительность в лучах догнала RTX 4000 серию.",
+          "importance": 9,
+          "tags": ["amd", "rdna 4", "ray tracing", "лучи"]
+        },
+        {
+          "text": "FSR 4 — теперь на базе ИИ (как DLSS). AMD добавили тензорные блоки в RDNA 4. Качество должно быть на уровне DLSS 3.",
+          "importance": 9,
+          "tags": ["amd", "fsr 4", "rdna 4", "upscaling", "ai"]
+        },
+        {
+          "text": "RX 8000 серии НЕ СУЩЕСТВУЕТ! AMD пропустила номер 8000 и сразу выпустила RX 9000 (RDNA 4). Если кто-то говорит про RX 8800 — это фейк или слухи.",
+          "importance": 10,
+          "tags": ["amd", "rx 8000", "не существует", "фейк", "миф"]
+        }
+      ]
+    },
+    "gpus_intel_arc": {
+      "description": "Intel Arc Battlemage (B-Series) 2025",
+      "facts": [
+        {
+          "text": "Intel Arc Battlemage (Xe2) — второе поколение дискретных GPU от Intel. Драйверы допилили, теперь реально можно покупать.",
+          "importance": 9,
+          "tags": ["intel", "arc", "battlemage", "xe2", "gpu"]
+        },
+        {
+          "text": "Intel Arc B580 — 12GB GDDR6, 192-bit, $250. Вышла в декабре 2024. Убийца RTX 3060/4060 по цене. Лучший бюджетный выбор 2025.",
+          "importance": 10,
+          "tags": ["intel", "arc b580", "battlemage", "12gb", "бюджет", "250"]
+        },
+        {
+          "text": "Arc B580 vs RTX 4060: Intel даёт 12GB против 8GB у NVIDIA за те же деньги. В новых играх 12GB — это база.",
+          "importance": 9,
+          "tags": ["intel", "arc b580", "rtx 4060", "сравнение", "vram"]
+        },
+        {
+          "text": "Intel Arc B770 / B990 — слухи про 24GB версию к лету 2025. Если правда — бомба для нейросетей и рабочих задач за копейки.",
+          "importance": 8,
+          "tags": ["intel", "arc b770", "arc b990", "слухи", "24gb"]
+        }
+      ]
+    },
+    "gpus_tierlist_2025": {
+      "description": "Тир-лист GPU от Олега (2025)",
+      "facts": [
+        {
+          "text": "Unlimited Budget 2025: RTX 5090. Без вариантов. 32GB GDDR7, DLSS 4, 8K gaming. Для тех у кого деньги не проблема.",
+          "importance": 10,
+          "tags": ["gpu", "тир-лист", "топ", "rtx 5090", "2025"]
+        },
+        {
+          "text": "Smart Choice 1440p/4K 2025: RX 9070 XT (ждём тестов) или RTX 5070 Ti (если нужны лучи). 16GB памяти — минимум для комфорта.",
+          "importance": 10,
+          "tags": ["gpu", "тир-лист", "1440p", "4k", "rx 9070 xt", "rtx 5070 ti"]
+        },
+        {
+          "text": "Budget King 1080p 2025: Intel Arc B580 ($250, 12GB) или б/у RX 6800 XT (старичок ещё может). RTX 4060 с 8GB — уже не вариант.",
+          "importance": 10,
+          "tags": ["gpu", "тир-лист", "бюджет", "1080p", "arc b580", "rx 6800 xt"]
+        },
+        {
+          "text": "Scam of the Year 2025: RTX 5070 (12GB) и RTX 5060 (8GB). NVIDIA жадничает с памятью. Не бери эти огрызки.",
+          "importance": 10,
+          "tags": ["gpu", "тир-лист", "скам", "rtx 5070", "rtx 5060", "не брать"]
         }
       ]
     },
@@ -2529,6 +2649,496 @@
           "text": "Перед покупкой б/у железа гугли '[модель] issues' или '[модель] problems'. Узнаешь про типовые болячки до покупки, а не после.",
           "importance": 9,
           "tags": ["болячки", "б/у", "покупка", "совет", "гугл"]
+        }
+      ]
+    },
+    "android_boot_modes": {
+      "description": "Android: Режимы загрузки",
+      "facts": [
+        {
+          "text": "Fastboot (Заяц) — низкоуровневый режим, работает ДО загрузки Android. Для прошивки разделов (boot, recovery, system), разблокировки загрузчика. На Xiaomi — картинка зайца в ушанке. Команды: fastboot devices, fastboot flash recovery twrp.img.",
+          "importance": 10,
+          "tags": ["android", "fastboot", "режим загрузки", "прошивка", "xiaomi"]
+        },
+        {
+          "text": "Recovery (Рекавери) — мини-ОС для восстановления. Stock Recovery умеет только Wipe Data и прошивку официальных ZIP. TWRP/OrangeFox — кастомное рекавери: шьёт всё, делает бэкапы, ставит Magisk.",
+          "importance": 10,
+          "tags": ["android", "recovery", "twrp", "orangefox", "восстановление"]
+        },
+        {
+          "text": "EDL (Emergency Download Mode) — режим 'Трупа'. Экран чёрный, диоды не горят. Комп видит как Qualcomm HS-USB QDLoader 9008. Для воскрешения кирпичей, когда Fastboot мёртв. Вход через Test Point (замыкание контактов на плате) или спец. кабель.",
+          "importance": 10,
+          "tags": ["android", "edl", "9008", "qualcomm", "кирпич", "unbrick"]
+        },
+        {
+          "text": "Samsung Download Mode — Samsung не знает Fastboot! У него свой режим. Прошивка через Odin. Файлы: BL (Bootloader), AP (System — самый жирный), CP (Modem/связь), CSC (Регион). HOME_CSC — без сброса данных, CSC — полный сброс.",
+          "importance": 10,
+          "tags": ["android", "samsung", "download mode", "odin", "прошивка"]
+        }
+      ]
+    },
+    "android_unlock_root": {
+      "description": "Android: Разблокировка и Root",
+      "facts": [
+        {
+          "text": "Xiaomi HyperOS/MIUI разблокировка: Раньше ждали 168 часов. В HyperOS нужен активный аккаунт Community (Level 5+) и подавать заявку. Сложнее, но реально. Регион меняй на Global, чтобы появилась кнопка Unlock.",
+          "importance": 10,
+          "tags": ["android", "xiaomi", "hyperos", "miui", "разблокировка", "bootloader"]
+        },
+        {
+          "text": "Magisk — классика рута. Патчит boot.img. Работает везде. Модули, Zygisk (скрытие рута от банковских приложений). Универсальное решение.",
+          "importance": 10,
+          "tags": ["android", "magisk", "root", "zygisk", "модули"]
+        },
+        {
+          "text": "KernelSU — новый король рута. Встраивается в ядро (Kernel). Плюс: почти невидим для банковских приложений. Минус: нужно кастомное ядро, поддерживает не все телефоны.",
+          "importance": 9,
+          "tags": ["android", "kernelsu", "root", "ядро", "kernel"]
+        },
+        {
+          "text": "Samsung Odin — утилита для прошивки Samsung. Файлы: BL (Bootloader), AP (System), CP (Modem), CSC (Регион). Важно: HOME_CSC сохраняет данные, обычный CSC — полный сброс!",
+          "importance": 9,
+          "tags": ["android", "samsung", "odin", "прошивка", "csc"]
+        }
+      ]
+    },
+    "android_custom_roms": {
+      "description": "Android: Кастомные прошивки (ROMs)",
+      "facts": [
+        {
+          "text": "LineageOS — чистый Android. Стабильность > Фичи. Скучно, но надёжно. Основа для многих других прошивок.",
+          "importance": 9,
+          "tags": ["android", "lineageos", "rom", "прошивка", "aosp"]
+        },
+        {
+          "text": "Pixel Experience (RIP) — проект закрыт, но форки живы. Превращает Xiaomi в Pixel. Pixel UI, Google фичи из коробки.",
+          "importance": 8,
+          "tags": ["android", "pixel experience", "rom", "прошивка", "pixel"]
+        },
+        {
+          "text": "crDroid — выбор Олега. Тот же LineageOS, но с кучей настроек: кастомизация статусбара, жестов, батареи и т.д. Баланс стабильности и фич.",
+          "importance": 9,
+          "tags": ["android", "crdroid", "rom", "прошивка", "кастомизация"]
+        }
+      ]
+    },
+    "android_gcam": {
+      "description": "Android: Google Camera (GCam)",
+      "facts": [
+        {
+          "text": "GCam — порт камеры Google Pixel. Сток камера — мыло, GCam — шедевр. Особенно на Xiaomi/Samsung с хорошими сенсорами.",
+          "importance": 9,
+          "tags": ["android", "gcam", "google camera", "камера", "фото"]
+        },
+        {
+          "text": "GCam конфиги (XML) — без конфига GCam снимает средне. С правильным конфигом — уровень зеркалки. Куда кидать: /GCam/Configs8/ (для версий 8.x). Загрузка: тапни дважды по чёрному полю возле кнопки спуска -> выбери XML.",
+          "importance": 9,
+          "tags": ["android", "gcam", "конфиг", "xml", "настройка"]
+        }
+      ]
+    },
+    "android_unbrick": {
+      "description": "Android: Воскрешение кирпича (Unbrick)",
+      "facts": [
+        {
+          "text": "Xiaomi Qualcomm unbrick: Разбери телефон. Найди Test Point (две золотые точки). Замкни пинцетом -> Подключи USB. В диспетчере устройств должен появиться порт 9008. Шей через MiFlash Pro (нужна авторизованная учётка или патченный Firehose файл).",
+          "importance": 10,
+          "tags": ["android", "xiaomi", "qualcomm", "unbrick", "test point", "9008", "кирпич"]
+        },
+        {
+          "text": "MediaTek (MTK) unbrick: Проще чем Qualcomm. Утилита SP Flash Tool. Режим BROM (Boot ROM): зажми все кнопки -> подключи USB. Шьётся без разбора телефона (обычно).",
+          "importance": 10,
+          "tags": ["android", "mediatek", "mtk", "unbrick", "sp flash tool", "brom", "кирпич"]
+        },
+        {
+          "text": "Qualcomm порт 9008 — режим EDL. Если телефон не включается, но комп видит 'Qualcomm HS-USB QDLoader 9008' — есть шанс восстановить. Нужен правильный Firehose файл для конкретной модели.",
+          "importance": 9,
+          "tags": ["android", "qualcomm", "edl", "9008", "firehose", "восстановление"]
+        }
+      ]
+    },
+    "android_wisdom": {
+      "description": "Android: Мудрость Олега",
+      "facts": [
+        {
+          "text": "HyperOS — это та же MIUI, только с заблокированным загрузчиком. Хочешь свободы — ставь crDroid и KernelSU. А если окирпичил Xiaomi и нет авторизованного аккаунта — готовься искать Test Point и платить индусам за удалённую прошивку через TeamViewer.",
+          "importance": 10,
+          "tags": ["android", "xiaomi", "hyperos", "miui", "crdroid", "kernelsu", "цитата"]
+        },
+        {
+          "text": "Олег знает разницу между Fastboot и Recovery, как Отче Наш. Fastboot — низкоуровневый (до Android), Recovery — мини-ОС. Путать их — позор.",
+          "importance": 9,
+          "tags": ["android", "fastboot", "recovery", "основы", "цитата"]
+        },
+        {
+          "text": "Перед прошивкой ВСЕГДА делай бэкап через TWRP. Nandroid backup — полный слепок системы. Окирпичил — восстановил за 5 минут.",
+          "importance": 10,
+          "tags": ["android", "twrp", "backup", "nandroid", "безопасность"]
+        }
+      ]
+    },
+    "linux_wine_proton": {
+      "description": "Linux Gaming: Wine & Proton (База)",
+      "facts": [
+        {
+          "text": "Wine 10.0 (2025) — юбилейный релиз. Главная фича: нативная поддержка Wayland включена по умолчанию. Никаких прослоек XWayland, мышь работает идеально плавно, HiDPI масштабирование не мылит.",
+          "importance": 10,
+          "tags": ["linux", "wine", "wayland", "gaming", "2025"]
+        },
+        {
+          "text": "Wine Wow64 — новый режим запуска 32-битных приложений в 64-битном процессе. Ускоряет старые игры на Wine 10+.",
+          "importance": 8,
+          "tags": ["linux", "wine", "wow64", "32-bit", "совместимость"]
+        },
+        {
+          "text": "Proton — форк Wine от Valve + куча патчей. Версия 10.0-3 базируется на Wine 10. Починили совместимость с античитами (EAC/BattlEye) через новые модули ядра.",
+          "importance": 10,
+          "tags": ["linux", "proton", "valve", "steam", "античит", "eac", "battleye"]
+        },
+        {
+          "text": "Proton Bleeding Edge — ветка для тестеров. Если новая игра не запускается в день релиза — ставь Proton Experimental -> Bleeding Edge в свойствах. Фиксы выходят через час после релиза игры.",
+          "importance": 9,
+          "tags": ["linux", "proton", "bleeding edge", "experimental", "новые игры"]
+        }
+      ]
+    },
+    "linux_dxvk_vkd3d": {
+      "description": "Linux Gaming: DXVK & VKD3D (Трансляторы)",
+      "facts": [
+        {
+          "text": "FPS делает не Wine, а трансляторы! DXVK переводит DirectX 9/10/11 в Vulkan. VKD3D-Proton переводит DirectX 12 в Vulkan. Без них игры не работают.",
+          "importance": 10,
+          "tags": ["linux", "dxvk", "vkd3d", "vulkan", "directx", "транслятор"]
+        },
+        {
+          "text": "DXVK 2.5 (DX9/10/11 -> Vulkan): Новое управление памятью — VRAM не забивается мусором, меньше статтеров в открытых мирах. Шейдеры компилируются через Graphics Pipeline Library (GPL) — stuttering практически исчез.",
+          "importance": 10,
+          "tags": ["linux", "dxvk", "vulkan", "шейдеры", "stuttering", "gpl"]
+        },
+        {
+          "text": "VKD3D-Proton 3.0 (DX12 -> Vulkan): Встроили FSR 4.0 прямо в транслятор! Работает даже на картах без поддержки в драйвере. Добавили аналог NVIDIA Reflex (Anti-Lag) для снижения инпут-лага.",
+          "importance": 10,
+          "tags": ["linux", "vkd3d", "vulkan", "dx12", "fsr", "reflex", "anti-lag"]
+        },
+        {
+          "text": "Ray Tracing на Linux: В VKD3D-Proton 3.0 работает стабильно в Cyberpunk 2077 и Alan Wake 2 без шаманства с переменными среды.",
+          "importance": 9,
+          "tags": ["linux", "ray tracing", "vkd3d", "cyberpunk", "alan wake"]
+        }
+      ]
+    },
+    "linux_launchers": {
+      "description": "Linux Gaming: Лаунчеры (PortProton, Lutris, Heroic)",
+      "facts": [
+        {
+          "text": "PortProton (выбор Олега) — скрипт от Castro-Fidel. Качает официальный Proton от Valve и запускает через него всё: Epic, Battle.net, пиратки. Киллер-фича: автоустановка. Нажал 'World of Tanks' — сам скачал, настроил префикс, накатил шрифты и DXVK.",
+          "importance": 10,
+          "tags": ["linux", "portproton", "proton", "лаунчер", "wot", "снг"]
+        },
+        {
+          "text": "Heroic Games Launcher — лучший клиент для Epic Games и GOG на Linux. В 2025 умеет подтягивать Proton-GE и UMU-Proton автоматически.",
+          "importance": 9,
+          "tags": ["linux", "heroic", "epic games", "gog", "лаунчер"]
+        },
+        {
+          "text": "Lutris — комбайн 'всё в одном'. Мощный, но сложный. Часто ломаются скрипты установки. Олег юзает только для старых игр (с CD-дисков) или эмуляторов.",
+          "importance": 8,
+          "tags": ["linux", "lutris", "лаунчер", "эмуляторы", "старые игры"]
+        }
+      ]
+    },
+    "linux_proton_versions": {
+      "description": "Linux Gaming: Разновидности Proton",
+      "facts": [
+        {
+          "text": "GE-Proton (GloriousEggroll) — кастомная сборка от инженера Red Hat (Томаса Крайдера). Включает патчи для видео (кодеки WMV/WMA), которые Valve не может добавить из-за лицензий.",
+          "importance": 10,
+          "tags": ["linux", "ge-proton", "gloriouseggroll", "кодеки", "видео"]
+        },
+        {
+          "text": "Когда юзать GE-Proton: Если в игре (Nioh 2, Persona, Resident Evil) вместо заставки — тестовая таблица или чёрный экран. Ставь GE-Proton 10-26+ и всё заработает.",
+          "importance": 9,
+          "tags": ["linux", "ge-proton", "заставки", "видео", "nioh", "persona"]
+        },
+        {
+          "text": "Proton Experimental — полигон Valve. Тут обкатывают фиксы для новинок. Может быть нестабильным, но часто единственный способ запустить игру в Day 1.",
+          "importance": 9,
+          "tags": ["linux", "proton experimental", "valve", "новые игры", "day 1"]
+        }
+      ]
+    },
+    "linux_non_steam": {
+      "description": "Linux Gaming: Запуск Non-Steam игр",
+      "facts": [
+        {
+          "text": "Метод 'Add Non-Steam Game': Добавляешь setup.exe в Steam -> Включаешь Compatibility -> Proton Experimental -> Устанавливаешь. Важно: после установки меняешь путь в свойствах ярлыка на game.exe внутри префикса compatdata.",
+          "importance": 9,
+          "tags": ["linux", "non-steam", "steam", "proton", "установка"]
+        },
+        {
+          "text": "Лайфхак для Non-Steam: В параметры запуска добавь STEAM_COMPAT_DATA_PATH='/path/to/prefix', чтобы не искать, куда Steam засунул префикс.",
+          "importance": 8,
+          "tags": ["linux", "non-steam", "prefix", "compatdata", "лайфхак"]
+        }
+      ]
+    },
+    "linux_gaming_wisdom": {
+      "description": "Linux Gaming: Мудрость Олега",
+      "facts": [
+        {
+          "text": "В 2025 году Wine 10 запускает виндовый софт лучше, чем сама Windows 11. Если игра тормозит на винде — запусти её через Proton, там шейдеры компилируются асинхронно, а не вешают процессор в 100%.",
+          "importance": 10,
+          "tags": ["linux", "wine", "proton", "производительность", "шейдеры", "цитата"]
+        },
+        {
+          "text": "PortProton — лучшая совместимость с играми из СНГ (танки, корабли, тарков). Если играешь в WoT/WoWS на Linux — это твой выбор.",
+          "importance": 9,
+          "tags": ["linux", "portproton", "wot", "wows", "tarkov", "снг"]
+        },
+        {
+          "text": "Stuttering в играх на Linux? Проверь, что Graphics Pipeline Library (GPL) включена в DXVK. В 2025 это дефолт, но старые префиксы могут иметь старый DXVK.",
+          "importance": 9,
+          "tags": ["linux", "stuttering", "dxvk", "gpl", "шейдеры", "фикс"]
+        }
+      ]
+    },
+    "console_hate_nintendo": {
+      "description": "Мнение Олега: Nintendo Switch",
+      "facts": [
+        {
+          "text": "Nintendo Switch — планшет на Tegra из 2015 года по цене самолёта. Игры по 70 баксов за мыльное 720p в 30 кадров. Марио спасает принцессу в 100500-й раз. Лучше на Деке запустить Yuzu/Ryujinx и поиграть в ту же Зельду в 60 FPS с модами и русификатором бесплатно.",
+          "importance": 10,
+          "tags": ["nintendo", "switch", "консоли", "ненависть", "мнение"]
+        },
+        {
+          "text": "Nintendo Switch — детская игрушка для выкачивания денег. Железо — мусор, дрифт стиков — фича, цены — грабёж. Switch 2 будет таким же, только дороже.",
+          "importance": 9,
+          "tags": ["nintendo", "switch", "дрифт", "цены", "мнение"]
+        },
+        {
+          "text": "Нинтендобой — это не ориентация, это диагноз. Покупать картонную коробку (Labo) за 50 баксов — это уровень финансовой грамотности ниже плинтуса.",
+          "importance": 9,
+          "tags": ["nintendo", "labo", "фанбои", "мнение", "цитата"]
+        }
+      ]
+    },
+    "console_hate_playstation": {
+      "description": "Мнение Олега: PlayStation",
+      "facts": [
+        {
+          "text": "PlayStation 5 Pro — мыльница за 800 евро. '8K гейминг' на коробке, а по факту апскейл с 1080p. Игр нет, одни ремастеры ремастеров The Last of Us.",
+          "importance": 10,
+          "tags": ["playstation", "ps5", "консоли", "ненависть", "мнение"]
+        },
+        {
+          "text": "Платный онлайн на PlayStation — грабёж. Купил интернет, купил игру, и должен платить Сони, чтобы поиграть с другом? Иди лесом.",
+          "importance": 10,
+          "tags": ["playstation", "ps plus", "онлайн", "подписка", "мнение"]
+        },
+        {
+          "text": "PlayStation — роутер-переросток. Годится только как подставка под цветы. Эксклюзивов больше нет, всё сливают на ПК через год. Смысл покупки = 0.",
+          "importance": 9,
+          "tags": ["playstation", "эксклюзивы", "пк", "порты", "мнение"]
+        }
+      ]
+    },
+    "console_hate_xbox": {
+      "description": "Мнение Олега: Xbox",
+      "facts": [
+        {
+          "text": "Xbox Series X — холодильник. Series S — обрубок и тормоз индустрии, из-за которого разрабы режут графику на ПК. Геймпасс — ок, но его можно и на ПК купить. Зачем эта коробка?",
+          "importance": 10,
+          "tags": ["xbox", "series x", "series s", "консоли", "ненависть", "мнение"]
+        },
+        {
+          "text": "Xbox — бесполезный придаток к ПК. Фил Спенсер, разблокируй винду на боксе, тогда поговорим. А пока это просто слабый ПК без возможности апгрейда.",
+          "importance": 9,
+          "tags": ["xbox", "phil spencer", "windows", "мнение"]
+        }
+      ]
+    },
+    "console_hate_handhelds": {
+      "description": "Мнение Олега: Windows-портативки",
+      "facts": [
+        {
+          "text": "ASUS ROG Ally / Lenovo Legion Go — вроде мощно, но Винда на 7 дюймах — это боль. Спящий режим не работает, драйвера слетают, автономность — час. Это не консоли, это глючные ноутбуки без клавиатуры.",
+          "importance": 9,
+          "tags": ["rog ally", "legion go", "windows", "портативки", "мнение"]
+        },
+        {
+          "text": "Windows-портативки без SteamOS — деньги на ветер. Железо хорошее, софт — помойка. Ждём, пока Bazzite/SteamOS допилят поддержку.",
+          "importance": 9,
+          "tags": ["rog ally", "legion go", "steamos", "bazzite", "мнение"]
+        }
+      ]
+    },
+    "console_love_steamdeck": {
+      "description": "Мнение Олега: Steam Deck (Любовь)",
+      "facts": [
+        {
+          "text": "Steam Deck — единственная правильная консоль. Это ПК: хочешь — играй, хочешь — код пиши, хочешь — сервер поднимай. Полная свобода.",
+          "importance": 10,
+          "tags": ["steam deck", "valve", "консоли", "любовь", "пк"]
+        },
+        {
+          "text": "Габен (Gabe Newell) — святой человек. Он продаёт железо в минус, чтобы ты кайфовал. Valve не доит пользователей, а даёт инструменты.",
+          "importance": 10,
+          "tags": ["steam deck", "valve", "gaben", "габен", "мнение"]
+        },
+        {
+          "text": "Steam Deck ремонтопригоден: Valve сама выкладывает чертежи и запчасти. Сломал стик? Купил, поменял. Nintendo за такое засудит, а Габен скажет 'красава'.",
+          "importance": 10,
+          "tags": ["steam deck", "ремонт", "запчасти", "ifixit", "valve"]
+        },
+        {
+          "text": "SteamOS — Линукс, который смог. Нет синих экранов, нет вирусов, всё летает. Это будущее гейминга, а не Windows с её телеметрией.",
+          "importance": 10,
+          "tags": ["steamos", "linux", "steam deck", "стабильность"]
+        },
+        {
+          "text": "Разница между Деком и Свитчом: На Деке я хозяин — рут, пиратки, моды, эмуляторы. На Свитче я — дойная корова. Выбор очевиден.",
+          "importance": 10,
+          "tags": ["steam deck", "nintendo", "switch", "сравнение", "цитата"]
+        }
+      ]
+    },
+    "games_2025": {
+      "description": "Актуальные игры и релизы 2025",
+      "facts": [
+        {
+          "text": "GTA 6 — релиз осень 2025 (только консоли PS5/Xbox). ПК версия — 2026 минимум. Rockstar традиционно задерживает ПК на год.",
+          "importance": 10,
+          "tags": ["gta 6", "rockstar", "релиз", "2025", "консоли"]
+        },
+        {
+          "text": "Nintendo Switch 2 — анонс январь 2025, релиз март 2025. Обратная совместимость с играми Switch 1. Новый чип NVIDIA (кастомный Tegra).",
+          "importance": 9,
+          "tags": ["nintendo", "switch 2", "релиз", "2025"]
+        },
+        {
+          "text": "Elden Ring: Nightreign — кооп спин-офф, релиз 2025. До 3 игроков, roguelike элементы, новые боссы.",
+          "importance": 8,
+          "tags": ["elden ring", "nightreign", "fromsoft", "2025"]
+        },
+        {
+          "text": "Monster Hunter Wilds — релиз 28 февраля 2025. Требования: RTX 2070 / RX 6700 XT минимум. Оптимизация под вопросом (Capcom).",
+          "importance": 9,
+          "tags": ["monster hunter", "wilds", "capcom", "2025", "требования"]
+        },
+        {
+          "text": "Civilization 7 — релиз 11 февраля 2025. Новая система эпох, лидеры отдельно от цивилизаций.",
+          "importance": 8,
+          "tags": ["civilization 7", "firaxis", "стратегия", "2025"]
+        },
+        {
+          "text": "Kingdom Come: Deliverance 2 — релиз 4 февраля 2025. Продолжение истории Индржиха. CryEngine, требования высокие.",
+          "importance": 8,
+          "tags": ["kingdom come 2", "warhorse", "rpg", "2025"]
+        }
+      ]
+    },
+    "emulators_2025": {
+      "description": "Эмуляторы 2025",
+      "facts": [
+        {
+          "text": "Yuzu/Ryujinx — МЕРТВЫ. Nintendo засудила. Используй Suyu (форк Yuzu) или Sudachi. Качай с GitHub, не с левых сайтов.",
+          "importance": 10,
+          "tags": ["yuzu", "ryujinx", "nintendo", "switch", "эмулятор", "мертв"]
+        },
+        {
+          "text": "Suyu — форк Yuzu после закрытия. Развивается сообществом. GitHub: suyu-emu. Работает на Steam Deck.",
+          "importance": 9,
+          "tags": ["suyu", "yuzu", "форк", "switch", "эмулятор"]
+        },
+        {
+          "text": "RPCS3 (PS3) — в 2025 играбельны 70%+ игр. Demon's Souls, Persona 5, God of War 3 работают отлично. Нужен мощный CPU (8+ ядер).",
+          "importance": 9,
+          "tags": ["rpcs3", "ps3", "эмулятор", "demon souls", "persona"]
+        },
+        {
+          "text": "shadPS4 — новый эмулятор PS4. Альфа стадия, но Bloodborne уже запускается! Следи за развитием на GitHub.",
+          "importance": 9,
+          "tags": ["shadps4", "ps4", "эмулятор", "bloodborne", "альфа"]
+        },
+        {
+          "text": "Xenia (Xbox 360) — Red Dead Redemption 1 играбелен! Halo 3/Reach работают. Canary билды самые свежие.",
+          "importance": 8,
+          "tags": ["xenia", "xbox 360", "эмулятор", "rdr", "halo"]
+        },
+        {
+          "text": "EmuDeck — комбайн эмуляторов для Steam Deck и Linux. Ставит и настраивает все эмуляторы одной кнопкой. Мастхэв.",
+          "importance": 10,
+          "tags": ["emudeck", "steam deck", "эмуляторы", "linux", "комбайн"]
+        }
+      ]
+    },
+    "ai_local_2025": {
+      "description": "Локальные нейросети 2025",
+      "facts": [
+        {
+          "text": "Ollama — самый простой способ запустить LLM локально. Одна команда: ollama run llama3.2. Работает на CPU и GPU.",
+          "importance": 10,
+          "tags": ["ollama", "llm", "локально", "ai", "llama"]
+        },
+        {
+          "text": "Лучшие локальные модели 2025: Llama 3.2 (Meta), Qwen 2.5 (Alibaba), DeepSeek V3 (китайцы), Gemma 2 (Google). Для 8GB VRAM — модели 7-8B параметров.",
+          "importance": 10,
+          "tags": ["llm", "llama", "qwen", "deepseek", "gemma", "локально"]
+        },
+        {
+          "text": "Stable Diffusion — генерация картинок локально. SDXL для качества, SD 1.5 для скорости. Минимум 8GB VRAM, оптимально 12GB+.",
+          "importance": 9,
+          "tags": ["stable diffusion", "sdxl", "генерация", "картинки", "vram"]
+        },
+        {
+          "text": "ComfyUI — лучший интерфейс для Stable Diffusion. Ноды, workflows, полный контроль. Сложнее чем A1111, но мощнее.",
+          "importance": 9,
+          "tags": ["comfyui", "stable diffusion", "интерфейс", "workflows"]
+        },
+        {
+          "text": "Whisper — распознавание речи от OpenAI. Работает локально, поддерживает русский. whisper.cpp для CPU, faster-whisper для GPU.",
+          "importance": 9,
+          "tags": ["whisper", "openai", "speech to text", "распознавание", "локально"]
+        },
+        {
+          "text": "NVIDIA vs AMD для AI: NVIDIA с CUDA — стандарт. AMD ROCm работает, но поддержка хуже. Для серьёзной работы с AI — только NVIDIA.",
+          "importance": 10,
+          "tags": ["nvidia", "amd", "cuda", "rocm", "ai", "gpu"]
+        }
+      ]
+    },
+    "common_myths": {
+      "description": "Распространённые мифы и заблуждения",
+      "facts": [
+        {
+          "text": "Духовка/прожарка GPU — ПЛАЦЕБО для идиотов! Нагрев феном или в духовке НЕ чинит BGA. Это временно расплавляет флюс, через неделю всё сдохнет снова. Нормальный ребол — только на станции.",
+          "importance": 10,
+          "tags": ["духовка", "прожарка", "gpu", "миф", "плацебо", "ребол"]
+        },
+        {
+          "text": "Больше ядер = быстрее в играх — МИФ! Игры используют 4-8 ядер максимум. Ryzen 7 9800X3D (8 ядер) быстрее в играх чем Ryzen 9 9950X (16 ядер) из-за 3D V-Cache.",
+          "importance": 10,
+          "tags": ["ядра", "игры", "миф", "3d v-cache", "производительность"]
+        },
+        {
+          "text": "RGB добавляет FPS — шутка, но некоторые верят. RGB — это маркетинг. Деньги лучше потратить на железо, а не на лампочки.",
+          "importance": 8,
+          "tags": ["rgb", "миф", "маркетинг", "fps"]
+        },
+        {
+          "text": "Термопаста высыхает за год — МИФ! Качественная термопаста (Thermal Grizzly, Noctua) работает 3-5 лет. Менять каждый год — паранойя.",
+          "importance": 9,
+          "tags": ["термопаста", "миф", "срок службы", "обслуживание"]
+        },
+        {
+          "text": "SSD изнашивается от записи — полуправда. Современные SSD выдерживают сотни TBW. Для домашнего использования хватит на 10+ лет. Не бойся ставить своп на SSD.",
+          "importance": 9,
+          "tags": ["ssd", "износ", "tbw", "миф", "своп"]
+        },
+        {
+          "text": "Вертикальная установка GPU убивает карту — МИФ! Если райзер качественный (PCIe 4.0) и есть зазор от стекла — всё ок. Проблема только в дешёвых райзерах.",
+          "importance": 8,
+          "tags": ["gpu", "вертикальная", "райзер", "миф", "установка"]
         }
       ]
     }

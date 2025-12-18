@@ -187,6 +187,11 @@ async def handle_image_message(msg: Message):
     
     **Validates: Requirements 1.1, 1.4**
     """
+    # Проверяем включена ли функция
+    from app.services.bot_config import is_feature_enabled
+    if msg.chat.type != "private" and not await is_feature_enabled(msg.chat.id, "vision"):
+        return
+    
     # Проверяем, нужно ли обрабатывать изображение
     should_process, is_auto_reply = await should_process_image(msg)
     if not should_process:

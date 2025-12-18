@@ -740,7 +740,9 @@ async def cb_owner_settings(callback: CallbackQuery):
         return
     
     kb = InlineKeyboardBuilder()
+    kb.button(text="🛡️ Антиспам", callback_data="owner_antispam")
     kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(1)
     
     text = (
         "🔧 <b>Текущие настройки</b>\n\n"
@@ -759,11 +761,138 @@ async def cb_owner_settings(callback: CallbackQuery):
         f"├ Whisper: {settings.whisper_model}\n"
         f"├ Голос: {'✅' if settings.voice_recognition_enabled else '❌'}\n"
         f"├ Загрузка: {'✅' if settings.content_download_enabled else '❌'}\n\n"
-        f"⚠️ Для изменения настроек отредактируй .env и перезапусти бота."
+        f"Нажми <b>Антиспам</b> для настройки лимитов запросов."
     )
     
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
+
+
+# ============================================================================
+# Антиспам настройки
+# ============================================================================
+
+@router.callback_query(F.data == "owner_antispam")
+async def cb_owner_antispam(callback: CallbackQuery):
+    """Меню настроек антиспама."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.token_limiter import token_limiter
+    
+    stats = token_limiter.get_stats()
+    
+    kb = InlineKeyboardBuilder()
+    # Burst лимит
+    kb.button(text="➖", callback_data="owner_as_burst_dec")
+    kb.button(text=f"⚡ Burst: {stats['burst_limit']}/мин", callback_data="owner_as_noop")
+    kb.button(text="➕", callback_data="owner_as_burst_inc")
+    # Часовой лимит
+    kb.button(text="➖", callback_data="owner_as_hourly_dec")
+    kb.button(text=f"⏱ Час: {stats['hourly_limit']}/час", callback_data="owner_as_noop")
+    kb.button(text="➕", callback_data="owner_as_hourly_inc")
+    # Действия
+    kb.button(text="🔄 Сбросить статистику", callback_data="owner_as_reset_stats")
+    kb.button(text="🔙 Назад", callback_data="owner_settings")
+    kb.adjust(3, 3, 1, 1)
+    
+    text = (
+        "🛡️ <b>Настройки антиспама</b>\n\n"
+        f"<b>Текущие лимиты:</b>\n"
+        f"├ ⚡ Burst: <b>{stats['burst_limit']}</b> запросов/минуту\n"
+        f"└ ⏱ Часовой: <b>{stats['hourly_limit']}</b> запросов/час\n\n"
+        f"<b>Статистика:</b>\n"
+        f"├ Пользователей: {stats['total_users']}\n"
+        f"├ В whitelist: {stats['whitelisted']}\n"
+        f"└ Заблокировано: {stats['total_blocked']}\n\n"
+        "Используй ➖/➕ для изменения лимитов."
+    )
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_as_noop")
+async def cb_owner_as_noop(callback: CallbackQuery):
+    """Пустой callback для кнопок-индикаторов."""
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_as_burst_dec")
+async def cb_owner_as_burst_dec(callback: CallbackQuery):
+    """Уменьшить burst лимит."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.token_limiter import token_limiter
+    
+    new_limit = max(1, token_limiter.burst_limit - 1)
+    token_limiter.set_burst_limit(new_limit)
+    await callback.answer(f"Burst: {new_limit}/мин")
+    await cb_owner_antispam(callback)
+
+
+@router.callback_query(F.data == "owner_as_burst_inc")
+async def cb_owner_as_burst_inc(callback: CallbackQuery):
+    """Увеличить burst лимит."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.token_limiter import token_limiter
+    
+    new_limit = min(30, token_limiter.burst_limit + 1)
+    token_limiter.set_burst_limit(new_limit)
+    await callback.answer(f"Burst: {new_limit}/мин")
+    await cb_owner_antispam(callback)
+
+
+@router.callback_query(F.data == "owner_as_hourly_dec")
+async def cb_owner_as_hourly_dec(callback: CallbackQuery):
+    """Уменьшить часовой лимит."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.token_limiter import token_limiter
+    
+    new_limit = max(10, token_limiter.hourly_limit - 10)
+    token_limiter.set_hourly_limit(new_limit)
+    await callback.answer(f"Часовой: {new_limit}/час")
+    await cb_owner_antispam(callback)
+
+
+@router.callback_query(F.data == "owner_as_hourly_inc")
+async def cb_owner_as_hourly_inc(callback: CallbackQuery):
+    """Увеличить часовой лимит."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.token_limiter import token_limiter
+    
+    new_limit = min(500, token_limiter.hourly_limit + 10)
+    token_limiter.set_hourly_limit(new_limit)
+    await callback.answer(f"Часовой: {new_limit}/час")
+    await cb_owner_antispam(callback)
+
+
+@router.callback_query(F.data == "owner_as_reset_stats")
+async def cb_owner_as_reset_stats(callback: CallbackQuery):
+    """Сбросить статистику антиспама."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.token_limiter import token_limiter
+    
+    token_limiter.users.clear()
+    token_limiter.total_blocked = 0
+    
+    await callback.answer("✅ Статистика сброшена!", show_alert=True)
+    await cb_owner_antispam(callback)
 
 
 # ============================================================================
@@ -792,7 +921,7 @@ async def cb_owner_emergency(callback: CallbackQuery):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔴 Выключить все функции", callback_data="owner_em_disable_all")
     kb.button(text="🟢 Включить все функции", callback_data="owner_em_enable_all")
-    kb.button(text="🗑 ВАЙП ПАМЯТИ И БД", callback_data="owner_wipe_confirm")
+    kb.button(text="🗑 Вайп (выборочный)", callback_data="owner_wipe_menu")
     kb.button(text="🔄 Перезапуск бота", callback_data="owner_em_restart")
     kb.button(text="🔙 Назад", callback_data="owner_main")
     kb.adjust(1)
@@ -898,28 +1027,12 @@ async def cb_owner_restart_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "owner_wipe_confirm")
 async def cb_owner_wipe_confirm(callback: CallbackQuery):
-    """Подтверждение вайпа."""
+    """Перенаправление на меню выборочного вайпа."""
     if not is_owner(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
-    
-    kb = InlineKeyboardBuilder()
-    kb.button(text="⚠️ ДА, УДАЛИТЬ ВСЁ", callback_data="owner_wipe_execute")
-    kb.button(text="❌ Отмена", callback_data="owner_emergency")
-    kb.adjust(1)
-    
-    await callback.message.edit_text(
-        "🗑 <b>ВАЙП ПАМЯТИ И БАЗЫ ДАННЫХ</b>\n\n"
-        "⚠️ <b>ВНИМАНИЕ!</b> Это действие:\n"
-        "• Удалит ВСЮ память бота (ChromaDB)\n"
-        "• Очистит ВСЕ таблицы базы данных\n"
-        "• Удалит всех пользователей, чаты, статистику\n"
-        "• Удалит все цитаты, достижения, квесты\n\n"
-        "❗ <b>ЭТО ДЕЙСТВИЕ НЕОБРАТИМО!</b>\n\n"
-        "Ты уверен?",
-        reply_markup=kb.as_markup()
-    )
-    await callback.answer()
+    # Перенаправляем на новое меню вайпа
+    await cb_owner_wipe_menu(callback)
 
 
 @router.callback_query(F.data == "owner_wipe_execute")
@@ -1767,4 +1880,475 @@ async def cb_owner_users_recent(callback: CallbackQuery):
     kb.adjust(1)
     
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+# ============================================================================
+# РАСШИРЕННОЕ МЕНЮ ВАЙПА (Selective Wipe)
+# ============================================================================
+
+@router.callback_query(F.data == "owner_wipe_menu")
+async def cb_owner_wipe_menu(callback: CallbackQuery):
+    """Меню выборочного вайпа."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🧠 RAG память (ChromaDB)", callback_data="owner_wipe_rag")
+    kb.button(text="🎮 Игровая статистика", callback_data="owner_wipe_games")
+    kb.button(text="💬 Цитаты", callback_data="owner_wipe_quotes")
+    kb.button(text="📝 Логи сообщений", callback_data="owner_wipe_messages")
+    kb.button(text="👥 Пользователи и чаты", callback_data="owner_wipe_users")
+    kb.button(text="🏆 Достижения и квесты", callback_data="owner_wipe_achievements")
+    kb.button(text="⚠️ ВСЁ СРАЗУ", callback_data="owner_wipe_all_confirm")
+    kb.button(text="🔙 Назад", callback_data="owner_emergency")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🗑 <b>Выборочный вайп</b>\n\n"
+        "Выбери что хочешь сбросить:\n\n"
+        "• <b>RAG память</b> — векторная БД (ChromaDB)\n"
+        "• <b>Игровая статистика</b> — размеры, PvP, казино\n"
+        "• <b>Цитаты</b> — все сохранённые цитаты\n"
+        "• <b>Логи сообщений</b> — история сообщений\n"
+        "• <b>Пользователи и чаты</b> — все юзеры и группы\n"
+        "• <b>Достижения и квесты</b> — прогресс игроков\n\n"
+        "⚠️ Действия необратимы!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_rag")
+async def cb_owner_wipe_rag(callback: CallbackQuery):
+    """Подтверждение вайпа RAG памяти."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🧠 Вайп + восстановить дефолт", callback_data="owner_wipe_rag_exec:restore")
+    kb.button(text="🗑 Полный вайп (без дефолта)", callback_data="owner_wipe_rag_exec:clean")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🧠 <b>Вайп RAG памяти (ChromaDB)</b>\n\n"
+        "Это удалит всю векторную память бота:\n"
+        "• Запомненные факты из чатов\n"
+        "• Контекст разговоров\n"
+        "• Выученную информацию\n\n"
+        "Выбери режим:\n"
+        "• <b>С восстановлением</b> — загрузит дефолтные знания\n"
+        "• <b>Полный вайп</b> — оставит память пустой",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_wipe_rag_exec:"))
+async def cb_owner_wipe_rag_exec(callback: CallbackQuery):
+    """Выполнение вайпа RAG памяти."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    mode = callback.data.split(":")[1]  # restore или clean
+    restore_default = mode == "restore"
+    
+    await callback.message.edit_text("🧠 <b>Вайп RAG памяти...</b>\n\n⏳ Подождите...")
+    
+    results = []
+    
+    try:
+        from app.services.vector_db import vector_db
+        if vector_db.client:
+            collections = vector_db.client.list_collections()
+            for col in collections:
+                vector_db.client.delete_collection(col.name)
+            results.append(f"✅ Удалено {len(collections)} коллекций")
+        else:
+            results.append("⚠️ ChromaDB не инициализирована")
+    except Exception as e:
+        results.append(f"❌ Ошибка: {str(e)[:50]}")
+
+    
+    if restore_default:
+        try:
+            from app.services.vector_db import vector_db
+            from app.config import settings
+            if vector_db.client:
+                collection_name = settings.chromadb_collection_name
+                load_result = vector_db.load_default_knowledge(collection_name)
+                if load_result.get("error"):
+                    results.append(f"⚠️ Дефолт: {load_result['error']}")
+                else:
+                    results.append(f"✅ Загружено {load_result['loaded']} дефолтных фактов")
+        except Exception as e:
+            results.append(f"❌ Дефолт: {str(e)[:50]}")
+    
+    logger.warning(f"RAG WIPE executed by owner {callback.from_user.id}, restore={restore_default}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
+    kb.button(text="🏠 Главное меню", callback_data="owner_main")
+    kb.adjust(2)
+    
+    await callback.message.edit_text(
+        "🧠 <b>Вайп RAG памяти завершён</b>\n\n" +
+        "\n".join(results),
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "owner_wipe_games")
+async def cb_owner_wipe_games(callback: CallbackQuery):
+    """Подтверждение вайпа игровой статистики."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, сбросить игры", callback_data="owner_wipe_games_exec")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🎮 <b>Вайп игровой статистики</b>\n\n"
+        "Это удалит:\n"
+        "• Все размеры игроков\n"
+        "• PvP статистику и победы\n"
+        "• Казино джекпоты\n"
+        "• ELO рейтинги и лиги\n"
+        "• Кошельки и балансы\n\n"
+        "⚠️ Все игроки начнут с нуля!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_games_exec")
+async def cb_owner_wipe_games_exec(callback: CallbackQuery):
+    """Выполнение вайпа игровой статистики."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await callback.message.edit_text("🎮 <b>Вайп игр...</b>\n\n⏳ Подождите...")
+    
+    results = []
+    
+    try:
+        from app.database.models import GameStat, Wallet, UserElo
+        from sqlalchemy import delete
+        
+        async with get_session()() as session:
+            r1 = await session.execute(delete(GameStat))
+            r2 = await session.execute(delete(Wallet))
+            try:
+                r3 = await session.execute(delete(UserElo))
+                results.append(f"✅ UserElo: {r3.rowcount}")
+            except Exception:
+                pass
+            await session.commit()
+            results.append(f"✅ GameStat: {r1.rowcount} записей")
+            results.append(f"✅ Wallet: {r2.rowcount} записей")
+    except Exception as e:
+        results.append(f"❌ Ошибка: {str(e)[:50]}")
+
+    
+    logger.warning(f"GAMES WIPE executed by owner {callback.from_user.id}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
+    kb.button(text="🏠 Главное меню", callback_data="owner_main")
+    kb.adjust(2)
+    
+    await callback.message.edit_text(
+        "🎮 <b>Вайп игр завершён</b>\n\n" +
+        "\n".join(results),
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "owner_wipe_quotes")
+async def cb_owner_wipe_quotes(callback: CallbackQuery):
+    """Подтверждение вайпа цитат."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, удалить цитаты", callback_data="owner_wipe_quotes_exec")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "💬 <b>Вайп цитат</b>\n\n"
+        "Это удалит все сохранённые цитаты пользователей.\n\n"
+        "⚠️ Действие необратимо!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_quotes_exec")
+async def cb_owner_wipe_quotes_exec(callback: CallbackQuery):
+    """Выполнение вайпа цитат."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    try:
+        from app.database.models import Quote
+        from sqlalchemy import delete
+        
+        async with get_session()() as session:
+            result = await session.execute(delete(Quote))
+            await session.commit()
+            count = result.rowcount
+    except Exception as e:
+        count = f"Ошибка: {e}"
+
+    
+    logger.warning(f"QUOTES WIPE executed by owner {callback.from_user.id}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        f"💬 <b>Вайп цитат завершён</b>\n\n✅ Удалено: {count}",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "owner_wipe_messages")
+async def cb_owner_wipe_messages(callback: CallbackQuery):
+    """Подтверждение вайпа логов сообщений."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, очистить логи", callback_data="owner_wipe_messages_exec")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "📝 <b>Вайп логов сообщений</b>\n\n"
+        "Это удалит:\n"
+        "• Историю всех сообщений\n"
+        "• Историю вопросов пользователей\n\n"
+        "⚠️ Статистика активности будет потеряна!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_messages_exec")
+async def cb_owner_wipe_messages_exec(callback: CallbackQuery):
+    """Выполнение вайпа логов."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    results = []
+    try:
+        from app.database.models import MessageLog, UserQuestionHistory
+        from sqlalchemy import delete
+        
+        async with get_session()() as session:
+            r1 = await session.execute(delete(MessageLog))
+            r2 = await session.execute(delete(UserQuestionHistory))
+            await session.commit()
+            results.append(f"✅ Сообщений: {r1.rowcount}")
+            results.append(f"✅ История вопросов: {r2.rowcount}")
+    except Exception as e:
+        results.append(f"❌ Ошибка: {str(e)[:50]}")
+
+    
+    logger.warning(f"MESSAGES WIPE executed by owner {callback.from_user.id}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "📝 <b>Вайп логов завершён</b>\n\n" + "\n".join(results),
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "owner_wipe_users")
+async def cb_owner_wipe_users(callback: CallbackQuery):
+    """Подтверждение вайпа пользователей."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ Да, удалить всех", callback_data="owner_wipe_users_exec")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "👥 <b>Вайп пользователей и чатов</b>\n\n"
+        "Это удалит:\n"
+        "• Всех пользователей\n"
+        "• Все группы/чаты\n"
+        "• Приватные чаты\n"
+        "• Админов и блеклисты\n\n"
+        "⚠️ <b>ОПАСНО!</b> Бот забудет всех!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_users_exec")
+async def cb_owner_wipe_users_exec(callback: CallbackQuery):
+    """Выполнение вайпа пользователей."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    results = []
+    try:
+        from app.database.models import User, Chat, PrivateChat, Admin, Blacklist
+        from sqlalchemy import delete
+        
+        async with get_session()() as session:
+            # Порядок важен из-за FK
+            r1 = await session.execute(delete(Admin))
+            r2 = await session.execute(delete(Blacklist))
+            r3 = await session.execute(delete(PrivateChat))
+            r4 = await session.execute(delete(Chat))
+            # User удаляем последним (много FK ссылаются на него)
+            await session.commit()
+            results.append(f"✅ Админы: {r1.rowcount}")
+            results.append(f"✅ Блеклист: {r2.rowcount}")
+            results.append(f"✅ Приватные чаты: {r3.rowcount}")
+            results.append(f"✅ Группы: {r4.rowcount}")
+    except Exception as e:
+        results.append(f"❌ Ошибка: {str(e)[:50]}")
+
+    
+    logger.warning(f"USERS WIPE executed by owner {callback.from_user.id}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "👥 <b>Вайп пользователей завершён</b>\n\n" + "\n".join(results),
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "owner_wipe_achievements")
+async def cb_owner_wipe_achievements(callback: CallbackQuery):
+    """Подтверждение вайпа достижений."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, сбросить прогресс", callback_data="owner_wipe_achievements_exec")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🏆 <b>Вайп достижений и квестов</b>\n\n"
+        "Это удалит:\n"
+        "• Все достижения пользователей\n"
+        "• Прогресс квестов\n"
+        "• Гильдии и участников\n"
+        "• Турниры и рейтинги\n\n"
+        "⚠️ Весь прогресс будет потерян!",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_wipe_achievements_exec")
+async def cb_owner_wipe_achievements_exec(callback: CallbackQuery):
+    """Выполнение вайпа достижений."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    results = []
+    try:
+        from app.database.models import (
+            UserAchievement, Achievement, UserQuest, Quest,
+            GuildMember, Guild, TournamentScore, Tournament,
+            UserReputation, ReputationHistory
+        )
+        from sqlalchemy import delete
+        
+        async with get_session()() as session:
+            tables = [
+                (TournamentScore, "TournamentScore"),
+                (Tournament, "Tournament"),
+                (ReputationHistory, "ReputationHistory"),
+                (UserReputation, "UserReputation"),
+                (UserAchievement, "UserAchievement"),
+                (Achievement, "Achievement"),
+                (UserQuest, "UserQuest"),
+                (Quest, "Quest"),
+                (GuildMember, "GuildMember"),
+                (Guild, "Guild"),
+            ]
+            for model, name in tables:
+                try:
+                    r = await session.execute(delete(model))
+                    results.append(f"✅ {name}: {r.rowcount}")
+                except Exception as e:
+                    results.append(f"⚠️ {name}: {str(e)[:30]}")
+            await session.commit()
+    except Exception as e:
+        results.append(f"❌ Ошибка: {str(e)[:50]}")
+
+    
+    logger.warning(f"ACHIEVEMENTS WIPE executed by owner {callback.from_user.id}")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🏆 <b>Вайп достижений завершён</b>\n\n" + "\n".join(results),
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "owner_wipe_all_confirm")
+async def cb_owner_wipe_all_confirm(callback: CallbackQuery):
+    """Финальное подтверждение полного вайпа."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ ДА, УДАЛИТЬ ВСЁ", callback_data="owner_wipe_execute")
+    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🗑 <b>ПОЛНЫЙ ВАЙП</b>\n\n"
+        "⚠️ <b>ВНИМАНИЕ!</b> Это действие:\n"
+        "• Удалит ВСЮ память бота (ChromaDB)\n"
+        "• Очистит ВСЕ таблицы базы данных\n"
+        "• Удалит всех пользователей, чаты, статистику\n"
+        "• Удалит все цитаты, достижения, квесты\n\n"
+        "❗ <b>ЭТО ДЕЙСТВИЕ НЕОБРАТИМО!</b>\n\n"
+        "Ты уверен?",
+        reply_markup=kb.as_markup()
+    )
     await callback.answer()

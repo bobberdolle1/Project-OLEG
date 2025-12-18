@@ -269,28 +269,55 @@ class VectorDB:
             
             # Ищем факты где теги содержат любой из терминов запроса
             tag_matched_facts = []
+            
+            # Стоп-слова которые не должны триггерить поиск по тегам
+            stop_words = {
+                'вот', 'уже', 'это', 'как', 'что', 'для', 'или', 'при', 'без', 'под',
+                'над', 'про', 'так', 'там', 'тут', 'где', 'кто', 'чем', 'чего', 'его',
+                'она', 'они', 'оно', 'мой', 'твой', 'наш', 'ваш', 'все', 'всё', 'был',
+                'быть', 'есть', 'нет', 'да', 'ну', 'же', 'бы', 'ли', 'не', 'ни',
+                'the', 'and', 'for', 'with', 'this', 'that', 'from', 'are', 'was',
+                'давай', 'олег', 'привет', 'пока', 'спасибо', 'плиз', 'пожалуйста',
+                'можно', 'нужно', 'надо', 'хочу', 'могу', 'буду', 'будет', 'если',
+                'когда', 'потом', 'сейчас', 'ещё', 'еще', 'очень', 'просто', 'только',
+                'конца', 'конец', 'начало', 'ярлыками', 'ярлык', 'доделаем', 'сделаем'
+            }
+            
             if where and where.get("source") == "default_knowledge":
                 try:
-                    # Получаем все факты и фильтруем по тегам
-                    all_results = collection.get(where=where, limit=500)
-                    if all_results and all_results['ids']:
-                        for i, doc_id in enumerate(all_results['ids']):
-                            metadata = all_results['metadatas'][i] if all_results['metadatas'] else {}
-                            tags = metadata.get('tags', '').lower()
-                            doc_text = all_results['documents'][i].lower() if all_results['documents'] else ''
-                            
-                            # Проверяем совпадение по тегам или тексту документа
-                            for term in query_terms:
-                                if len(term) >= 3 and (term in tags or term in doc_text):
-                                    tag_matched_facts.append({
-                                        'text': all_results['documents'][i],
-                                        'metadata': metadata,
-                                        'distance': 0.1,  # Высокий приоритет для tag match
-                                        'match_type': 'tag'
-                                    })
-                                    break
+                    # Фильтруем термины: убираем стоп-слова и короткие
+                    filtered_terms = [t for t in query_terms if len(t) >= 4 and t not in stop_words]
+                    
+                    # Если после фильтрации не осталось терминов — пропускаем tag search
+                    if not filtered_terms:
+                        logger.debug(f"[TAG SEARCH] Пропущен: нет значимых терминов в запросе")
+                    else:
+                        # Получаем все факты и фильтруем по тегам
+                        all_results = collection.get(where=where, limit=500)
+                        logger.debug(f"[TAG SEARCH] Получено {len(all_results['ids']) if all_results and all_results['ids'] else 0} фактов для фильтрации")
+                        logger.debug(f"[TAG SEARCH] Ищем термины: {filtered_terms}")
+                        
+                        if all_results and all_results['ids']:
+                            for i, doc_id in enumerate(all_results['ids']):
+                                metadata = all_results['metadatas'][i] if all_results['metadatas'] else {}
+                                tags = metadata.get('tags', '').lower()
+                                
+                                # Проверяем совпадение ТОЛЬКО по тегам (не по тексту!)
+                                for term in filtered_terms:
+                                    if term in tags:
+                                        tag_matched_facts.append({
+                                            'text': all_results['documents'][i],
+                                            'metadata': metadata,
+                                            'distance': 0.1,  # Высокий приоритет для tag match
+                                            'match_type': 'tag'
+                                        })
+                                        logger.debug(f"[TAG MATCH] Термин '{term}' найден в тегах: {tags[:60]}...")
+                                        break
+                        
+                        if tag_matched_facts:
+                            logger.info(f"[TAG SEARCH] Найдено {len(tag_matched_facts)} фактов по тегам")
                 except Exception as e:
-                    logger.debug(f"Tag search failed: {e}")
+                    logger.warning(f"Tag search failed: {e}")
             
             # Затем делаем embedding поиск
             query_params = {
@@ -874,6 +901,8 @@ class VectorDB:
         
         # Batch загрузка — добавляем все факты за один раз
         # Это НАМНОГО быстрее чем по одному (один вызов embeddings вместо 400+)
+        logger.info(f"Подготовлено {len(all_documents)} фактов из {categories_count} категорий для загрузки (v{version})")
+        
         if all_documents:
             try:
                 # Загружаем батчами по 50 фактов (ChromaDB лимит)

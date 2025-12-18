@@ -185,6 +185,11 @@ async def cmd_quote(msg: Message):
     """
     logger.info(f"[QUOTE] /q command received from {msg.from_user.id} in chat {msg.chat.id}")
     
+    # Проверяем включена ли функция
+    from app.services.bot_config import is_feature_enabled
+    if not await is_feature_enabled(msg.chat.id, "quotes"):
+        return  # Молча игнорируем
+    
     if not msg.reply_to_message:
         await msg.reply("❌ Нужно ответить на сообщение, чтобы сделать из него цитату.")
         return

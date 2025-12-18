@@ -2,9 +2,17 @@
 Dailies Service for OLEG v6.0 Fortress Update.
 
 Manages daily scheduled messages including:
-- Morning summary (#dailysummary) at 09:00 Moscow time
+- Evening summary (#dailysummary) at 20:00 Moscow time
 - Evening quote (#dailyquote) at 21:00 Moscow time
 - Evening stats (#dailystats) at 21:00 Moscow time
+
+Features:
+- LLM-generated chat summary
+- Mood analysis
+- Activity comparison with previous day
+- Interesting quotes of the day
+- Hot topics with links
+- Toxicity thermometer
 
 Requirements: 13.1, 13.2, 13.3, 13.4, 13.5
 """
@@ -29,18 +37,77 @@ logger = logging.getLogger(__name__)
 # Minimum activity threshold for sending summary (Requirement 13.5)
 MIN_ACTIVITY_FOR_SUMMARY = 1  # At least 1 message to send summary
 
-# Default wisdom quotes when Golden Fund is empty
+# Quote categories for variety
+QUOTE_CATEGORIES = {
+    "philosophy": [
+        "Если долго смотреть в монитор, монитор начинает смотреть в тебя.",
+        "Код работает — не трогай. Не работает — тоже не трогай.",
+        "Лучший код — тот, который не пришлось писать.",
+        "Проблема не в том, что ты не знаешь. Проблема в том, что ты уверен в том, чего не знаешь.",
+        "Оптимист верит, что мы живём в лучшем из миров. Пессимист боится, что так оно и есть.",
+        "Единственная настоящая ошибка — та, из которой мы ничего не извлекли.",
+        "Сложность — враг надёжности.",
+        "Простота — это не когда нечего добавить, а когда нечего убрать.",
+    ],
+    "it_wisdom": [
+        "В продакшене работает — значит работает. Почему — вопрос философский.",
+        "Документация как секс: когда хорошая — очень хорошая, когда плохая — лучше, чем ничего.",
+        "Первое правило отладки: это не баг, это фича. Второе правило: см. первое.",
+        "Legacy код — это код, который приносит деньги.",
+        "Хороший программист — ленивый программист. Он автоматизирует всё.",
+        "git push --force — и пусть весь мир подождёт.",
+        "Работает? Коммить. Не работает? Тоже коммить, но с припиской WIP.",
+        "Лучшая оптимизация — удалить код.",
+        "Любая достаточно сложная система содержит баг. Любая простая — два.",
+        "Код ревью: искусство вежливо сказать 'какого хрена'.",
+    ],
+    "life": [
+        "Не все, кто бродит, потерялись. Некоторые просто прокрастинируют.",
+        "План — это список вещей, которые пойдут не так.",
+        "Дедлайн — лучшая мотивация. Особенно вчерашний.",
+        "Кофе не решает проблемы, но и чай не решает.",
+        "Если не можешь объяснить просто — значит сам не понял.",
+        "Опыт — это когда вместо новых ошибок делаешь старые, но быстрее.",
+        "Перфекционизм — это прокрастинация в красивой обёртке.",
+        "Иногда лучшее решение — пойти поспать.",
+        "Сегодня не тот день, когда я буду разбираться с этим. Завтра тоже.",
+    ],
+    "motivation": [
+        "Сделай или не сделай. Пробовать — это для слабаков.",
+        "Каждый эксперт когда-то был новичком, который не сдался.",
+        "Маленький прогресс — тоже прогресс.",
+        "Не сравнивай свой первый шаг с чьим-то сотым.",
+        "Ошибки — это просто данные для следующей итерации.",
+        "Начни. Остальное приложится.",
+        "Лучше сделать на 80% сегодня, чем на 100% никогда.",
+        "Усталость — временная. Результат — постоянный.",
+    ],
+    "absurd": [
+        "Если код работает с первого раза — проверь, тот ли файл ты запустил.",
+        "Вселенная стремится к хаосу. Твой код — часть вселенной.",
+        "Баги не исчезают. Они мигрируют.",
+        "Понедельник — это пятница в параллельной вселенной.",
+        "Кто понял жизнь, тот не спешит.",
+        "Иногда тишина — лучший ответ. Особенно в чате в 3 ночи.",
+        "Всё временно. Кроме временных решений.",
+        "Если что-то выглядит глупо, но работает — это не глупо. Это legacy.",
+    ],
+    "oleg_style": [
+        "Хуй с ним, работает и ладно.",
+        "Не баг, а неожиданное поведение.",
+        "Сегодня я добрый. Завтра — посмотрим.",
+        "Если ты это читаешь — значит ещё не всё потеряно.",
+        "Главное — не паниковать. Ну, или паниковать эффективно.",
+        "Было сложно, стало просто. Шучу, всё ещё сложно.",
+        "Ты справишься. Или нет. Но попробовать стоит.",
+        "Жизнь коротка. Пиши понятный код.",
+        "Отдыхай, пока можешь. Дедлайны вечны.",
+    ],
+}
+
+# Flattened list for backward compatibility
 DEFAULT_WISDOM_QUOTES = [
-    "Мудрость приходит с опытом, а опыт — с ошибками.",
-    "Лучше сделать и пожалеть, чем не сделать и пожалеть.",
-    "Терпение и труд всё перетрут.",
-    "Не откладывай на завтра то, что можно сделать сегодня.",
-    "Учиться никогда не поздно.",
-    "Кто рано встаёт, тому Бог подаёт.",
-    "Без труда не выловишь и рыбку из пруда.",
-    "Век живи — век учись.",
-    "Тише едешь — дальше будешь.",
-    "Семь раз отмерь, один раз отрежь.",
+    quote for quotes in QUOTE_CATEGORIES.values() for quote in quotes
 ]
 
 
@@ -65,7 +132,7 @@ class DailiesConfig:
     summary_enabled: bool = True
     quote_enabled: bool = True
     stats_enabled: bool = True
-    summary_time_hour: int = 9   # 09:00 Moscow (Requirement 13.1)
+    summary_time_hour: int = 20  # 20:00 Moscow (evening summary)
     quote_time_hour: int = 21   # 21:00 Moscow (Requirement 13.2, 13.3)
 
 
@@ -88,6 +155,13 @@ class DailySummary:
         hot_topics: List of hot topics with message links
         peak_hour: Hour with most activity
         top_chatters: List of most active users
+        # Enhanced fields
+        llm_summary: LLM-generated summary of discussions
+        mood_score: Overall chat mood (0-100, 50=neutral)
+        mood_label: Mood description
+        interesting_quotes: Notable/funny messages
+        activity_change: Percentage change vs previous day
+        prev_message_count: Previous day message count for comparison
     """
     chat_id: int
     date: datetime
@@ -97,12 +171,19 @@ class DailySummary:
     moderation_actions: int = 0
     top_messages: List[Dict[str, Any]] = field(default_factory=list)
     has_activity: bool = False
-    # New fields for enhanced dailies
+    # Toxicity & topics
     toxicity_score: float = 0.0
     toxicity_incidents: int = 0
     hot_topics: List[Dict[str, Any]] = field(default_factory=list)
     peak_hour: Optional[int] = None
     top_chatters: List[Dict[str, Any]] = field(default_factory=list)
+    # Enhanced fields
+    llm_summary: Optional[str] = None
+    mood_score: float = 50.0
+    mood_label: str = "Нейтрально"
+    interesting_quotes: List[Dict[str, Any]] = field(default_factory=list)
+    activity_change: Optional[float] = None
+    prev_message_count: int = 0
 
 
 @dataclass
@@ -503,9 +584,40 @@ class DailiesService:
                 for row in top_chatters_result.all()
             ]
             
-            # ===== NEW: Hot topics (extract from messages) =====
+            # ===== Hot topics (extract from messages) =====
             hot_topics = await self._extract_hot_topics(
                 chat_id, yesterday_start, yesterday_end, session
+            )
+            
+            # ===== Activity comparison with previous day =====
+            prev_day_start = yesterday_start - timedelta(days=1)
+            prev_count_result = await session.execute(
+                select(func.count(MessageLog.id)).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= prev_day_start,
+                    MessageLog.created_at < yesterday_start
+                )
+            )
+            prev_message_count = prev_count_result.scalar() or 0
+            
+            activity_change = None
+            if prev_message_count > 0:
+                activity_change = ((message_count - prev_message_count) / prev_message_count) * 100
+            
+            # ===== Interesting quotes =====
+            interesting_quotes = await self._extract_interesting_quotes(
+                chat_id, yesterday_start, yesterday_end, session
+            )
+            
+            # ===== Mood analysis =====
+            mood_score, mood_label = await self._analyze_chat_mood(
+                chat_id, yesterday_start, yesterday_end, session, toxicity_score
+            )
+            
+            # ===== LLM Summary =====
+            llm_summary = await self._generate_llm_summary(
+                chat_id, yesterday_start, yesterday_end, session,
+                message_count, hot_topics, top_chatters
             )
             
             return DailySummary(
@@ -520,7 +632,13 @@ class DailiesService:
                 toxicity_incidents=toxicity_incidents,
                 hot_topics=hot_topics,
                 peak_hour=peak_hour,
-                top_chatters=top_chatters
+                top_chatters=top_chatters,
+                llm_summary=llm_summary,
+                mood_score=mood_score,
+                mood_label=mood_label,
+                interesting_quotes=interesting_quotes,
+                activity_change=activity_change,
+                prev_message_count=prev_message_count,
             )
             
         except Exception as e:
@@ -624,6 +742,223 @@ class DailiesService:
             logger.warning(f"Failed to extract hot topics: {e}")
             return []
     
+    async def _extract_interesting_quotes(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        session: AsyncSession
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract interesting/funny messages from the day.
+        
+        Looks for messages with certain patterns that indicate humor or interest.
+        """
+        from app.database.models import MessageLog
+        
+        try:
+            # Get messages with text
+            messages_result = await session.execute(
+                select(MessageLog).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time,
+                    MessageLog.text.isnot(None)
+                ).order_by(MessageLog.created_at.desc()).limit(300)
+            )
+            messages = messages_result.scalars().all()
+            
+            if not messages:
+                return []
+            
+            interesting = []
+            
+            for msg in messages:
+                if not msg.text or len(msg.text) < 15 or len(msg.text) > 200:
+                    continue
+                
+                text_lower = msg.text.lower()
+                score = 0
+                
+                # Humor indicators
+                if any(x in text_lower for x in ['😂', '🤣', 'хахах', 'лол', 'ахах', 'ржу']):
+                    score += 2
+                if any(x in text_lower for x in ['блять', 'пиздец', 'ебать', 'охуе']):
+                    score += 1  # Expressive
+                if '?' in msg.text and '!' in msg.text:
+                    score += 1  # Emotional
+                if msg.text.count('!') >= 2:
+                    score += 1
+                # Avoid boring messages
+                if any(x in text_lower for x in ['привет', 'пока', 'спасибо', 'ок', 'да', 'нет']):
+                    score -= 2
+                if len(msg.text) < 30:
+                    score -= 1
+                
+                if score >= 2:
+                    interesting.append({
+                        "text": msg.text[:150] + ("..." if len(msg.text) > 150 else ""),
+                        "username": msg.username or f"User {msg.user_id}",
+                        "message_id": msg.message_id,
+                        "score": score
+                    })
+            
+            # Sort by score and take top 3
+            interesting.sort(key=lambda x: x["score"], reverse=True)
+            return interesting[:3]
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract interesting quotes: {e}")
+            return []
+    
+    async def _analyze_chat_mood(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        session: AsyncSession,
+        toxicity_score: float
+    ) -> tuple[float, str]:
+        """
+        Analyze overall chat mood based on message patterns.
+        
+        Returns:
+            (mood_score, mood_label) where score is 0-100 (50=neutral)
+        """
+        from app.database.models import MessageLog
+        
+        try:
+            messages_result = await session.execute(
+                select(MessageLog.text).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time,
+                    MessageLog.text.isnot(None)
+                ).limit(200)
+            )
+            texts = [row[0] for row in messages_result.all() if row[0]]
+            
+            if not texts:
+                return 50.0, "Нейтрально"
+            
+            positive_count = 0
+            negative_count = 0
+            
+            positive_markers = ['😊', '😄', '🥰', '❤️', '👍', '🎉', '😁', 'круто', 'класс', 
+                              'отлично', 'супер', 'спасибо', 'молодец', 'красава', 'топ']
+            negative_markers = ['😢', '😭', '😤', '😡', '👎', '💔', 'плохо', 'ужас', 
+                              'отстой', 'хуйня', 'пиздец', 'блять', 'дерьмо']
+            
+            for text in texts:
+                text_lower = text.lower()
+                if any(m in text_lower for m in positive_markers):
+                    positive_count += 1
+                if any(m in text_lower for m in negative_markers):
+                    negative_count += 1
+            
+            total = len(texts)
+            positive_ratio = positive_count / total if total > 0 else 0
+            negative_ratio = negative_count / total if total > 0 else 0
+            
+            # Calculate mood score (0-100, 50 is neutral)
+            # Toxicity also affects mood negatively
+            base_mood = 50 + (positive_ratio * 40) - (negative_ratio * 30) - (toxicity_score * 0.2)
+            mood_score = max(0, min(100, base_mood))
+            
+            # Determine label
+            if mood_score >= 75:
+                mood_label = "Отличное настроение! 🌟"
+            elif mood_score >= 60:
+                mood_label = "Позитивно 😊"
+            elif mood_score >= 45:
+                mood_label = "Нейтрально"
+            elif mood_score >= 30:
+                mood_label = "Напряжённо 😐"
+            else:
+                mood_label = "Тяжёлый день 😔"
+            
+            return mood_score, mood_label
+            
+        except Exception as e:
+            logger.warning(f"Failed to analyze mood: {e}")
+            return 50.0, "Нейтрально"
+    
+    async def _generate_llm_summary(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        session: AsyncSession,
+        message_count: int,
+        hot_topics: List[Dict[str, Any]],
+        top_chatters: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """
+        Generate LLM-based summary of chat discussions.
+        """
+        from app.database.models import MessageLog
+        
+        try:
+            # Get sample of messages for context
+            messages_result = await session.execute(
+                select(MessageLog.text, MessageLog.username).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time,
+                    MessageLog.text.isnot(None)
+                ).order_by(func.random()).limit(50)
+            )
+            messages = messages_result.all()
+            
+            if len(messages) < 5:
+                return None
+            
+            # Build context
+            topics_str = ", ".join([t["keyword"] for t in hot_topics[:5]]) if hot_topics else "разное"
+            chatters_str = ", ".join([c["username"] for c in top_chatters[:3]]) if top_chatters else "участники"
+            
+            sample_texts = [f"{m.username}: {m.text[:100]}" for m in messages[:20] if m.text]
+            messages_sample = "\n".join(sample_texts)
+            
+            from app.services.ollama_client import _ollama_chat
+            
+            prompt = f"""Сделай ОЧЕНЬ краткий пересказ обсуждений в чате за день (2-3 предложения).
+
+Статистика:
+- Сообщений: {message_count}
+- Темы: {topics_str}
+- Активные: {chatters_str}
+
+Примеры сообщений:
+{messages_sample}
+
+Требования:
+- Максимум 2-3 коротких предложения
+- Упомяни главные темы обсуждений
+- Стиль: информативно, немного с юмором
+- Без банальностей типа "участники общались"
+- Говори как будто рассказываешь другу
+
+Ответь ТОЛЬКО пересказом, без вступлений."""
+
+            messages_for_llm = [
+                {"role": "system", "content": "Ты — Олег, делаешь краткие пересказы чатов. Говоришь по делу, с лёгкой иронией."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            summary = await _ollama_chat(messages_for_llm, temperature=0.7)
+            
+            # Clean and validate
+            summary = summary.strip()
+            if len(summary) < 20 or len(summary) > 300:
+                return None
+            
+            return summary
+            
+        except Exception as e:
+            logger.debug(f"Failed to generate LLM summary: {e}")
+            return None
+    
     def _get_toxicity_emoji(self, score: float) -> str:
         """Get toxicity thermometer emoji based on score."""
         if score < 20:
@@ -672,10 +1007,7 @@ class DailiesService:
         """
         Format daily summary for display.
         
-        Requirement 13.1: Send a #dailysummary message with a digest
-        of yesterday's events.
-        
-        Enhanced with toxicity thermometer, hot topics, and more stats.
+        Enhanced evening summary with LLM insights, mood, quotes, and comparisons.
         
         Args:
             summary: DailySummary to format
@@ -686,82 +1018,118 @@ class DailiesService:
         date_str = summary.date.strftime("%d.%m.%Y")
         
         lines = [
-            f"📊 #dailysummary за {date_str}",
+            f"🌆 #dailysummary за {date_str}",
             "",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "📈 СТАТИСТИКА",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"💬 Сообщений: {summary.message_count}",
-            f"👥 Активных: {summary.active_users}",
         ]
         
+        # LLM Summary at the top (if available)
+        if summary.llm_summary:
+            lines.append(f"📝 {summary.llm_summary}")
+            lines.append("")
+        
+        # Stats with comparison
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append("📈 ЦИФРЫ ДНЯ")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        
+        # Message count with trend
+        trend = ""
+        if summary.activity_change is not None:
+            if summary.activity_change > 10:
+                trend = f" 📈 +{summary.activity_change:.0f}%"
+            elif summary.activity_change < -10:
+                trend = f" 📉 {summary.activity_change:.0f}%"
+            elif summary.activity_change != 0:
+                trend = f" → {summary.activity_change:+.0f}%"
+        
+        lines.append(f"💬 Сообщений: {summary.message_count}{trend}")
+        lines.append(f"👥 Активных: {summary.active_users}")
+        
         if summary.peak_hour is not None:
-            lines.append(f"⏰ Пик активности: {summary.peak_hour}:00")
+            lines.append(f"⏰ Пик: {summary.peak_hour}:00")
         
         if summary.new_members > 0:
             lines.append(f"🆕 Новичков: {summary.new_members}")
         
-        if summary.moderation_actions > 0:
-            lines.append(f"⚠️ Модерация: {summary.moderation_actions}")
-        
-        # Toxicity thermometer
+        # Mood & Toxicity combined
         lines.append("")
         lines.append("━━━━━━━━━━━━━━━━━━━━")
-        lines.append("🌡️ ТЕРМОМЕТР ТОКСИЧНОСТИ")
+        lines.append("🎭 ВАЙБ ЧАТА")
         lines.append("━━━━━━━━━━━━━━━━━━━━")
         
+        # Mood bar
+        mood_filled = int(summary.mood_score / 10)
+        mood_bar = "█" * mood_filled + "░" * (10 - mood_filled)
+        lines.append(f"😊 [{mood_bar}] {summary.mood_label}")
+        
+        # Toxicity (compact)
         toxicity_emoji = self._get_toxicity_emoji(summary.toxicity_score)
         toxicity_label = self._get_toxicity_label(summary.toxicity_score)
-        
-        # Visual thermometer bar
-        filled = int(summary.toxicity_score / 10)
-        bar = "█" * filled + "░" * (10 - filled)
-        
-        lines.append(f"{toxicity_emoji} [{bar}] {summary.toxicity_score:.0f}%")
-        lines.append(f"Вайб: {toxicity_label}")
+        lines.append(f"{toxicity_emoji} Токсичность: {summary.toxicity_score:.0f}% — {toxicity_label}")
         
         if summary.toxicity_incidents > 0:
             lines.append(f"🚨 Инцидентов: {summary.toxicity_incidents}")
         
-        # Top chatters
+        # Top chatters (compact)
         if summary.top_chatters:
             lines.append("")
             lines.append("━━━━━━━━━━━━━━━━━━━━")
-            lines.append("🏆 ТОП БОЛТУНОВ")
+            lines.append("🏆 БОЛТУНЫ ДНЯ")
             lines.append("━━━━━━━━━━━━━━━━━━━━")
-            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            for i, chatter in enumerate(summary.top_chatters[:5]):
+            medals = ["🥇", "🥈", "🥉"]
+            for i, chatter in enumerate(summary.top_chatters[:3]):
                 medal = medals[i] if i < len(medals) else f"{i+1}."
-                lines.append(f"{medal} {chatter['username']}: {chatter['count']} сообщ.")
+                lines.append(f"{medal} {chatter['username']} — {chatter['count']}")
         
         # Hot topics with links
         if summary.hot_topics:
             lines.append("")
             lines.append("━━━━━━━━━━━━━━━━━━━━")
-            lines.append("🔥 ГОРЯЧИЕ ТЕМЫ")
+            lines.append("🔥 ОБСУЖДАЛИ")
             lines.append("━━━━━━━━━━━━━━━━━━━━")
-            for topic in summary.hot_topics[:5]:
+            for topic in summary.hot_topics[:4]:
                 keyword = topic['keyword']
                 mentions = topic['mentions']
                 msg_id = topic.get('message_id')
                 
                 if msg_id and summary.chat_id:
-                    # Create message link (works for supergroups)
-                    # Format: https://t.me/c/CHAT_ID/MESSAGE_ID
-                    # For supergroups, chat_id is negative, we need to remove -100 prefix
                     chat_id_str = str(abs(summary.chat_id))
                     if chat_id_str.startswith("100"):
                         chat_id_str = chat_id_str[3:]
                     link = f"https://t.me/c/{chat_id_str}/{msg_id}"
-                    # Make the keyword itself clickable
-                    lines.append(f'• <a href="{link}">{keyword}</a> ({mentions}x)')
+                    lines.append(f'• <a href="{link}">{keyword}</a> ({mentions})')
                 else:
-                    lines.append(f"• {keyword} ({mentions}x)")
+                    lines.append(f"• {keyword} ({mentions})")
         
-        lines.append("")
-        lines.append("Хорошего дня! ☀️")
+        # Interesting quotes
+        if summary.interesting_quotes:
+            lines.append("")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            lines.append("💬 ЦИТАТЫ ДНЯ")
+            lines.append("━━━━━━━━━━━━━━━━━━━━")
+            for quote in summary.interesting_quotes[:2]:
+                text = quote['text']
+                username = quote['username']
+                lines.append(f'"{text}"')
+                lines.append(f"— {username}")
+                lines.append("")
+        
+        # Footer
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append(self._get_summary_footer())
         
         return "\n".join(lines)
+    
+    def _get_summary_footer(self) -> str:
+        """Get contextual footer for summary."""
+        footers = [
+            "Хорошего вечера! 🌙",
+            "Отдыхайте! 😴",
+            "До завтра! 👋",
+            "Спокойной ночи! 🌃",
+            "Завтра новый день! ✨",
+        ]
+        return random.choice(footers)
     
     # =========================================================================
     # Quote Selection (Requirement 13.2)
@@ -773,11 +1141,16 @@ class DailiesService:
         session: Optional[AsyncSession] = None
     ) -> DailyQuote:
         """
-        Select a daily quote (from Golden Fund or generated).
+        Select a daily quote (from Golden Fund, LLM-generated, or predefined).
         
         Requirement 13.2: WHEN the time reaches 21:00 Moscow time
         THEN the Dailies System SHALL send a #dailyquote message
         with a wisdom quote (either from Golden Fund or generated).
+        
+        Priority:
+        1. Golden Fund (50% chance if available)
+        2. LLM-generated quote (30% chance)
+        3. Predefined category quotes (20% chance, or fallback)
         
         Args:
             chat_id: Optional chat ID to prefer chat-specific quotes
@@ -786,8 +1159,10 @@ class DailiesService:
         Returns:
             DailyQuote with selected quote
         """
-        # Try to get quote from Golden Fund first
-        if self.golden_fund_service:
+        roll = random.random()
+        
+        # 50% chance: Try Golden Fund first
+        if roll < 0.5 and self.golden_fund_service:
             try:
                 golden_quote = await self.golden_fund_service.get_random_golden_quote(
                     chat_id=chat_id
@@ -803,14 +1178,127 @@ class DailiesService:
             except Exception as e:
                 logger.warning(f"Failed to get golden quote: {e}")
         
-        # Fall back to default wisdom quotes
-        quote_text = random.choice(DEFAULT_WISDOM_QUOTES)
+        # 30% chance: Try LLM generation
+        if roll < 0.8:
+            llm_quote = await self._generate_llm_quote()
+            if llm_quote:
+                return DailyQuote(
+                    text=llm_quote,
+                    author="Олег",
+                    is_from_golden_fund=False,
+                    sticker_file_id=None
+                )
+        
+        # Fallback: Pick from categorized quotes
+        return self._select_category_quote()
+    
+    def _select_category_quote(self) -> DailyQuote:
+        """
+        Select a quote from predefined categories based on day/mood.
+        
+        Uses day of week to vary categories:
+        - Monday: motivation
+        - Tuesday: it_wisdom  
+        - Wednesday: philosophy
+        - Thursday: life
+        - Friday: oleg_style
+        - Saturday: absurd
+        - Sunday: random category
+        """
+        from datetime import datetime
+        
+        day_categories = {
+            0: "motivation",    # Monday - need motivation
+            1: "it_wisdom",     # Tuesday - tech day
+            2: "philosophy",    # Wednesday - mid-week thoughts
+            3: "life",          # Thursday - life wisdom
+            4: "oleg_style",    # Friday - Oleg mode
+            5: "absurd",        # Saturday - weird stuff
+            6: None,            # Sunday - random
+        }
+        
+        weekday = datetime.now().weekday()
+        category = day_categories.get(weekday)
+        
+        if category and category in QUOTE_CATEGORIES:
+            quotes = QUOTE_CATEGORIES[category]
+        else:
+            # Random category on Sunday or fallback
+            category = random.choice(list(QUOTE_CATEGORIES.keys()))
+            quotes = QUOTE_CATEGORIES[category]
+        
+        quote_text = random.choice(quotes)
+        
         return DailyQuote(
             text=quote_text,
             author=None,
             is_from_golden_fund=False,
             sticker_file_id=None
         )
+    
+    async def _generate_llm_quote(self) -> Optional[str]:
+        """
+        Generate a unique daily quote using LLM.
+        
+        Returns:
+            Generated quote text or None if generation fails
+        """
+        try:
+            from app.services.ollama_client import _ollama_chat
+            
+            # Vary the prompt based on day
+            themes = [
+                "программирование и код",
+                "жизнь и философия", 
+                "мотивация без кринжа",
+                "абсурдный юмор",
+                "IT-мудрость",
+                "прокрастинация и дедлайны",
+                "простые истины",
+            ]
+            theme = random.choice(themes)
+            
+            prompt = f"""Придумай одну короткую цитату/мысль дня на тему: {theme}.
+
+Требования:
+- Максимум 1-2 предложения
+- Без банальщины типа "верь в себя" или "следуй за мечтой"
+- Можно с лёгкой иронией или сарказмом
+- Без кринжа и пафоса
+- Говори как умный, но не заносчивый чувак
+- Можно немного грубовато, но не токсично
+
+Примеры хорошего стиля:
+- "Код работает — не трогай. Не работает — тоже не трогай."
+- "Дедлайн — лучшая мотивация. Особенно вчерашний."
+- "Простота — это не когда нечего добавить, а когда нечего убрать."
+
+Ответь ТОЛЬКО цитатой, без кавычек и пояснений."""
+
+            messages = [
+                {"role": "system", "content": "Ты — Олег, прямолинейный и ироничный бот. Говоришь коротко и по делу."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            quote = await _ollama_chat(messages, temperature=0.9)
+            
+            # Clean up the quote
+            quote = quote.strip().strip('"\'')
+            
+            # Validate length and quality
+            if len(quote) < 10 or len(quote) > 200:
+                return None
+            
+            # Skip if too generic
+            generic_phrases = ["верь в себя", "следуй за мечтой", "ты можешь всё", "никогда не сдавайся"]
+            if any(phrase in quote.lower() for phrase in generic_phrases):
+                return None
+            
+            return quote
+            
+        except Exception as e:
+            logger.debug(f"Failed to generate LLM quote: {e}")
+            return None
     
     def format_quote(self, quote: DailyQuote) -> str:
         """
@@ -824,17 +1312,46 @@ class DailiesService:
         Returns:
             Formatted quote string
         """
-        lines = ["💭 #dailyquote", ""]
+        # Pick a random header emoji for variety
+        header_emojis = ["💭", "🌙", "✨", "🔮", "💡", "🎯", "⚡"]
+        header = random.choice(header_emojis)
+        
+        lines = [f"{header} #dailyquote", ""]
         
         if quote.is_from_golden_fund and quote.author:
-            lines.append(f'"{quote.text}"')
+            lines.append(f'«{quote.text}»')
             lines.append(f"— {quote.author}")
             lines.append("")
             lines.append("🏆 Из Золотого Фонда")
+        elif quote.author == "Олег":
+            # LLM-generated quote
+            lines.append(f'«{quote.text}»')
+            lines.append("")
+            lines.append("🤖 Сгенерировано Олегом")
         else:
-            lines.append(f'"{quote.text}"')
+            lines.append(f'«{quote.text}»')
+            # Add day-based footer
+            lines.append("")
+            lines.append(self._get_quote_footer())
         
         return "\n".join(lines)
+    
+    def _get_quote_footer(self) -> str:
+        """Get a contextual footer based on day of week."""
+        from datetime import datetime
+        
+        footers = {
+            0: "Понедельник. Держись. 💪",
+            1: "Вторник. Ещё не пятница, но уже не понедельник.",
+            2: "Среда. Полпути пройдено.",
+            3: "Четверг. Почти выходные.",
+            4: "Пятница! 🎉",
+            5: "Суббота. Отдыхай.",
+            6: "Воскресенье. Завтра понедельник... 😅",
+        }
+        
+        weekday = datetime.now().weekday()
+        return footers.get(weekday, "Хорошего дня!")
     
     # =========================================================================
     # Stats Aggregation (Requirement 13.3)

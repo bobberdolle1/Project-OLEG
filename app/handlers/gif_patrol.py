@@ -198,6 +198,7 @@ async def should_process_gif(msg: Message) -> tuple[bool, bool]:
     Проверяет, нужно ли обрабатывать GIF.
     
     Бот обрабатывает GIF если:
+    - Это личное сообщение (всегда обрабатываем)
     - В caption есть упоминание бота (@username или "олег")
     - Это ответ на сообщение бота
     - Авто-ответ сработал по вероятности (3.5%)
@@ -213,6 +214,11 @@ async def should_process_gif(msg: Message) -> tuple[bool, bool]:
         logger.debug(f"GIF processing: skipping - Ollama not available")
         return False, False
     
+    # В личных сообщениях всегда обрабатываем
+    if msg.chat.type == "private":
+        logger.debug(f"GIF processing: private chat, processing message {msg.message_id}")
+        return True, False
+    
     # Проверяем caption на упоминание бота
     caption = msg.caption or ""
     if _contains_bot_mention(caption, msg.bot):
@@ -226,11 +232,9 @@ async def should_process_gif(msg: Message) -> tuple[bool, bool]:
             return True, False
     
     # Авто-ответ на GIF с вероятностью 3.5%
-    # Только в групповых чатах, не в личных сообщениях
-    if msg.chat.type != "private":
-        if random.random() < AUTO_GIF_REPLY_PROBABILITY:
-            logger.debug(f"GIF processing: auto-reply triggered for message {msg.message_id}")
-            return True, True
+    if random.random() < AUTO_GIF_REPLY_PROBABILITY:
+        logger.debug(f"GIF processing: auto-reply triggered for message {msg.message_id}")
+        return True, True
     
     logger.debug(f"GIF processing: skipping message {msg.message_id} - no explicit mention")
     return False, False
@@ -271,6 +275,11 @@ async def handle_animation_message(message: Message, bot: Bot):
     
     **Validates: Requirements 3.3, 3.4, 3.5**
     """
+    # Проверяем включена ли функция (только для групп)
+    from app.services.bot_config import is_feature_enabled
+    if message.chat.type != "private" and not await is_feature_enabled(message.chat.id, "vision"):
+        return
+    
     # Пропускаем сообщения без отправителя (системные)
     if not message.from_user:
         return

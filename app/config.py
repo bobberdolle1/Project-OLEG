@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
     rate_limit_requests: int = Field(default=15, ge=1, description="Max requests per window")
     rate_limit_window: int = Field(default=60, ge=1, description="Rate limit window in seconds")
+    
+    # Antispam (лимит запросов к боту)
+    antispam_enabled: bool = Field(default=True, description="Enable request limits (antispam)")
+    antispam_burst: int = Field(default=5, ge=1, description="Max requests per minute (burst)")
+    antispam_hourly: int = Field(default=50, ge=5, description="Max requests per hour")
 
     # Metrics
     metrics_enabled: bool = Field(default=False, description="Enable Prometheus metrics endpoint")

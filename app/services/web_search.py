@@ -12,7 +12,7 @@ Web Search Service — умный веб-поиск с несколькими п
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -21,6 +21,37 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# Паттерны для определения запросов о ценах на железо
+HARDWARE_PRICE_PATTERNS = [
+    r"(rtx\s*\d{4}|gtx\s*\d{4}|rx\s*\d{4}|arc\s*[ab]\d{3})",  # GPU
+    r"(ryzen\s*\d|i[3579]-\d{4,5}|core\s*ultra)",  # CPU
+    r"(ddr[45]\s*\d{4}|ram\s*\d{2}gb)",  # RAM
+    r"(ssd\s*\d+[gt]b|nvme\s*\d+)",  # Storage
+]
+
+# Ключевые слова для определения запроса о цене
+PRICE_KEYWORDS = [
+    "цена", "стоит", "стоимость", "купить", "price", "cost",
+    "сколько", "почём", "за сколько", "где купить",
+]
+
+
+def is_hardware_price_query(query: str) -> bool:
+    """Проверяет, является ли запрос вопросом о цене на железо."""
+    query_lower = query.lower()
+    
+    # Проверяем наличие ключевых слов о цене
+    has_price_keyword = any(kw in query_lower for kw in PRICE_KEYWORDS)
+    
+    # Проверяем наличие названия железа
+    has_hardware = any(
+        re.search(pattern, query_lower) 
+        for pattern in HARDWARE_PRICE_PATTERNS
+    )
+    
+    return has_price_keyword and has_hardware
 
 
 @dataclass
@@ -80,8 +111,13 @@ class WebSearchService:
         brave_key = getattr(settings, 'brave_search_api_key', None)
         self.brave_api_key = brave_key if brave_key and brave_key.strip() else None
         self._cache: dict[str, tuple[SearchResponse, float]] = {}
-        self._cache_ttl = 600  # 10 минут (увеличил для экономии запросов)
+        self._cache_ttl = 600  # 10 минут для обычных запросов
+        self._price_cache_ttl = 3600  # 1 час для цен на железо
         self._working_searxng: Optional[str] = None  # Кэш рабочего инстанса
+        
+        # Статистика кэша
+        self._cache_hits = 0
+        self._cache_misses = 0
     
     async def search(
         self, 
@@ -100,14 +136,21 @@ class WebSearchService:
         Returns:
             SearchResponse с результатами
         """
+        # Определяем TTL в зависимости от типа запроса
+        is_price_query = is_hardware_price_query(query)
+        cache_ttl = self._price_cache_ttl if is_price_query else self._cache_ttl
+        
         # Проверяем кэш
         cache_key = f"{query}:{max_results}"
         if cache_key in self._cache:
             response, timestamp = self._cache[cache_key]
-            if (datetime.now().timestamp() - timestamp) < self._cache_ttl:
-                logger.debug(f"[SEARCH] Cache hit: {query[:30]}...")
+            if (datetime.now().timestamp() - timestamp) < cache_ttl:
+                self._cache_hits += 1
+                logger.debug(f"[SEARCH] Cache hit ({cache_ttl}s TTL): {query[:30]}...")
                 response.cached = True
                 return response
+        
+        self._cache_misses += 1
         
         # Пробуем провайдеры по приоритету
         response = await self._try_providers(query, max_results, freshness)
@@ -160,16 +203,28 @@ class WebSearchService:
         for instance_url in instances_to_try[:4]:  # Пробуем максимум 4
             try:
                 async with httpx.AsyncClient(timeout=8) as client:
+                    request_params = {
+                        "q": query,
+                        "format": "json",
+                        "engines": "google,bing,duckduckgo",
+                        "language": "ru-RU",
+                    }
+                    
+                    # Заголовки для обхода bot detection
+                    # X-Forwarded-For и X-Real-IP нужны для SearXNG
+                    headers = {
+                        "Accept": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "X-Forwarded-For": "127.0.0.1",
+                        "X-Real-IP": "127.0.0.1",
+                    }
+                    
                     response = await client.get(
                         f"{instance_url.rstrip('/')}/search",
-                        params={
-                            "q": query,
-                            "format": "json",
-                            "engines": "google,bing,duckduckgo",
-                            "language": "ru-RU",
-                        },
-                        headers={"Accept": "application/json"}
+                        params=request_params,
+                        headers=headers
                     )
+                    
                     response.raise_for_status()
                     data = response.json()
                     
@@ -327,6 +382,24 @@ class WebSearchService:
             total_chars += len(line)
         
         return "\n".join(lines)
+
+
+    def get_cache_stats(self) -> dict:
+        """Возвращает статистику кэша."""
+        total = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total * 100) if total > 0 else 0
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "total": total,
+            "hit_rate": f"{hit_rate:.1f}%",
+            "cached_queries": len(self._cache),
+        }
+    
+    def clear_cache(self):
+        """Очищает кэш поиска."""
+        self._cache.clear()
+        logger.info("[SEARCH] Cache cleared")
 
 
 # Глобальный экземпляр

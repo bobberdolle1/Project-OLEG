@@ -38,6 +38,11 @@ async def handle_voice_message(msg: Message):
     Uses faster-whisper for speech recognition.
     Only responds in private chats or when replying to bot's message.
     """
+    # Проверяем включена ли функция
+    from app.services.bot_config import is_feature_enabled
+    if msg.chat.type != "private" and not await is_feature_enabled(msg.chat.id, "voice"):
+        return
+    
     if not stt_available():
         logger.warning("STT not available, skipping voice message")
         return
@@ -75,7 +80,8 @@ async def handle_voice_message(msg: Message):
         response = await generate_reply_with_context(
             text,
             username=msg.from_user.username or msg.from_user.first_name,
-            chat_id=msg.chat.id
+            chat_id=msg.chat.id,
+            user_id=msg.from_user.id
         )
         
         if response:
@@ -107,6 +113,11 @@ async def handle_video_note(msg: Message):
     
     Only responds in private chats or when replying to bot's message.
     """
+    # Проверяем включена ли функция (только для групп)
+    from app.services.bot_config import is_feature_enabled
+    if msg.chat.type != "private" and not await is_feature_enabled(msg.chat.id, "voice"):
+        return
+    
     # В группах отвечаем только если это реплай на сообщение бота
     if msg.chat.type != "private":
         if not msg.reply_to_message:
@@ -182,7 +193,8 @@ async def handle_video_note(msg: Message):
         response = await generate_reply_with_context(
             full_context,
             username=msg.from_user.username or msg.from_user.first_name,
-            chat_id=msg.chat.id
+            chat_id=msg.chat.id,
+            user_id=msg.from_user.id
         )
         
         # 5. Формируем красивый ответ

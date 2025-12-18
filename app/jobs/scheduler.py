@@ -607,9 +607,9 @@ async def job_start_monthly_tournament(bot: Bot):
 # Fortress Update: Dailies System Jobs (Requirements 13.1, 13.2, 13.3)
 # ============================================================================
 
-async def job_dailies_morning_summary(bot: Bot):
+async def job_dailies_evening_summary(bot: Bot):
     """
-    Send morning summary (#dailysummary) to all chats at 09:00 Moscow time.
+    Send evening summary (#dailysummary) to all chats at 20:00 Moscow time.
     
     Respects chat-specific settings and skips chats with no activity.
     
@@ -626,7 +626,7 @@ async def job_dailies_morning_summary(bot: Bot):
             
             for chat in chats:
                 try:
-                    # Get morning messages (respects settings and activity)
+                    # Get summary messages (respects settings and activity)
                     messages = await dailies_service.get_morning_messages(
                         chat.id, session
                     )
@@ -641,12 +641,12 @@ async def job_dailies_morning_summary(bot: Bot):
                         await asyncio.sleep(0.5)  # Rate limiting
                     
                     if messages:
-                        logger.info(f"Sent morning summary to chat {chat.id}")
+                        logger.info(f"Sent evening summary to chat {chat.id}")
                     else:
-                        logger.debug(f"Skipped morning summary for chat {chat.id} (no activity or disabled)")
+                        logger.debug(f"Skipped evening summary for chat {chat.id} (no activity or disabled)")
                         
                 except Exception as e:
-                    logger.error(f"Failed to send morning summary to chat {chat.id}: {e}")
+                    logger.error(f"Failed to send evening summary to chat {chat.id}: {e}")
                     
         except Exception as e:
             logger.error(f"Error in morning summary job: {e}")
@@ -737,12 +737,12 @@ async def setup_scheduler(bot: Bot):
     )
     
     # Fortress Update: Dailies System jobs (Requirements 13.1, 13.2, 13.3)
-    # Morning summary at 09:00 Moscow time (UTC+3)
+    # Evening summary at 20:00 Moscow time (UTC+3)
     _scheduler.add_job(
-        job_dailies_morning_summary,
-        CronTrigger(hour=9, minute=0, timezone='Europe/Moscow'),
+        job_dailies_evening_summary,
+        CronTrigger(hour=20, minute=0, timezone='Europe/Moscow'),
         args=[bot],
-        id="dailies_morning_summary"
+        id="dailies_evening_summary"
     )
     # Evening quote and stats at 21:00 Moscow time (UTC+3)
     _scheduler.add_job(

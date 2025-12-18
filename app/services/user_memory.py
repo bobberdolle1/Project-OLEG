@@ -1,0 +1,377 @@
+"""
+Сервис памяти о пользователях для Олега.
+
+Хранит профили пользователей: сетап, предпочтения, историю вопросов.
+Используется для персонализации ответов.
+"""
+
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Any
+import json
+from dataclasses import dataclass, field, asdict
+
+from app.logger import logger
+from app.services.vector_db import vector_db
+
+
+@dataclass
+class UserProfile:
+    """Профиль пользователя для памяти Олега."""
+    user_id: int
+    username: Optional[str] = None
+    
+    # Железо
+    cpu: Optional[str] = None
+    gpu: Optional[str] = None
+    ram: Optional[str] = None
+    storage: Optional[str] = None
+    motherboard: Optional[str] = None
+    psu: Optional[str] = None
+    case: Optional[str] = None
+    cooling: Optional[str] = None
+    monitor: Optional[str] = None
+    peripherals: List[str] = field(default_factory=list)
+    
+    # Устройства
+    laptop: Optional[str] = None
+    steam_deck: bool = False
+    steam_deck_mods: List[str] = field(default_factory=list)
+    phone: Optional[str] = None
+    console: Optional[str] = None  # Если есть (для подколов)
+    
+    # Софт и ОС
+    os: Optional[str] = None
+    distro: Optional[str] = None  # Для Linux
+    de: Optional[str] = None  # Desktop Environment
+    
+    # Предпочтения
+    brand_preference: Optional[str] = None  # amd, intel, nvidia
+    games: List[str] = field(default_factory=list)
+    expertise: List[str] = field(default_factory=list)  # В чём шарит
+    
+    # Проблемы и история
+    current_problems: List[str] = field(default_factory=list)
+    resolved_problems: List[str] = field(default_factory=list)
+    
+    # Метаданные
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    message_count: int = 0
+    
+    def to_dict(self) -> Dict:
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> "UserProfile":
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+    
+    def to_context_string(self) -> str:
+        """Генерирует строку контекста для промпта."""
+        parts = []
+        
+        if self.username:
+            parts.append(f"@{self.username}")
+        
+        # Сетап
+        setup_parts = []
+        if self.cpu:
+            setup_parts.append(f"CPU: {self.cpu}")
+        if self.gpu:
+            setup_parts.append(f"GPU: {self.gpu}")
+        if self.ram:
+            setup_parts.append(f"RAM: {self.ram}")
+        if self.os:
+            os_str = self.os
+            if self.distro:
+                os_str = f"{self.distro}"
+            setup_parts.append(f"OS: {os_str}")
+        
+        if setup_parts:
+            parts.append(f"Сетап: {', '.join(setup_parts)}")
+        
+        if self.steam_deck:
+            deck_str = "Steam Deck"
+            if self.steam_deck_mods:
+                deck_str += f" ({', '.join(self.steam_deck_mods[:3])})"
+            parts.append(deck_str)
+        
+        if self.laptop:
+            parts.append(f"Ноут: {self.laptop}")
+        
+        if self.brand_preference:
+            parts.append(f"Фанат {self.brand_preference.upper()}")
+        
+        if self.expertise:
+            parts.append(f"Шарит в: {', '.join(self.expertise[:3])}")
+        
+        if self.current_problems:
+            parts.append(f"Проблемы: {self.current_problems[-1]}")
+        
+        if self.console:
+            parts.append(f"Консольщик ({self.console})")
+        
+        return " | ".join(parts) if parts else ""
+
+
+class UserMemoryService:
+    """Сервис для работы с памятью о пользователях."""
+    
+    def __init__(self):
+        self._cache: Dict[str, UserProfile] = {}  # chat_id:user_id -> profile
+        self._cache_ttl = 3600  # 1 час
+        self._cache_timestamps: Dict[str, datetime] = {}
+    
+    def _get_cache_key(self, chat_id: int, user_id: int) -> str:
+        return f"{chat_id}:{user_id}"
+    
+    def _get_collection_name(self, chat_id: int) -> str:
+        return f"chat_{chat_id}_user_profiles"
+    
+    async def get_profile(self, chat_id: int, user_id: int) -> Optional[UserProfile]:
+        """Получить профиль пользователя."""
+        cache_key = self._get_cache_key(chat_id, user_id)
+        
+        # Проверяем кэш
+        if cache_key in self._cache:
+            cache_time = self._cache_timestamps.get(cache_key)
+            if cache_time and datetime.now() - cache_time < timedelta(seconds=self._cache_ttl):
+                return self._cache[cache_key]
+        
+        # Загружаем из ChromaDB
+        try:
+            collection_name = self._get_collection_name(chat_id)
+            results = vector_db.search_facts(
+                collection_name=collection_name,
+                query=f"user_profile_{user_id}",
+                n_results=1,
+                where={"user_id": user_id, "type": "profile"}
+            )
+            
+            if results:
+                profile_data = json.loads(results[0].get('text', '{}'))
+                profile = UserProfile.from_dict(profile_data)
+                
+                # Кэшируем
+                self._cache[cache_key] = profile
+                self._cache_timestamps[cache_key] = datetime.now()
+                
+                return profile
+        except Exception as e:
+            logger.debug(f"Profile not found for user {user_id} in chat {chat_id}: {e}")
+        
+        return None
+    
+    async def save_profile(self, chat_id: int, user_id: int, profile: UserProfile):
+        """Сохранить профиль пользователя."""
+        try:
+            collection_name = self._get_collection_name(chat_id)
+            profile_json = json.dumps(profile.to_dict(), ensure_ascii=False)
+            
+            # Удаляем старый профиль если есть
+            try:
+                vector_db.delete_facts(
+                    collection_name=collection_name,
+                    where={"user_id": user_id, "type": "profile"}
+                )
+            except:
+                pass
+            
+            # Сохраняем новый
+            vector_db.add_fact(
+                collection_name=collection_name,
+                fact_text=profile_json,
+                metadata={
+                    "user_id": user_id,
+                    "type": "profile",
+                    "username": profile.username or "",
+                    "updated_at": datetime.now().isoformat()
+                }
+            )
+            
+            # Обновляем кэш
+            cache_key = self._get_cache_key(chat_id, user_id)
+            self._cache[cache_key] = profile
+            self._cache_timestamps[cache_key] = datetime.now()
+            
+            logger.debug(f"Profile saved for user {user_id} in chat {chat_id}")
+        except Exception as e:
+            logger.error(f"Error saving profile: {e}")
+    
+    async def update_profile_from_facts(
+        self, 
+        chat_id: int, 
+        user_id: int, 
+        username: Optional[str],
+        facts: List[Dict]
+    ) -> UserProfile:
+        """Обновить профиль на основе извлечённых фактов."""
+        # Получаем существующий профиль или создаём новый
+        profile = await self.get_profile(chat_id, user_id)
+        if not profile:
+            profile = UserProfile(user_id=user_id, username=username)
+            profile.first_seen = datetime.now().isoformat()
+        
+        profile.last_seen = datetime.now().isoformat()
+        profile.message_count += 1
+        
+        if username:
+            profile.username = username
+        
+        # Обновляем на основе фактов
+        for fact in facts:
+            text = fact.get('text', '').lower()
+            category = fact.get('metadata', {}).get('category', '')
+            
+            # Парсим железо
+            if category == 'hardware' or 'rtx' in text or 'gtx' in text or 'rx ' in text or 'radeon' in text:
+                self._parse_hardware(profile, text)
+            
+            # Парсим софт/ОС
+            if category == 'software' or 'linux' in text or 'windows' in text or 'arch' in text:
+                self._parse_software(profile, text)
+            
+            # Парсим проблемы
+            if category == 'problem':
+                if len(profile.current_problems) < 5:
+                    profile.current_problems.append(fact.get('text', '')[:100])
+            
+            # Парсим экспертизу
+            if category == 'expertise':
+                expertise = self._extract_expertise(text)
+                if expertise and expertise not in profile.expertise:
+                    profile.expertise.append(expertise)
+            
+            # Steam Deck
+            if 'steam deck' in text or 'дек' in text:
+                profile.steam_deck = True
+                mods = self._extract_deck_mods(text)
+                for mod in mods:
+                    if mod not in profile.steam_deck_mods:
+                        profile.steam_deck_mods.append(mod)
+        
+        # Сохраняем обновлённый профиль
+        await self.save_profile(chat_id, user_id, profile)
+        
+        return profile
+    
+    def _parse_hardware(self, profile: UserProfile, text: str):
+        """Парсит информацию о железе из текста."""
+        import re
+        
+        # GPU
+        gpu_patterns = [
+            r'(rtx\s*\d{4}\s*(?:ti|super)?)',
+            r'(gtx\s*\d{4}\s*(?:ti)?)',
+            r'(rx\s*\d{4}\s*(?:xt)?)',
+            r'(radeon\s*(?:rx\s*)?\d{4})',
+            r'(arc\s*[ab]\d{3})',
+        ]
+        for pattern in gpu_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                profile.gpu = match.group(1).upper()
+                break
+        
+        # CPU
+        cpu_patterns = [
+            r'(ryzen\s*\d\s*\d{4}x?3?d?)',
+            r'(i[3579]-\d{4,5}[a-z]*)',
+            r'(core\s*ultra\s*\d\s*\d{3}[a-z]*)',
+        ]
+        for pattern in cpu_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                profile.cpu = match.group(1)
+                break
+        
+        # RAM
+        ram_match = re.search(r'(\d{2,3})\s*(?:gb|гб|гигов?)\s*(?:ram|озу|памят)?', text, re.IGNORECASE)
+        if ram_match:
+            profile.ram = f"{ram_match.group(1)}GB"
+        
+        # Brand preference
+        if 'amd' in text and ('фанат' in text or 'люблю' in text or 'топ' in text):
+            profile.brand_preference = 'amd'
+        elif 'intel' in text and ('фанат' in text or 'люблю' in text or 'топ' in text):
+            profile.brand_preference = 'intel'
+        elif 'nvidia' in text and ('фанат' in text or 'люблю' in text or 'топ' in text):
+            profile.brand_preference = 'nvidia'
+    
+    def _parse_software(self, profile: UserProfile, text: str):
+        """Парсит информацию о софте/ОС."""
+        # Linux distros
+        distros = ['arch', 'ubuntu', 'fedora', 'debian', 'manjaro', 'mint', 'nixos', 'gentoo', 'cachyos', 'bazzite', 'nobara']
+        for distro in distros:
+            if distro in text.lower():
+                profile.os = 'linux'
+                profile.distro = distro.capitalize()
+                break
+        
+        if 'windows' in text.lower():
+            if 'ненавижу' not in text and 'говно' not in text:
+                profile.os = 'windows'
+        
+        # DE
+        des = ['kde', 'gnome', 'hyprland', 'sway', 'i3', 'xfce']
+        for de in des:
+            if de in text.lower():
+                profile.de = de.upper()
+                break
+    
+    def _extract_expertise(self, text: str) -> Optional[str]:
+        """Извлекает область экспертизы."""
+        expertise_keywords = {
+            'разгон': 'разгон',
+            'overclock': 'разгон',
+            'андервольт': 'андервольт',
+            'undervolt': 'андервольт',
+            'пайка': 'board level repair',
+            'ремонт': 'ремонт',
+            'linux': 'Linux',
+            'сервер': 'серверы',
+            'сеть': 'сети',
+            'программирован': 'программирование',
+        }
+        
+        for keyword, expertise in expertise_keywords.items():
+            if keyword in text.lower():
+                return expertise
+        return None
+    
+    def _extract_deck_mods(self, text: str) -> List[str]:
+        """Извлекает моды Steam Deck."""
+        mods = []
+        mod_keywords = {
+            'ptm7950': 'PTM7950',
+            'термопрокладк': 'термопрокладки',
+            'андервольт': 'андервольт',
+            'разгон памят': 'разгон RAM',
+            '6400': 'RAM 6400',
+            'ssd': 'SSD апгрейд',
+        }
+        
+        for keyword, mod in mod_keywords.items():
+            if keyword in text.lower():
+                mods.append(mod)
+        
+        return mods
+    
+    async def get_context_for_user(self, chat_id: int, user_id: int) -> str:
+        """Получить контекст о пользователе для промпта."""
+        profile = await self.get_profile(chat_id, user_id)
+        if profile:
+            return profile.to_context_string()
+        return ""
+    
+    async def get_all_profiles_context(self, chat_id: int, user_ids: List[int]) -> Dict[int, str]:
+        """Получить контекст для нескольких пользователей."""
+        result = {}
+        for user_id in user_ids:
+            context = await self.get_context_for_user(chat_id, user_id)
+            if context:
+                result[user_id] = context
+        return result
+
+
+# Глобальный экземпляр
+user_memory = UserMemoryService()

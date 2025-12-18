@@ -364,3 +364,61 @@ async def cb_advanced_settings(callback: CallbackQuery, bot: Bot):
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer("✅ Настройка изменена")
+
+
+# ============================================================================
+# Bot Settings Callbacks
+# ============================================================================
+
+@router.callback_query(F.data.startswith(f"{CALLBACK_PREFIX}bot_"))
+async def cb_bot_settings(callback: CallbackQuery, bot: Bot):
+    """
+    Handle bot settings (auto-reply, feature toggles).
+    """
+    user_id = callback.from_user.id
+    parts = callback.data.split("_")
+    chat_id = int(parts[2])
+    action = parts[3]
+    
+    # Verify ownership
+    if not await admin_panel_service.verify_ownership(bot, user_id, chat_id):
+        await callback.answer("❌ У вас нет прав на управление этим чатом", show_alert=True)
+        return
+    
+    from app.database.models import BotConfig
+    
+    async with get_session()() as session:
+        result = await session.execute(select(BotConfig).filter_by(chat_id=chat_id))
+        config = result.scalar_one_or_none()
+        
+        if not config:
+            config = BotConfig(chat_id=chat_id)
+            session.add(config)
+        
+        if action == "reply":
+            # Изменение шанса автоответа
+            value = int(parts[4])
+            config.auto_reply_chance = value
+            await callback.answer(f"✅ Автоответ: {value}%")
+        elif action == "quotes":
+            config.quotes_enabled = not config.quotes_enabled
+            await callback.answer(f"{'✅ Цитаты включены' if config.quotes_enabled else '❌ Цитаты выключены'}")
+        elif action == "voice":
+            config.voice_enabled = not config.voice_enabled
+            await callback.answer(f"{'✅ Голосовые включены' if config.voice_enabled else '❌ Голосовые выключены'}")
+        elif action == "vision":
+            config.vision_enabled = not config.vision_enabled
+            await callback.answer(f"{'✅ Картинки включены' if config.vision_enabled else '❌ Картинки выключены'}")
+        elif action == "games":
+            config.games_enabled = not config.games_enabled
+            await callback.answer(f"{'✅ Игры включены' if config.games_enabled else '❌ Игры выключены'}")
+        
+        await session.commit()
+    
+    # Сбрасываем кэш
+    from app.services.bot_config import invalidate_cache
+    invalidate_cache(chat_id)
+    
+    # Обновляем меню
+    text, keyboard = await admin_panel_service._build_bot_menu(chat_id)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")

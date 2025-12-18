@@ -11,6 +11,7 @@ from app.database.session import init_db
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
 from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
+from app.handlers.stickers import router as stickers_router
 from app.handlers.tournaments import router as tournaments_router
 from app.handlers.health import router as health_router
 from app.handlers.private_admin import router as private_admin_router
@@ -85,6 +86,16 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     logger.info("Загрузка конфигураций модерации...")
     await load_moderation_configs()
     logger.info("Конфигурации модерации загружены")
+
+    # Инициализация антиспама
+    if settings.antispam_enabled:
+        logger.info("Инициализация антиспама...")
+        from app.services.token_limiter import token_limiter
+        if settings.owner_id:
+            token_limiter.add_to_whitelist(settings.owner_id)
+        token_limiter.burst_limit = settings.antispam_burst
+        token_limiter.hourly_limit = settings.antispam_hourly
+        logger.info(f"Антиспам: {settings.antispam_burst}/мин, {settings.antispam_hourly}/час")
 
     logger.info("Запуск фоновой задачи для случайных сообщений...")
     from app.handlers.random_responses import schedule_random_messages
@@ -237,6 +248,7 @@ def build_dp() -> Dispatcher:
         duos.router,
         statistics.router,
         gif_patrol_router,  # GIF Patrol - анализ GIF на запрещённый контент (до vision)
+        stickers_router,  # Реакции на стикеры
         vision.router,  # Роутер для обработки изображений
         random_responses.router,  # Роутер для рандомных ответов
         reactions_router,  # Роутер для обработки реакций

@@ -623,6 +623,28 @@ class DailiesConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
+class BotConfig(Base):
+    """
+    Bot behavior configuration per chat.
+    
+    Controls auto-reply chance and feature toggles.
+    """
+    __tablename__ = "bot_configs"
+    
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    
+    # Автоответ (0-100%)
+    auto_reply_chance: Mapped[int] = mapped_column(Integer, default=5)  # 5% по умолчанию
+    
+    # Функции бота
+    quotes_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # /q команда
+    voice_enabled: Mapped[bool] = mapped_column(Boolean, default=True)   # Распознавание голоса
+    vision_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # Анализ картинок
+    games_enabled: Mapped[bool] = mapped_column(Boolean, default=True)   # Игровые команды
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
 # ============================================================================
 # SHIELD & ECONOMY v6.5 - New Models
 # ============================================================================

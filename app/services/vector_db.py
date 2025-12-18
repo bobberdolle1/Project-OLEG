@@ -262,26 +262,78 @@ class VectorDB:
         collection = self.get_or_create_collection(collection_name)
         
         try:
+            # Сначала пробуем поиск по тегам (более точный для технических терминов)
+            # Извлекаем ключевые слова из запроса
+            query_lower = query.lower()
+            query_terms = query_lower.split()
+            
+            # Ищем факты где теги содержат любой из терминов запроса
+            tag_matched_facts = []
+            if where and where.get("source") == "default_knowledge":
+                try:
+                    # Получаем все факты и фильтруем по тегам
+                    all_results = collection.get(where=where, limit=500)
+                    if all_results and all_results['ids']:
+                        for i, doc_id in enumerate(all_results['ids']):
+                            metadata = all_results['metadatas'][i] if all_results['metadatas'] else {}
+                            tags = metadata.get('tags', '').lower()
+                            doc_text = all_results['documents'][i].lower() if all_results['documents'] else ''
+                            
+                            # Проверяем совпадение по тегам или тексту документа
+                            for term in query_terms:
+                                if len(term) >= 3 and (term in tags or term in doc_text):
+                                    tag_matched_facts.append({
+                                        'text': all_results['documents'][i],
+                                        'metadata': metadata,
+                                        'distance': 0.1,  # Высокий приоритет для tag match
+                                        'match_type': 'tag'
+                                    })
+                                    break
+                except Exception as e:
+                    logger.debug(f"Tag search failed: {e}")
+            
+            # Затем делаем embedding поиск
             query_params = {
                 "query_texts": [query],
-                "n_results": n_results
+                "n_results": n_results * 2  # Берём больше для объединения
             }
             if where:
                 query_params["where"] = where
             
             results = collection.query(**query_params)
             
-            facts = []
+            embedding_facts = []
             for i in range(len(results['documents'][0])):
                 fact = {
                     'text': results['documents'][0][i],
                     'metadata': results['metadatas'][0][i],
-                    'distance': results['distances'][0][i] if results['distances'] and len(results['distances'][0]) > i else None
+                    'distance': results['distances'][0][i] if results['distances'] and len(results['distances'][0]) > i else None,
+                    'match_type': 'embedding'
                 }
-                facts.append(fact)
+                embedding_facts.append(fact)
             
-            logger.debug(f"Найдено {len(facts)} фактов по запросу: {query[:50]}...")
-            return facts
+            # Объединяем результаты: сначала tag matches, потом embedding matches
+            # Убираем дубликаты по тексту
+            seen_texts = set()
+            combined_facts = []
+            
+            # Сначала добавляем tag matches (они более точные)
+            for fact in tag_matched_facts:
+                if fact['text'] not in seen_texts:
+                    seen_texts.add(fact['text'])
+                    combined_facts.append(fact)
+            
+            # Затем добавляем embedding matches
+            for fact in embedding_facts:
+                if fact['text'] not in seen_texts:
+                    seen_texts.add(fact['text'])
+                    combined_facts.append(fact)
+            
+            # Ограничиваем количество результатов
+            final_facts = combined_facts[:n_results]
+            
+            logger.debug(f"Найдено {len(final_facts)} фактов по запросу: {query[:50]}... (tag: {len(tag_matched_facts)}, emb: {len(embedding_facts)})")
+            return final_facts
         except Exception as e:
             logger.error(f"Ошибка при поиске фактов: {e}")
             return []

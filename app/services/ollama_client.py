@@ -1440,7 +1440,7 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     # Слова с цифрами (RTX4090, DDR5, i7-14700K)
     tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', search_query))
     # Известные термины (регистронезависимо)
-    known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel']
+    known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel', 'ryzen', 'geforce', 'radeon', 'bazzite', 'nobara', 'cachyos']
     for term in known_terms:
         if term.lower() in search_query.lower():
             tech_terms.append(term)
@@ -2203,7 +2203,7 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
     # Слова с цифрами (RTX4090, DDR5, i7-14700K)
     tech_terms.extend(re.findall(r'\b[A-Za-z]+\d+[A-Za-z0-9]*\b', search_query))
     # Известные термины (регистронезависимо)
-    known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel', 'ryzen', 'geforce', 'radeon']
+    known_terms = ['steam deck', 'gamescope', 'sdweak', 'decky', 'proton', 'linux', 'arch', 'nvidia', 'amd', 'intel', 'ryzen', 'geforce', 'radeon', 'bazzite', 'nobara', 'cachyos']
     for term in known_terms:
         if term.lower() in search_query.lower():
             tech_terms.append(term)

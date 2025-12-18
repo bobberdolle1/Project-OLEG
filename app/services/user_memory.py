@@ -10,7 +10,9 @@ from typing import Optional, Dict, List, Any
 import json
 from dataclasses import dataclass, field, asdict
 
-from app.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 from app.services.vector_db import vector_db
 
 

@@ -770,10 +770,25 @@ async def cmd_whois(msg: Message):
     
     # Формируем красивый вывод
     lines = []
+    info_lines = []  # Строки с реальной информацией
     username = profile.username or target_user.first_name or f"ID:{target_user_id}"
     lines.append(f"📋 <b>Профиль @{username}</b>\n")
     
-    # Железо
+    # Личная информация
+    personal = []
+    if profile.name:
+        personal.append(profile.name)
+    if profile.age:
+        personal.append(f"{profile.age} лет")
+    if profile.city:
+        personal.append(profile.city)
+    if personal:
+        info_lines.append(f"👤 {', '.join(personal)}")
+    
+    if profile.job:
+        info_lines.append(f"💼 <b>Работа:</b> {profile.job}")
+    
+    # Железо (основное)
     hardware = []
     if profile.cpu:
         hardware.append(f"CPU: {profile.cpu}")
@@ -782,41 +797,85 @@ async def cmd_whois(msg: Message):
     if profile.ram:
         hardware.append(f"RAM: {profile.ram}")
     if hardware:
-        lines.append(f"🖥 <b>Сетап:</b> {', '.join(hardware)}")
+        info_lines.append(f"🖥 <b>Сетап:</b> {', '.join(hardware)}")
+    
+    # Дополнительное железо
+    extra_hw = []
+    if profile.storage:
+        extra_hw.append(f"SSD: {profile.storage}")
+    if profile.motherboard:
+        extra_hw.append(f"MB: {profile.motherboard}")
+    if profile.psu:
+        extra_hw.append(f"PSU: {profile.psu}")
+    if profile.cooling:
+        extra_hw.append(f"Охлад: {profile.cooling}")
+    if extra_hw:
+        info_lines.append(f"⚙️ {', '.join(extra_hw)}")
+    
+    # Монитор и периферия
+    if profile.monitor:
+        info_lines.append(f"🖥 <b>Монитор:</b> {profile.monitor}")
+    if profile.peripherals:
+        info_lines.append(f"🎮 <b>Периферия:</b> {', '.join(profile.peripherals[:3])}")
     
     # ОС
     if profile.os or profile.distro:
         os_str = profile.distro or profile.os
         if profile.de:
             os_str += f" ({profile.de})"
-        lines.append(f"💻 <b>ОС:</b> {os_str}")
+        info_lines.append(f"💻 <b>ОС:</b> {os_str}")
     
-    # Steam Deck
+    # Устройства
     if profile.steam_deck:
         deck_str = "Steam Deck"
         if profile.steam_deck_mods:
             deck_str += f" ({', '.join(profile.steam_deck_mods[:3])})"
-        lines.append(f"🎮 {deck_str}")
+        info_lines.append(f"🎮 {deck_str}")
     
-    # Ноут
     if profile.laptop:
-        lines.append(f"💻 <b>Ноут:</b> {profile.laptop}")
+        info_lines.append(f"💻 <b>Ноут:</b> {profile.laptop}")
+    
+    if profile.phone:
+        info_lines.append(f"📱 <b>Телефон:</b> {profile.phone}")
+    
+    if profile.console:
+        info_lines.append(f"🎮 <b>Консольщик:</b> {profile.console} (сочувствую)")
+    
+    # Игры
+    if profile.games:
+        info_lines.append(f"🎯 <b>Играет в:</b> {', '.join(profile.games[:5])}")
+    
+    # Хобби и интересы
+    if profile.hobbies:
+        info_lines.append(f"🎨 <b>Хобби:</b> {', '.join(profile.hobbies[:5])}")
+    
+    if profile.music:
+        info_lines.append(f"🎵 <b>Музыка:</b> {', '.join(profile.music[:3])}")
+    
+    if profile.languages:
+        info_lines.append(f"💻 <b>Языки:</b> {', '.join(profile.languages[:5])}")
+    
+    if profile.pets:
+        info_lines.append(f"🐾 <b>Питомцы:</b> {', '.join(profile.pets)}")
     
     # Предпочтения
     if profile.brand_preference:
-        lines.append(f"❤️ <b>Фанат:</b> {profile.brand_preference.upper()}")
+        info_lines.append(f"❤️ <b>Фанат:</b> {profile.brand_preference.upper()}")
     
     # Экспертиза
     if profile.expertise:
-        lines.append(f"🧠 <b>Шарит в:</b> {', '.join(profile.expertise[:5])}")
+        info_lines.append(f"🧠 <b>Шарит в:</b> {', '.join(profile.expertise[:5])}")
     
     # Проблемы
     if profile.current_problems:
-        lines.append(f"⚠️ <b>Проблемы:</b> {profile.current_problems[-1][:50]}...")
+        info_lines.append(f"⚠️ <b>Проблемы:</b> {profile.current_problems[-1][:50]}...")
     
-    # Консоль (для подкола)
-    if profile.console:
-        lines.append(f"🎮 <b>Консольщик:</b> {profile.console} (сочувствую)")
+    # Если нет никакой информации — показываем заглушку
+    if not info_lines:
+        lines.append("🤷 Пока ничего интересного не узнал.")
+        lines.append("Пусть расскажет про себя побольше.")
+    else:
+        lines.extend(info_lines)
     
     # Статистика
     if profile.message_count > 0:

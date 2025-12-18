@@ -49,6 +49,18 @@ class UserProfile:
     games: List[str] = field(default_factory=list)
     expertise: List[str] = field(default_factory=list)  # В чём шарит
     
+    # Личное
+    name: Optional[str] = None  # Имя если представился
+    city: Optional[str] = None  # Город
+    country: Optional[str] = None  # Страна
+    job: Optional[str] = None  # Работа/профессия
+    hobbies: List[str] = field(default_factory=list)  # Хобби
+    music: List[str] = field(default_factory=list)  # Музыка
+    movies: List[str] = field(default_factory=list)  # Фильмы/сериалы
+    pets: List[str] = field(default_factory=list)  # Питомцы
+    languages: List[str] = field(default_factory=list)  # Языки программирования или обычные
+    age: Optional[int] = None  # Возраст если сказал
+    
     # Проблемы и история
     current_problems: List[str] = field(default_factory=list)
     resolved_problems: List[str] = field(default_factory=list)
@@ -220,6 +232,7 @@ class UserMemoryService:
         # Обновляем на основе фактов
         for fact in facts:
             text = fact.get('text', '').lower()
+            original_text = fact.get('text', '')  # Оригинал для имён
             category = fact.get('metadata', {}).get('category', '')
             
             # Парсим железо
@@ -229,6 +242,9 @@ class UserMemoryService:
             # Парсим софт/ОС
             if category == 'software' or 'linux' in text or 'windows' in text or 'arch' in text:
                 self._parse_software(profile, text)
+            
+            # Парсим личную информацию
+            self._parse_personal(profile, text, original_text)
             
             # Парсим проблемы
             if category == 'problem':
@@ -355,6 +371,117 @@ class UserMemoryService:
                 mods.append(mod)
         
         return mods
+    
+    def _parse_personal(self, profile: UserProfile, text: str, original_text: str):
+        """Парсит личную информацию из текста."""
+        import re
+        
+        # Имя (меня зовут X, я X)
+        name_patterns = [
+            r'меня зовут\s+([а-яё]+)',
+            r'я\s+([а-яё]{3,})\s*[,.]',
+            r'зови меня\s+([а-яё]+)',
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                name = match.group(1).capitalize()
+                if len(name) >= 3 and name.lower() not in ['это', 'тут', 'там', 'вот', 'что', 'как']:
+                    profile.name = name
+                    break
+        
+        # Город
+        cities = {
+            'москв': 'Москва', 'питер': 'Питер', 'спб': 'СПб', 'петербург': 'СПб',
+            'новосиб': 'Новосибирск', 'екатеринбург': 'Екатеринбург', 'казан': 'Казань',
+            'нижн': 'Нижний Новгород', 'самар': 'Самара', 'омск': 'Омск',
+            'челябинск': 'Челябинск', 'ростов': 'Ростов', 'уфа': 'Уфа',
+            'красноярск': 'Красноярск', 'воронеж': 'Воронеж', 'пермь': 'Пермь',
+            'волгоград': 'Волгоград', 'краснодар': 'Краснодар', 'киев': 'Киев',
+            'минск': 'Минск', 'алмат': 'Алматы', 'ташкент': 'Ташкент',
+        }
+        for key, city in cities.items():
+            if key in text and ('живу' in text or 'из' in text or 'город' in text):
+                profile.city = city
+                break
+        
+        # Работа/профессия
+        jobs = {
+            'программист': 'программист', 'разработчик': 'разработчик', 'девелопер': 'разработчик',
+            'сисадмин': 'сисадмин', 'админ': 'админ', 'devops': 'DevOps',
+            'тестировщик': 'тестировщик', 'qa': 'QA', 'дизайнер': 'дизайнер',
+            'студент': 'студент', 'школьник': 'школьник', 'фрилансер': 'фрилансер',
+            'инженер': 'инженер', 'аналитик': 'аналитик', 'менеджер': 'менеджер',
+            'эникей': 'эникейщик', 'техподдержк': 'техподдержка',
+        }
+        for key, job in jobs.items():
+            if key in text and ('работаю' in text or 'я ' in text):
+                profile.job = job
+                break
+        
+        # Хобби
+        hobbies_map = {
+            'фотограф': 'фотография', 'фото': 'фотография',
+            'музык': 'музыка', 'гитар': 'гитара', 'пиан': 'пианино',
+            'рисова': 'рисование', 'рисую': 'рисование',
+            'спорт': 'спорт', 'качалк': 'качалка', 'бег': 'бег',
+            'велосипед': 'велосипед', 'плава': 'плавание',
+            'кино': 'кино', 'фильм': 'кино', 'сериал': 'сериалы',
+            'аниме': 'аниме', 'манг': 'манга',
+            'книг': 'книги', 'читаю': 'книги',
+            'готов': 'готовка', 'кулинар': 'готовка',
+            '3d': '3D моделирование', 'блендер': '3D моделирование',
+            'стрим': 'стримы', 'ютуб': 'YouTube',
+        }
+        for key, hobby in hobbies_map.items():
+            if key in text and hobby not in profile.hobbies:
+                if len(profile.hobbies) < 5:
+                    profile.hobbies.append(hobby)
+        
+        # Музыка
+        music_genres = ['рок', 'метал', 'электроник', 'рэп', 'хип-хоп', 'поп', 'джаз', 
+                       'классик', 'панк', 'инди', 'техно', 'хаус', 'dnb', 'драм']
+        for genre in music_genres:
+            if genre in text and ('слушаю' in text or 'люблю' in text or 'музык' in text):
+                if genre not in profile.music and len(profile.music) < 5:
+                    profile.music.append(genre)
+        
+        # Питомцы
+        pets_map = {
+            'кот': 'кот', 'кошк': 'кошка', 'котик': 'кот', 'котэ': 'кот',
+            'собак': 'собака', 'пёс': 'собака', 'пес': 'собака',
+            'попугай': 'попугай', 'хомяк': 'хомяк', 'крыс': 'крыса',
+        }
+        for key, pet in pets_map.items():
+            if key in text and ('есть' in text or 'мой' in text or 'моя' in text or 'у меня' in text):
+                if pet not in profile.pets and len(profile.pets) < 3:
+                    profile.pets.append(pet)
+        
+        # Языки программирования
+        prog_langs = ['python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'rust', 
+                     'go', 'kotlin', 'swift', 'php', 'ruby', 'lua']
+        for lang in prog_langs:
+            if lang in text and ('пишу' in text or 'знаю' in text or 'учу' in text or 'на ' in text):
+                if lang not in profile.languages and len(profile.languages) < 5:
+                    profile.languages.append(lang)
+        
+        # Возраст
+        age_match = re.search(r'мне\s+(\d{1,2})\s*(?:лет|год)', text)
+        if age_match:
+            age = int(age_match.group(1))
+            if 10 <= age <= 80:
+                profile.age = age
+        
+        # Игры
+        games_list = ['cs2', 'cs:go', 'dota', 'дота', 'valorant', 'apex', 'pubg', 
+                     'fortnite', 'minecraft', 'майнкрафт', 'gta', 'гта', 'elden ring',
+                     'baldur', 'cyberpunk', 'киберпанк', 'witcher', 'ведьмак',
+                     'dark souls', 'дарк соулс', 'tarkov', 'тарков', 'rust', 'раст',
+                     'wow', 'варкрафт', 'diablo', 'path of exile', 'poe']
+        for game in games_list:
+            if game in text and game not in profile.games:
+                if len(profile.games) < 5:
+                    profile.games.append(game)
     
     async def get_context_for_user(self, chat_id: int, user_id: int) -> str:
         """Получить контекст о пользователе для промпта."""

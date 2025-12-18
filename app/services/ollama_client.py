@@ -2091,6 +2091,7 @@ async def store_fact_to_memory(fact_text: str, chat_id: int, metadata: Dict = No
 async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 3, topic_id: int = None) -> List[str]:
     """
     Извлекает контекст из памяти Олега, релевантный запросу.
+    Ищет сначала в памяти чата, потом в дефолтных знаниях.
 
     Args:
         query: Запрос пользователя
@@ -2101,7 +2102,10 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
     Returns:
         Список релевантных фактов
     """
+    context_facts = []
+    
     try:
+        # 1. Ищем в памяти чата
         collection_name = f"chat_{chat_id}_facts"
         
         # Формируем фильтр по топику если указан
@@ -2109,7 +2113,6 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
         if topic_id is not None:
             where_filter = {"topic_id": topic_id}
         
-        # Используем модель для поиска в базе знаний
         facts = vector_db.search_facts(
             collection_name=collection_name,
             query=query,
@@ -2118,14 +2121,35 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
             where=where_filter
         )
 
-        # Извлекаем только тексты фактов
         context_facts = [fact['text'] for fact in facts if 'text' in fact]
-
-        logger.debug(f"Извлечено {len(context_facts)} фактов из памяти для чата {chat_id} (topic={topic_id})")
-        return context_facts
+        logger.debug(f"Извлечено {len(context_facts)} фактов из памяти чата {chat_id}")
     except Exception as e:
-        logger.error(f"Ошибка при извлечении контекста из памяти: {e}")
-        return []
+        logger.debug(f"Память чата недоступна: {e}")
+    
+    # 2. Дополняем дефолтными знаниями если нужно больше контекста
+    try:
+        remaining = n_results - len(context_facts)
+        if remaining > 0:
+            default_collection = settings.chromadb_collection_name
+            default_facts = vector_db.search_facts(
+                collection_name=default_collection,
+                query=query,
+                n_results=remaining + 2,  # Берём чуть больше для лучшего покрытия
+                where={"source": "default_knowledge"}
+            )
+            
+            for fact in default_facts:
+                if 'text' in fact and fact['text'] not in context_facts:
+                    context_facts.append(fact['text'])
+                    if len(context_facts) >= n_results + 2:  # Лимит
+                        break
+            
+            if default_facts:
+                logger.debug(f"Добавлено {len(default_facts)} фактов из базы знаний")
+    except Exception as e:
+        logger.debug(f"Дефолтные знания недоступны: {e}")
+    
+    return context_facts
 
 
 async def generate_reply_with_context(user_text: str, username: str | None,
@@ -2167,8 +2191,8 @@ async def generate_reply_with_context(user_text: str, username: str | None,
                 chat_history_context += "ВАЖНО: Ты видишь контекст разговора. НЕ говори 'не знаю о чём речь'. "
                 chat_history_context += "Если тебя спрашивают про что-то из контекста — отвечай по делу.\n"
     
-    # Извлекаем контекст из памяти (с учётом топика если указан)
-    context_facts = await retrieve_context_for_query(user_text, chat_id, topic_id=topic_id)
+    # Извлекаем контекст из памяти и базы знаний (с учётом топика если указан)
+    context_facts = await retrieve_context_for_query(user_text, chat_id, n_results=5, topic_id=topic_id)
 
     # Извлекаем новые факты из сообщения (асинхронно, не блокируя ответ)
     user_info = {"username": username} if username else {}

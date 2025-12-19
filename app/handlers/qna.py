@@ -3,6 +3,8 @@
 import logging
 import random
 import re
+import asyncio
+import time
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -23,6 +25,11 @@ from app.utils import utc_now, safe_reply
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+# Дебаунс для сообщений — если юзер шлёт несколько сообщений подряд, отвечаем только на последнее
+# Ключ: (chat_id, user_id), значение: (message_id, timestamp, asyncio.Task)
+_pending_messages: dict[tuple[int, int], tuple[int, float, asyncio.Task | None]] = {}
+_DEBOUNCE_DELAY = 2.0  # Ждём 2 секунды перед ответом
 
 
 async def _get_chat_context(msg: Message) -> str | None:
@@ -430,8 +437,42 @@ async def general_qna(msg: Message):
     
     if not await _should_reply(msg):
         return
+    
+    # Дебаунс: если юзер шлёт несколько сообщений подряд, отвечаем только на последнее
+    debounce_key = (msg.chat.id, msg.from_user.id)
+    current_time = time.time()
+    
+    # Проверяем есть ли pending сообщение от этого юзера
+    if debounce_key in _pending_messages:
+        old_msg_id, old_time, old_task = _pending_messages[debounce_key]
+        # Если прошло меньше DEBOUNCE_DELAY — отменяем старый таск
+        if current_time - old_time < _DEBOUNCE_DELAY and old_task and not old_task.done():
+            old_task.cancel()
+            logger.debug(f"[DEBOUNCE] Отменён ответ на msg_id={old_msg_id}, новое сообщение от {user_tag}")
+    
+    # Создаём таск с задержкой
+    async def delayed_response():
+        await asyncio.sleep(_DEBOUNCE_DELAY)
+        # Проверяем что это всё ещё актуальное сообщение
+        if debounce_key in _pending_messages:
+            stored_msg_id, _, _ = _pending_messages[debounce_key]
+            if stored_msg_id != msg.message_id:
+                return  # Пришло новое сообщение, не отвечаем на это
+        await _process_qna_message(msg)
+        # Очищаем после обработки
+        if debounce_key in _pending_messages:
+            del _pending_messages[debounce_key]
+    
+    task = asyncio.create_task(delayed_response())
+    _pending_messages[debounce_key] = (msg.message_id, current_time, task)
 
+
+async def _process_qna_message(msg: Message):
+    """Обработка сообщения после дебаунса."""
+    user_tag = f"@{msg.from_user.username}" if msg.from_user.username else f"id:{msg.from_user.id}"
     text = msg.text or ""
+    topic_id = getattr(msg, 'message_thread_id', None)
+    is_forum = getattr(msg.chat, 'is_forum', False)
     async_session = get_session()
     user = await ensure_user(msg.from_user)
 

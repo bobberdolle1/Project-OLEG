@@ -490,7 +490,7 @@ Describe factually without opinions.""",
                 "options": {
                     "temperature": 0.85,  # Больше креативности и живости
                     "num_ctx": 4096,
-                    "num_predict": 512  # Увеличено для полных ответов
+                    "num_predict": 1024  # Увеличено для полных ответов
                 }
             }
             

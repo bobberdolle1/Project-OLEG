@@ -24,6 +24,7 @@ CATEGORIES = {
     "fishing": ("🎣 Рыбалка", [ItemType.FISHING_ROD_BASIC, ItemType.FISHING_ROD_PRO, ItemType.FISHING_ROD_GOLDEN]),
     "boosters": ("⚡ Бустеры", [ItemType.LUCKY_CHARM, ItemType.DOUBLE_XP, ItemType.SHIELD, ItemType.ENERGY_DRINK, ItemType.VIP_STATUS]),
     "roosters": ("🐔 Петухи", [ItemType.ROOSTER_COMMON, ItemType.ROOSTER_RARE, ItemType.ROOSTER_EPIC]),
+    "pp_creams": ("🍆 Мази для роста", [ItemType.PP_CREAM_SMALL, ItemType.PP_CREAM_MEDIUM, ItemType.PP_CREAM_LARGE, ItemType.PP_CREAM_TITAN]),
 }
 
 

@@ -55,6 +55,7 @@ class GameStat(Base):
     size_cm: Mapped[int] = mapped_column(Integer, default=0)
     next_grow_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     pvp_wins: Mapped[int] = mapped_column(Integer, default=0)
+    pvp_losses: Mapped[int] = mapped_column(Integer, default=0)  # PP battle losses
     grow_count: Mapped[int] = mapped_column(Integer, default=0)
     casino_jackpots: Mapped[int] = mapped_column(Integer, default=0)
     reputation: Mapped[int] = mapped_column(Integer, default=0)

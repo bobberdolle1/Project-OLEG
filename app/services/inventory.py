@@ -51,6 +51,12 @@ class ItemType(str, Enum):
     ROOSTER_COMMON = "rooster_common"
     ROOSTER_RARE = "rooster_rare"
     ROOSTER_EPIC = "rooster_epic"
+    
+    # PP Creams (мази для роста)
+    PP_CREAM_SMALL = "pp_cream_small"
+    PP_CREAM_MEDIUM = "pp_cream_medium"
+    PP_CREAM_LARGE = "pp_cream_large"
+    PP_CREAM_TITAN = "pp_cream_titan"
 
 
 @dataclass
@@ -252,6 +258,44 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         description="Элитный боец.",
         price=1500,
         effect={"rooster_tier": "epic"},
+        stackable=True,
+    ),
+    
+    # PP Creams (мази для роста пиписьки)
+    ItemType.PP_CREAM_SMALL: ItemInfo(
+        item_type=ItemType.PP_CREAM_SMALL,
+        name="Мазь 'Подрастай'",
+        emoji="🧴",
+        description="+1-3 см к размеру пиписьки.",
+        price=100,
+        effect={"pp_boost_min": 1, "pp_boost_max": 3},
+        stackable=True,
+    ),
+    ItemType.PP_CREAM_MEDIUM: ItemInfo(
+        item_type=ItemType.PP_CREAM_MEDIUM,
+        name="Крем 'Титан'",
+        emoji="🧴",
+        description="+2-5 см к размеру пиписьки.",
+        price=300,
+        effect={"pp_boost_min": 2, "pp_boost_max": 5},
+        stackable=True,
+    ),
+    ItemType.PP_CREAM_LARGE: ItemInfo(
+        item_type=ItemType.PP_CREAM_LARGE,
+        name="Гель 'Мегамен'",
+        emoji="🧴",
+        description="+5-10 см к размеру пиписьки.",
+        price=800,
+        effect={"pp_boost_min": 5, "pp_boost_max": 10},
+        stackable=True,
+    ),
+    ItemType.PP_CREAM_TITAN: ItemInfo(
+        item_type=ItemType.PP_CREAM_TITAN,
+        name="Эликсир 'Годзилла'",
+        emoji="🧪",
+        description="+10-20 см к размеру пиписьки!",
+        price=2000,
+        effect={"pp_boost_min": 10, "pp_boost_max": 20},
         stackable=True,
     ),
 }

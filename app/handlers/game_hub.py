@@ -60,8 +60,8 @@ class GameHubUI:
     BUTTONS_PAGE_3 = [
         ("📦 Лутбоксы", "game:loot"),
         ("🐔 Петухи", "game:cockfight"),
+        ("🍆 Битва ПП", "game:pp"),
         ("🏪 Магазин", "game:shop"),
-        ("🎒 Инвентарь", "game:inventory"),
         ("📊 Топ", "game:top"),
         ("💰 Баланс", "game:balance"),
     ]
@@ -173,6 +173,7 @@ class GameHubUI:
             "guess": "/guess",
             "loot": "/loot",
             "cockfight": "/cockfight",
+            "pp": "/pp",
             "shop": "/shop",
             "inventory": "/inventory",
             "top": "/top",
@@ -231,6 +232,19 @@ class GameHubUI:
                 await mini_games.cmd_loot(fake_message)
             elif game_type == "cockfight":
                 await mini_games.cmd_cockfight(fake_message)
+            elif game_type == "pp":
+                # Показываем гайд + статистику
+                await callback.message.answer(
+                    "🍆 <b>Битва Пиписек</b>\n\n"
+                    "⚔️ <b>Как вызвать на бой:</b>\n"
+                    "• /pp @username — вызов (ставка 20 см)\n"
+                    "• /pp @username 50 — со ставкой 50 см\n"
+                    "• Ответом на сообщение: /pp [ставка]\n\n"
+                    "📊 <b>Статистика:</b> /pp\n"
+                    "🤖 <b>Бой с Олегом:</b> кнопка в /pp\n"
+                    "🧴 <b>Мази для роста:</b> /shop → Мази",
+                    parse_mode="HTML"
+                )
             elif game_type == "shop":
                 await shop_handler.cmd_shop(fake_message)
             elif game_type == "inventory":

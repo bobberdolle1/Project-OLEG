@@ -739,13 +739,20 @@ async def _ollama_chat(
                                 enable_tools=False
                             )
                 
-                # Если есть final_model и это не она — перенаправляем ответ на final_model
-                # Это нужно когда tool_model решил не использовать tools, но ответ должен быть от другой модели
-                if final_model and model_to_use != final_model and content:
-                    logger.info(f"[FALLBACK] Redirecting response from {model_to_use} to {final_model}")
-                    # Просто возвращаем ответ tool_model — он уже в стиле Олега
-                    # Не нужно перенаправлять, это создаёт артефакты
-                    pass  # Продолжаем обработку content как обычно
+                # Если есть final_model и это не она — делаем новый запрос к final_model
+                # Это нужно когда tool_model решил не использовать tools, но ответ должен быть от модели с промптом Олега
+                if final_model and model_to_use != final_model:
+                    logger.info(f"[FALLBACK] tool_model answered without tools, redirecting to {final_model}")
+                    # Делаем новый запрос к final_model с оригинальными messages (там есть промпт Олега)
+                    # tool_model ответ игнорируем — он без личности
+                    return await _ollama_chat(
+                        messages,
+                        temperature=temperature,
+                        retry=1,
+                        use_cache=False,
+                        model=final_model,
+                        enable_tools=False
+                    )
                 
                 # Проверяем на зацикливание и очищаем если нужно
                 is_looped, content = detect_loop_in_text(content)

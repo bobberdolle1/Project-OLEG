@@ -31,6 +31,16 @@ router = Router()
 _pending_messages: dict[tuple[int, int], tuple[int, float, asyncio.Task | None]] = {}
 _DEBOUNCE_DELAY = 2.0  # Ждём 2 секунды перед ответом
 
+# Глобальный троттлинг на уровне чата — не больше 1 ответа в N секунд
+# Ключ: chat_id, значение: timestamp последнего ответа
+_chat_last_response: dict[int, float] = {}
+_CHAT_THROTTLE_DELAY = 3.0  # Минимум 3 секунды между ответами в одном чате
+
+# Очередь сообщений на обработку для каждого чата
+# Ключ: chat_id, значение: (message, timestamp)
+_chat_pending_queue: dict[int, tuple[Message, float]] = {}
+_chat_processing_lock: dict[int, asyncio.Lock] = {}
+
 
 async def _get_chat_context(msg: Message) -> str | None:
     """
@@ -438,33 +448,47 @@ async def general_qna(msg: Message):
     if not await _should_reply(msg):
         return
     
-    # Дебаунс: если юзер шлёт несколько сообщений подряд, отвечаем только на последнее
-    debounce_key = (msg.chat.id, msg.from_user.id)
+    chat_id = msg.chat.id
     current_time = time.time()
     
-    # Проверяем есть ли pending сообщение от этого юзера
-    if debounce_key in _pending_messages:
-        old_msg_id, old_time, old_task = _pending_messages[debounce_key]
-        # Если прошло меньше DEBOUNCE_DELAY — отменяем старый таск
-        if current_time - old_time < _DEBOUNCE_DELAY and old_task and not old_task.done():
-            old_task.cancel()
-            logger.debug(f"[DEBOUNCE] Отменён ответ на msg_id={old_msg_id}, новое сообщение от {user_tag}")
+    # Троттлинг на уровне чата — не спамим ответами
+    # Если недавно отвечали в этом чате, пропускаем (кроме прямых обращений)
+    is_direct_mention = False
+    if msg.text:
+        text_lower = msg.text.lower()
+        bot_username = msg.bot._me.username if msg.bot._me else None
+        is_direct_mention = (
+            (bot_username and f"@{bot_username.lower()}" in text_lower) or
+            any(re.search(rf'\b{t}\b', text_lower) for t in ["олег", "олега", "олегу"])
+        )
     
-    # Создаём таск с задержкой
-    async def delayed_response():
-        await asyncio.sleep(_DEBOUNCE_DELAY)
-        # Проверяем что это всё ещё актуальное сообщение
-        if debounce_key in _pending_messages:
-            stored_msg_id, _, _ = _pending_messages[debounce_key]
-            if stored_msg_id != msg.message_id:
-                return  # Пришло новое сообщение, не отвечаем на это
+    # Для прямых обращений — отвечаем всегда
+    # Для остальных — троттлинг
+    if not is_direct_mention:
+        last_response_time = _chat_last_response.get(chat_id, 0)
+        time_since_last = current_time - last_response_time
+        
+        if time_since_last < _CHAT_THROTTLE_DELAY:
+            # Сохраняем в очередь — может ответим позже
+            _chat_pending_queue[chat_id] = (msg, current_time)
+            logger.debug(f"[THROTTLE] Пропускаем msg_id={msg.message_id}, недавно отвечали ({time_since_last:.1f}s ago)")
+            return
+    
+    # Получаем или создаём лок для этого чата
+    if chat_id not in _chat_processing_lock:
+        _chat_processing_lock[chat_id] = asyncio.Lock()
+    
+    # Пробуем захватить лок (без ожидания)
+    lock = _chat_processing_lock[chat_id]
+    if lock.locked():
+        # Уже обрабатываем сообщение в этом чате — сохраняем в очередь
+        _chat_pending_queue[chat_id] = (msg, current_time)
+        logger.debug(f"[THROTTLE] Чат занят, msg_id={msg.message_id} в очереди")
+        return
+    
+    async with lock:
         await _process_qna_message(msg)
-        # Очищаем после обработки
-        if debounce_key in _pending_messages:
-            del _pending_messages[debounce_key]
-    
-    task = asyncio.create_task(delayed_response())
-    _pending_messages[debounce_key] = (msg.message_id, current_time, task)
+        _chat_last_response[chat_id] = time.time()
 
 
 async def _process_qna_message(msg: Message):

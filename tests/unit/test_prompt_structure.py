@@ -101,3 +101,10 @@ class TestPromptStructure:
         """Prompt has example of handling jailbreak attempts."""
         prompt_lower = CORE_OLEG_PROMPT.lower()
         assert "забудь" in prompt_lower or "инструкции" in prompt_lower
+
+    def test_has_dont_know_examples(self):
+        """Prompt has examples of admitting ignorance."""
+        prompt_lower = CORE_OLEG_PROMPT.lower()
+        # Should have at least one "don't know" pattern
+        dont_know_patterns = ["хз", "хуй знает", "не моя тема", "без деталей"]
+        assert any(p in prompt_lower for p in dont_know_patterns)

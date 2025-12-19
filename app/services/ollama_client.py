@@ -743,24 +743,9 @@ async def _ollama_chat(
                 # Это нужно когда tool_model решил не использовать tools, но ответ должен быть от другой модели
                 if final_model and model_to_use != final_model and content:
                     logger.info(f"[FALLBACK] Redirecting response from {model_to_use} to {final_model}")
-                    # Добавляем ответ tool_model как контекст и просим final_model ответить
-                    messages_for_final = messages.copy()
-                    messages_for_final.append({
-                        "role": "assistant",
-                        "content": f"[Информация для ответа: {content}]"
-                    })
-                    messages_for_final.append({
-                        "role": "user", 
-                        "content": "Ответь на основе этой информации в своём стиле, коротко."
-                    })
-                    return await _ollama_chat(
-                        messages_for_final,
-                        temperature=temperature,
-                        retry=1,
-                        use_cache=False,
-                        model=final_model,
-                        enable_tools=False
-                    )
+                    # Просто возвращаем ответ tool_model — он уже в стиле Олега
+                    # Не нужно перенаправлять, это создаёт артефакты
+                    pass  # Продолжаем обработку content как обычно
                 
                 # Проверяем на зацикливание и очищаем если нужно
                 is_looped, content = detect_loop_in_text(content)

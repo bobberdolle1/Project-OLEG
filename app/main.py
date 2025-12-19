@@ -44,8 +44,25 @@ from app.jobs.scheduler import setup_scheduler
 logger = logging.getLogger(__name__)
 
 
+async def set_bot_status(bot: Bot, online: bool = True):
+    """Обновить статус бота в описании."""
+    try:
+        status = "🟢" if online else "🔴"
+        base_desc = "Твой личный кибер-кентуха. Поясняю за железо, разгоняю скуку и баню душнил."
+        # Короткое описание (показывается в профиле бота, макс 120 символов)
+        await bot.set_my_short_description(
+            short_description=f"{status} {base_desc}"
+        )
+        logger.info(f"Статус бота обновлён: {'Онлайн' if online else 'Офлайн'}")
+    except Exception as e:
+        logger.warning(f"Не удалось обновить статус бота: {e}")
+
+
 async def on_startup(bot: Bot, dp: Dispatcher):
     """Действия при запуске бота."""
+    # Ставим статус "Онлайн"
+    await set_bot_status(bot, online=True)
+    
     logger.info("Инициализация базы данных...")
     await init_db()
     logger.info("База данных инициализирована")
@@ -298,6 +315,10 @@ async def main():
         logger.info("=" * 60)
         logger.info("ОСТАНОВКА БОТА")
         logger.info("=" * 60)
+        
+        # Ставим статус "Офлайн"
+        await set_bot_status(bot, online=False)
+        
         logger.info("Остановка фоновых задач...")
         # Отменяем все задачи, которые мы сохранили в dp
         if hasattr(dp, 'tasks'):

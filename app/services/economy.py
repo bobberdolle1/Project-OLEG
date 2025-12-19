@@ -36,6 +36,11 @@ class ItemType(str, Enum):
     ROOSTER_COMMON = "rooster_common"
     ROOSTER_RARE = "rooster_rare"
     ROOSTER_EPIC = "rooster_epic"
+    # Мази для роста пиписьки
+    PP_CREAM_SMALL = "pp_cream_small"  # +1-3 см
+    PP_CREAM_MEDIUM = "pp_cream_medium"  # +2-5 см
+    PP_CREAM_LARGE = "pp_cream_large"  # +5-10 см
+    PP_CREAM_TITAN = "pp_cream_titan"  # +10-20 см (редкий)
 
 
 class Rarity(str, Enum):
@@ -120,6 +125,23 @@ SHOP_ITEMS: Dict[ItemType, ShopItem] = {
     ItemType.ROOSTER_EPIC: ShopItem(
         ItemType.ROOSTER_EPIC, "Эпический петух", "Элитный боец",
         1500, "🦃", Rarity.EPIC
+    ),
+    # Мази для роста пиписьки
+    ItemType.PP_CREAM_SMALL: ShopItem(
+        ItemType.PP_CREAM_SMALL, "Мазь 'Подрастай'", "+1-3 см к размеру",
+        100, "🧴", Rarity.COMMON
+    ),
+    ItemType.PP_CREAM_MEDIUM: ShopItem(
+        ItemType.PP_CREAM_MEDIUM, "Крем 'Титан'", "+2-5 см к размеру",
+        300, "🧴", Rarity.UNCOMMON
+    ),
+    ItemType.PP_CREAM_LARGE: ShopItem(
+        ItemType.PP_CREAM_LARGE, "Гель 'Мегамен'", "+5-10 см к размеру",
+        800, "🧴", Rarity.RARE
+    ),
+    ItemType.PP_CREAM_TITAN: ShopItem(
+        ItemType.PP_CREAM_TITAN, "Эликсир 'Годзилла'", "+10-20 см к размеру",
+        2000, "🧪", Rarity.EPIC
     ),
 }
 

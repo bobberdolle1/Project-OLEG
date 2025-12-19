@@ -6,13 +6,16 @@ Updated in v7.5.1 with full inventory, fishing shop, and statistics.
 
 import logging
 import asyncio
+import random
+import uuid
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, UserBalance
+from app.database.models import User, UserBalance, GameStat
+from app.utils import utc_now
 from app.services.mini_games import (
     fishing_game, crash_engine, dice_game, guess_engine,
     war_game, wheel_game, lootbox_engine, cockfight_game,
@@ -1331,3 +1334,668 @@ async def cmd_use(message: Message):
         )
     
     logger.info(f"User {user_id} used item {item_type}")
+
+
+# ============================================================================
+# PP BATTLE GAME (Битва пиписек) - использует GameStat.size_cm от /grow
+# ============================================================================
+
+PP_PREFIX = "pp:"
+
+# Хранилище активных вызовов на битву {challenge_id: PPChallenge}
+pp_challenges: dict[str, dict] = {}
+
+
+def get_pp_size_emoji(size: int) -> str:
+    """Get emoji representation of PP size."""
+    if size <= 0:
+        return "❓"
+    elif size < 10:
+        return "🤏"
+    elif size < 30:
+        return "👌"
+    elif size < 50:
+        return "👍"
+    elif size < 100:
+        return "💪"
+    elif size < 200:
+        return "🔥"
+    elif size < 500:
+        return "🚀"
+    else:
+        return "🏆"
+
+
+def get_pp_bar(size: int, max_display: int = 30) -> str:
+    """Generate visual PP bar."""
+    # Масштабируем для отображения (каждые 10 см = 1 символ)
+    display_size = min(size // 10, max_display)
+    if display_size < 1:
+        display_size = 1
+    bar = "8" + "=" * display_size + "D"
+    return bar
+
+
+async def get_or_create_game_stat(tg_user_id: int, username: str = None) -> tuple[int, int, int]:
+    """Get user's PP stats from GameStat. Returns (size_cm, pvp_wins, pvp_losses)."""
+    async_session = get_session()
+    async with async_session() as session:
+        # Сначала проверяем/создаём User
+        res = await session.execute(
+            select(User).where(User.tg_user_id == tg_user_id)
+        )
+        user = res.scalars().first()
+        if not user:
+            user = User(tg_user_id=tg_user_id, username=username or "")
+            session.add(user)
+            await session.flush()
+        
+        # Теперь GameStat
+        res = await session.execute(
+            select(GameStat).where(GameStat.tg_user_id == tg_user_id)
+        )
+        gs = res.scalars().first()
+        if not gs:
+            gs = GameStat(user_id=user.id, tg_user_id=tg_user_id, username=username)
+            session.add(gs)
+            await session.commit()
+        
+        return gs.size_cm, gs.pvp_wins, getattr(gs, 'pvp_losses', 0)
+
+
+async def update_pp_size(tg_user_id: int, change: int) -> int:
+    """Update PP size (GameStat.size_cm) and return new value."""
+    async_session = get_session()
+    async with async_session() as session:
+        res = await session.execute(
+            select(GameStat).where(GameStat.tg_user_id == tg_user_id)
+        )
+        gs = res.scalars().first()
+        if gs:
+            gs.size_cm = max(1, gs.size_cm + change)
+            await session.commit()
+            return gs.size_cm
+        return 0
+
+
+async def update_pp_stats(tg_user_id: int, won: bool) -> None:
+    """Update PP battle stats in GameStat."""
+    async_session = get_session()
+    async with async_session() as session:
+        res = await session.execute(
+            select(GameStat).where(GameStat.tg_user_id == tg_user_id)
+        )
+        gs = res.scalars().first()
+        if gs:
+            if won:
+                gs.pvp_wins += 1
+            else:
+                gs.pvp_losses += 1
+            await session.commit()
+
+
+def get_pp_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Create PP game keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📏 Измерить", callback_data=f"{PP_PREFIX}{user_id}:measure"),
+            InlineKeyboardButton(text="🤖 Бой с Олегом", callback_data=f"{PP_PREFIX}{user_id}:pve"),
+        ],
+        [
+            InlineKeyboardButton(text="🧴 Использовать мазь", callback_data=f"{PP_PREFIX}{user_id}:cream"),
+            InlineKeyboardButton(text="🏆 Топ", callback_data=f"{PP_PREFIX}{user_id}:top"),
+        ]
+    ])
+
+
+def get_bet_keyboard(user_id: int, max_bet: int) -> InlineKeyboardMarkup:
+    """Create bet selection keyboard."""
+    # Предлагаем ставки: 10, 20, 50, 100, 200 см (но не больше чем есть)
+    bets = [b for b in [10, 20, 50, 100, 200] if b <= max_bet]
+    if not bets:
+        # Если меньше 10 см — предлагаем всё что есть
+        bets = [max_bet] if max_bet > 0 else [1]
+    
+    buttons = []
+    row = []
+    for bet in bets:
+        row.append(InlineKeyboardButton(text=f"{bet} см", callback_data=f"{PP_PREFIX}{user_id}:bet:{bet}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"{PP_PREFIX}{user_id}:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_challenge_keyboard(challenge_id: str, target_id: int) -> InlineKeyboardMarkup:
+    """Create challenge accept/decline keyboard."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔️ Принять бой!", callback_data=f"{PP_PREFIX}accept:{challenge_id}"),
+            InlineKeyboardButton(text="🏃 Сбежать", callback_data=f"{PP_PREFIX}decline:{challenge_id}"),
+        ]
+    ])
+
+
+@router.message(Command("pp"))
+async def cmd_pp(message: Message):
+    """PP battle game - использует размер из /grow.
+    
+    Использование:
+    - /pp — показать статистику и меню
+    - /pp @username [ставка] — вызвать на бой
+    - Ответ на сообщение: /pp [ставка] — вызвать автора сообщения
+    """
+    user_id = message.from_user.id
+    username = message.from_user.first_name or "Аноним"
+    tg_username = message.from_user.username
+    chat_id = message.chat.id
+    
+    # Парсим аргументы
+    args = message.text.split()[1:] if message.text else []
+    target_username = None
+    bet = 20  # Дефолтная ставка
+    
+    # Проверяем reply
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user = message.reply_to_message.from_user
+        if target_user.id == user_id:
+            await message.reply("❌ Нельзя вызвать самого себя!")
+            return
+        if target_user.is_bot:
+            await message.reply("❌ Нельзя вызвать бота! Используй кнопку 'Бой с Олегом'")
+            return
+        target_username = target_user.username
+        target_id = target_user.id
+        target_name = target_user.first_name or "Аноним"
+        # Ставка из аргументов
+        if args and args[0].isdigit():
+            bet = int(args[0])
+    # Проверяем @username в аргументах
+    elif args and args[0].startswith("@"):
+        target_username = args[0][1:]  # Убираем @
+        if len(args) > 1 and args[1].isdigit():
+            bet = int(args[1])
+        # Нужно найти target_id по username — создаём открытый вызов
+        target_id = 0  # Будет определён при принятии
+        target_name = target_username
+    else:
+        # Просто /pp — показываем статистику
+        size, wins, losses = await get_or_create_game_stat(user_id, tg_username)
+        
+        if size == 0:
+            text = (
+                f"🍆 <b>Пиписька {username}</b>\n\n"
+                f"❓ Размер: <b>неизвестен</b>\n\n"
+                f"Сначала используй /grow чтобы вырастить пипиську!\n\n"
+                f"<i>Вызов на бой: /pp @username [ставка]</i>"
+            )
+            await message.reply(text)
+            return
+        
+        emoji = get_pp_size_emoji(size)
+        bar = get_pp_bar(size)
+        
+        total_battles = wins + losses
+        winrate = (wins / total_battles * 100) if total_battles > 0 else 0
+        
+        text = (
+            f"🍆 <b>Пиписька {username}</b>\n\n"
+            f"{bar}\n\n"
+            f"📏 Размер: <b>{size} см</b> {emoji}\n"
+            f"⚔️ PvP: {wins}W / {losses}L ({winrate:.0f}%)\n\n"
+            f"<i>Вызов: /pp @username [ставка] или ответом</i>"
+        )
+        
+        await message.reply(text, reply_markup=get_pp_keyboard(user_id))
+        return
+    
+    # Создаём вызов на бой
+    size, _, _ = await get_or_create_game_stat(user_id, tg_username)
+    
+    if size == 0:
+        await message.reply("❌ Сначала вырасти пипиську через /grow!")
+        return
+    
+    if bet < 1:
+        bet = 1
+    if bet > size:
+        await message.reply(f"❌ У тебя только {size} см, а ставишь {bet}!")
+        return
+    
+    # Создаём вызов
+    challenge_id = str(uuid.uuid4())[:8]
+    pp_challenges[challenge_id] = {
+        "challenger_id": user_id,
+        "challenger_name": username,
+        "challenger_size": size,
+        "target_id": target_id if target_id else 0,
+        "target_username": target_username,
+        "bet": bet,
+        "chat_id": chat_id,
+        "created_at": utc_now(),
+    }
+    
+    bar = get_pp_bar(size)
+    
+    if target_username:
+        mention = f"@{target_username}" if target_username else "любого смельчака"
+        text = (
+            f"⚔️ <b>ВЫЗОВ НА БИТВУ ПИПИСЕК!</b>\n\n"
+            f"🍆 <b>{username}</b> вызывает {mention}!\n\n"
+            f"{bar}\n"
+            f"📏 Размер: <b>{size} см</b>\n"
+            f"💰 Ставка: <b>{bet} см</b>\n\n"
+            f"<i>У соперника должно быть минимум {bet} см!</i>"
+        )
+    else:
+        text = (
+            f"⚔️ <b>ВЫЗОВ НА БИТВУ ПИПИСЕК!</b>\n\n"
+            f"🍆 <b>{username}</b> бросает вызов!\n\n"
+            f"{bar}\n"
+            f"📏 Размер: <b>{size} см</b>\n"
+            f"💰 Ставка: <b>{bet} см</b>\n\n"
+            f"<i>Кто осмелится принять бой?</i>"
+        )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Принять бой!", callback_data=f"{PP_PREFIX}fight:{challenge_id}")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data=f"{PP_PREFIX}{user_id}:cancel_challenge:{challenge_id}")]
+    ])
+    
+    await message.reply(text, reply_markup=keyboard)
+
+
+async def execute_pp_battle(
+    chat_id: int,
+    challenger_id: int, challenger_name: str, challenger_size: int,
+    target_id: int, target_name: str, target_size: int,
+    bet: int
+) -> str:
+    """Execute PP battle and return result text."""
+    # Определяем победителя (с элементом случайности ±20%)
+    challenger_power = challenger_size + random.randint(-challenger_size // 5, challenger_size // 5)
+    target_power = target_size + random.randint(-target_size // 5, target_size // 5)
+    
+    if challenger_power > target_power:
+        winner_id, winner_name = challenger_id, challenger_name
+        loser_id, loser_name = target_id, target_name
+        winner_power, loser_power = challenger_power, target_power
+    elif target_power > challenger_power:
+        winner_id, winner_name = target_id, target_name
+        loser_id, loser_name = challenger_id, challenger_name
+        winner_power, loser_power = target_power, challenger_power
+    else:
+        # Ничья — никто не теряет
+        return (
+            f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
+            f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
+            f"🍆 {target_name}: {target_size} см (сила: {target_power})\n\n"
+            f"🤝 <b>НИЧЬЯ!</b>\n"
+            f"Пиписьки оказались равны по силе!\n"
+            f"Ставка {bet} см возвращена обоим."
+        )
+    
+    # Обновляем статистику (только для реальных игроков, не для Олега id=0)
+    if winner_id > 0:
+        await update_pp_stats(winner_id, won=True)
+        await update_pp_size(winner_id, bet)
+        winner_new_size, _, _ = await get_or_create_game_stat(winner_id)
+    else:
+        winner_new_size = target_size + bet  # Олег "выиграл"
+    
+    if loser_id > 0:
+        await update_pp_stats(loser_id, won=False)
+        await update_pp_size(loser_id, -bet)
+        loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
+    else:
+        loser_new_size = target_size - bet  # Олег "проиграл"
+    
+    return (
+        f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
+        f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
+        f"🍆 {target_name}: {target_size} см (сила: {target_power})\n\n"
+        f"🏆 <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
+        f"💪 {winner_name}: +{bet} см → <b>{winner_new_size} см</b>\n"
+        f"💀 {loser_name}: -{bet} см → <b>{loser_new_size} см</b>"
+    )
+
+
+@router.callback_query(F.data.startswith(PP_PREFIX))
+async def pp_callback(callback: CallbackQuery):
+    """Handle PP game callbacks."""
+    data = callback.data[len(PP_PREFIX):]
+    parts = data.split(":")
+    
+    if len(parts) < 1:
+        return await callback.answer("❌ Ошибка")
+    
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    username = callback.from_user.first_name or "Аноним"
+    
+    # Обработка принятия/отклонения вызова
+    if parts[0] == "accept" and len(parts) >= 2:
+        challenge_id = parts[1]
+        challenge = pp_challenges.get(challenge_id)
+        
+        if not challenge:
+            return await callback.answer("❌ Вызов истёк или не найден", show_alert=True)
+        
+        if user_id != challenge["target_id"]:
+            return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
+        
+        # Проверяем что у цели хватает см для ставки
+        target_size, _, _ = await get_or_create_game_stat(user_id)
+        if target_size < challenge["bet"]:
+            del pp_challenges[challenge_id]
+            return await callback.answer(f"❌ У тебя только {target_size} см, а ставка {challenge['bet']} см!", show_alert=True)
+        
+        # Выполняем битву
+        result_text = await execute_pp_battle(
+            chat_id,
+            challenge["challenger_id"], challenge["challenger_name"], challenge["challenger_size"],
+            user_id, username, target_size,
+            challenge["bet"]
+        )
+        
+        del pp_challenges[challenge_id]
+        await callback.message.edit_text(result_text)
+        await callback.answer("⚔️ Битва завершена!")
+        return
+    
+    elif parts[0] == "decline" and len(parts) >= 2:
+        challenge_id = parts[1]
+        challenge = pp_challenges.get(challenge_id)
+        
+        if not challenge:
+            return await callback.answer("❌ Вызов уже истёк", show_alert=True)
+        
+        if user_id != challenge["target_id"]:
+            return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
+        
+        del pp_challenges[challenge_id]
+        await callback.message.edit_text(
+            f"🏃 <b>{username}</b> сбежал от битвы пиписек!\n\n"
+            f"Видимо, не уверен в своих силах..."
+        )
+        await callback.answer("🏃 Ты сбежал!")
+        return
+    
+    # Остальные действия требуют owner_id
+    if len(parts) < 2:
+        return await callback.answer("❌ Ошибка")
+    
+    try:
+        owner_id = int(parts[0])
+    except ValueError:
+        return await callback.answer("❌ Ошибка")
+    
+    action = parts[1]
+    
+    # Измерить может только владелец
+    if action == "measure":
+        if user_id != owner_id:
+            return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
+        
+        size, wins, losses = await get_or_create_game_stat(user_id)
+        
+        # Случайное изменение при измерении (-2 до +3)
+        change = random.randint(-2, 3)
+        new_size = await update_pp_size(user_id, change)
+        
+        if change > 0:
+            result = f"📈 Подросла на {change} см!"
+        elif change < 0:
+            result = f"📉 Усохла на {abs(change)} см... Бывает."
+        else:
+            result = "📊 Без изменений."
+        
+        bar = get_pp_bar(new_size)
+        emoji = get_pp_size_emoji(new_size)
+        
+        text = (
+            f"📏 <b>Измерение пиписьки</b>\n\n"
+            f"{bar}\n\n"
+            f"Было: {size} см\n"
+            f"Стало: <b>{new_size} см</b> {emoji}\n\n"
+            f"{result}"
+        )
+        
+        await callback.message.edit_text(text, reply_markup=get_pp_keyboard(user_id))
+        await callback.answer()
+    
+    elif action == "pve":
+        # Бой с Олегом (PvE)
+        if user_id != owner_id:
+            return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
+        
+        size, _, _ = await get_or_create_game_stat(user_id)
+        if size < 10:
+            return await callback.answer("❌ Минимум 10 см для боя с Олегом!", show_alert=True)
+        
+        # Олег имеет случайный размер от 50% до 150% от игрока
+        oleg_size = random.randint(int(size * 0.5), int(size * 1.5))
+        oleg_size = max(10, oleg_size)
+        
+        # Ставка = 10% от размера игрока
+        bet = max(5, size // 10)
+        
+        # Выполняем битву
+        result_text = await execute_pp_battle(
+            chat_id,
+            user_id, username, size,
+            0, "Олег 🤖", oleg_size,
+            bet
+        )
+        
+        await callback.message.edit_text(result_text, reply_markup=get_pp_keyboard(user_id))
+        await callback.answer("⚔️ Битва с Олегом!")
+    
+    elif action == "bet" and len(parts) >= 3:
+        # Выбрана ставка — создаём вызов
+        if user_id != owner_id:
+            return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
+        
+        try:
+            bet = int(parts[2])
+        except ValueError:
+            return await callback.answer("❌ Неверная ставка")
+        
+        size, _, _ = await get_or_create_game_stat(user_id)
+        if bet > size:
+            return await callback.answer(f"❌ У тебя только {size} см!", show_alert=True)
+        if bet < 1:
+            return await callback.answer("❌ Минимальная ставка 1 см!", show_alert=True)
+        
+        # Создаём вызов
+        challenge_id = str(uuid.uuid4())[:8]
+        pp_challenges[challenge_id] = {
+            "challenger_id": user_id,
+            "challenger_name": username,
+            "challenger_size": size,
+            "target_id": None,  # Любой может принять
+            "bet": bet,
+            "chat_id": chat_id,
+            "created_at": utc_now(),
+        }
+        
+        bar = get_pp_bar(size)
+        text = (
+            f"⚔️ <b>ВЫЗОВ НА БИТВУ ПИПИСЕК!</b>\n\n"
+            f"🍆 <b>{username}</b> бросает вызов!\n\n"
+            f"{bar}\n"
+            f"📏 Размер: <b>{size} см</b>\n"
+            f"💰 Ставка: <b>{bet} см</b>\n\n"
+            f"<i>Кто осмелится принять бой?</i>\n"
+            f"<i>У соперника должно быть минимум {bet} см!</i>"
+        )
+        
+        # Обновляем target_id на "любой" — первый кто нажмёт
+        pp_challenges[challenge_id]["target_id"] = 0  # 0 = любой
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⚔️ Принять бой!", callback_data=f"{PP_PREFIX}fight:{challenge_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отменить", callback_data=f"{PP_PREFIX}{user_id}:cancel_challenge:{challenge_id}"),
+            ]
+        ])
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer(f"⚔️ Вызов создан! Ставка: {bet} см")
+    
+    elif action == "fight" and len(parts) >= 2:
+        # Кто-то принимает открытый вызов
+        challenge_id = parts[1]
+        challenge = pp_challenges.get(challenge_id)
+        
+        if not challenge:
+            return await callback.answer("❌ Вызов истёк или не найден", show_alert=True)
+        
+        if user_id == challenge["challenger_id"]:
+            return await callback.answer("❌ Нельзя биться с самим собой!", show_alert=True)
+        
+        # Проверяем, был ли вызов для конкретного юзера
+        target_username = challenge.get("target_username")
+        tg_username = callback.from_user.username
+        if target_username and target_username.lower() != (tg_username or "").lower():
+            return await callback.answer(f"❌ Этот вызов для @{target_username}!", show_alert=True)
+        
+        # Проверяем размер соперника
+        target_size, _, _ = await get_or_create_game_stat(user_id, tg_username)
+        if target_size < challenge["bet"]:
+            return await callback.answer(f"❌ У тебя только {target_size} см, а ставка {challenge['bet']} см!", show_alert=True)
+        
+        # Выполняем битву
+        result_text = await execute_pp_battle(
+            chat_id,
+            challenge["challenger_id"], challenge["challenger_name"], challenge["challenger_size"],
+            user_id, username, target_size,
+            challenge["bet"]
+        )
+        
+        del pp_challenges[challenge_id]
+        await callback.message.edit_text(result_text)
+        await callback.answer("⚔️ Битва завершена!")
+    
+    elif action == "cancel_challenge" and len(parts) >= 3:
+        # Отмена вызова создателем
+        challenge_id = parts[2]
+        challenge = pp_challenges.get(challenge_id)
+        
+        if not challenge:
+            return await callback.answer("❌ Вызов уже истёк", show_alert=True)
+        
+        if user_id != challenge["challenger_id"]:
+            return await callback.answer("❌ Только создатель может отменить!", show_alert=True)
+        
+        del pp_challenges[challenge_id]
+        
+        size, wins, losses = await get_or_create_game_stat(user_id)
+        bar = get_pp_bar(size)
+        emoji = get_pp_size_emoji(size)
+        total_battles = wins + losses
+        winrate = (wins / total_battles * 100) if total_battles > 0 else 0
+        
+        text = (
+            f"🍆 <b>Пиписька {username}</b>\n\n"
+            f"{bar}\n\n"
+            f"📏 Размер: <b>{size} см</b> {emoji}\n"
+            f"⚔️ Битвы: {wins}W / {losses}L ({winrate:.0f}%)\n\n"
+            f"<i>Вызов отменён</i>"
+        )
+        
+        await callback.message.edit_text(text, reply_markup=get_pp_keyboard(user_id))
+        await callback.answer("❌ Вызов отменён")
+    
+    elif action == "cancel":
+        # Отмена выбора ставки
+        if user_id != owner_id:
+            return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
+        
+        size, wins, losses = await get_or_create_game_stat(user_id)
+        bar = get_pp_bar(size)
+        emoji = get_pp_size_emoji(size)
+        total_battles = wins + losses
+        winrate = (wins / total_battles * 100) if total_battles > 0 else 0
+        
+        text = (
+            f"🍆 <b>Пиписька {username}</b>\n\n"
+            f"{bar}\n\n"
+            f"📏 Размер: <b>{size} см</b> {emoji}\n"
+            f"⚔️ Битвы: {wins}W / {losses}L ({winrate:.0f}%)\n\n"
+            f"Выбери действие:"
+        )
+        
+        await callback.message.edit_text(text, reply_markup=get_pp_keyboard(user_id))
+        await callback.answer()
+    
+    elif action == "cream":
+        if user_id != owner_id:
+            return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
+        
+        # Проверяем наличие мазей (от лучшей к худшей)
+        creams = [
+            (ItemType.PP_CREAM_TITAN, "Эликсир 'Годзилла'", 10, 20),
+            (ItemType.PP_CREAM_LARGE, "Гель 'Мегамен'", 5, 10),
+            (ItemType.PP_CREAM_MEDIUM, "Крем 'Титан'", 2, 5),
+            (ItemType.PP_CREAM_SMALL, "Мазь 'Подрастай'", 1, 3),
+        ]
+        
+        used_cream = None
+        for cream_type, cream_name, min_boost, max_boost in creams:
+            if await inventory_service.has_item(user_id, chat_id, cream_type):
+                await inventory_service.remove_item(user_id, chat_id, cream_type, 1)
+                boost = random.randint(min_boost, max_boost)
+                new_size = await update_pp_size(user_id, boost)
+                used_cream = (cream_name, boost, new_size)
+                break
+        
+        if used_cream:
+            cream_name, boost, new_size = used_cream
+            bar = get_pp_bar(new_size)
+            emoji = get_pp_size_emoji(new_size)
+            
+            text = (
+                f"🧴 <b>Использована {cream_name}!</b>\n\n"
+                f"{bar}\n\n"
+                f"📈 +{boost} см!\n"
+                f"📏 Новый размер: <b>{new_size} см</b> {emoji}"
+            )
+            await callback.message.edit_text(text, reply_markup=get_pp_keyboard(user_id))
+            await callback.answer(f"📈 +{boost} см!")
+        else:
+            await callback.answer("❌ У тебя нет мазей! Купи в /shop", show_alert=True)
+    
+    elif action == "top":
+        # Топ пиписек (глобальный, т.к. GameStat не привязан к чату)
+        async_session = get_session()
+        async with async_session() as session:
+            res = await session.execute(
+                select(GameStat)
+                .where(GameStat.size_cm > 0)
+                .order_by(GameStat.size_cm.desc())
+                .limit(10)
+            )
+            top_users = res.scalars().all()
+        
+        if not top_users:
+            return await callback.answer("❌ Пока никто не измерял!", show_alert=True)
+        
+        lines = ["🏆 <b>ТОП ПИПИСЕК</b>\n"]
+        medals = ["🥇", "🥈", "🥉"]
+        
+        for i, gs in enumerate(top_users):
+            medal = medals[i] if i < 3 else f"{i+1}."
+            emoji = get_pp_size_emoji(gs.size_cm)
+            name = gs.username or f"id{gs.tg_user_id}"
+            lines.append(f"{medal} @{name}: {gs.size_cm} см {emoji} (W:{gs.pvp_wins}/L:{gs.pvp_losses})")
+        
+        text = "\n".join(lines)
+        await callback.message.edit_text(text, reply_markup=get_pp_keyboard(owner_id))
+        await callback.answer()

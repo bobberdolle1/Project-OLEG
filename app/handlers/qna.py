@@ -397,13 +397,12 @@ GAMES_AI_CONTEXT = """
 """
 
 
-@router.message(F.text)
+@router.message(F.text, ~F.text.startswith("/"))
 async def general_qna(msg: Message):
     """
     Общий обработчик Q&A.
+    Не обрабатывает команды (начинающиеся с /).
     """
-    if msg.text and msg.text.startswith('/'):
-        return
     
     # Проверяем, не замучена ли группа владельцем
     from app.handlers.owner_panel import is_group_muted
@@ -743,22 +742,59 @@ async def cmd_reset_context(msg: Message):
 async def cmd_whois(msg: Message):
     """
     Показывает профиль пользователя из памяти Олега.
-    Использование: /whois или /whois @username (в ответ на сообщение)
+    Использование: /whois, /whois @username, или реплай на сообщение
     """
+    logger.info(f"[CMD] /whois handler called by {msg.from_user.id}")
     from app.services.user_memory import user_memory
+    from app.services.vector_db import vector_db
+    import re
     
     # Определяем целевого пользователя
     target_user = None
     target_user_id = None
+    target_username = None
+    
+    # Парсим аргументы команды
+    args = msg.text.split(maxsplit=1)
+    if len(args) > 1:
+        # /whois @username или /whois username
+        username_arg = args[1].strip().lstrip('@')
+        if username_arg:
+            target_username = username_arg
     
     if msg.reply_to_message and msg.reply_to_message.from_user:
-        # Если ответ на сообщение — смотрим профиль автора
+        # Реплай на сообщение — смотрим профиль автора
         target_user = msg.reply_to_message.from_user
         target_user_id = target_user.id
+        target_username = target_user.username or target_user.first_name
+    elif target_username:
+        # Ищем по username в сохранённых профилях
+        collection_name = user_memory._get_collection_name(msg.chat.id)
+        try:
+            # Поиск по username в метаданных
+            results = vector_db.search_facts(
+                collection_name=collection_name,
+                query=f"profile {target_username}",
+                n_results=10,
+                where={"type": "profile"}
+            )
+            for r in results:
+                meta = r.get('metadata', {})
+                stored_username = meta.get('username', '').lower()
+                if stored_username == target_username.lower():
+                    target_user_id = meta.get('user_id')
+                    break
+        except Exception as e:
+            logger.debug(f"Username search error: {e}")
+        
+        if not target_user_id:
+            await msg.reply(f"Не нашёл @{target_username} в памяти. Может, опечатка?")
+            return
     else:
-        # Иначе — свой профиль
+        # Свой профиль
         target_user = msg.from_user
         target_user_id = msg.from_user.id
+        target_username = target_user.username or target_user.first_name
     
     if not target_user_id:
         await msg.reply("Не могу определить пользователя.")
@@ -768,126 +804,91 @@ async def cmd_whois(msg: Message):
     profile = await user_memory.get_profile(msg.chat.id, target_user_id)
     
     if not profile:
-        username = target_user.username or target_user.first_name
-        await msg.reply(f"🤷 Олег пока ничего не знает о @{username}. Пусть пообщается побольше.")
+        await msg.reply(f"Олег пока ничего не знает о @{target_username}.")
         return
     
-    # Формируем красивый вывод
-    lines = []
-    info_lines = []  # Строки с реальной информацией
-    username = profile.username or target_user.first_name or f"ID:{target_user_id}"
-    lines.append(f"📋 <b>Профиль @{username}</b>\n")
+    # Формируем компактный вывод — только то что реально есть
+    username = profile.username or target_username or f"ID:{target_user_id}"
+    parts = [f"<b>@{username}</b>"]
     
-    # Личная информация
+    # Личное (компактно в одну строку)
     personal = []
     if profile.name:
         personal.append(profile.name)
     if profile.age:
-        personal.append(f"{profile.age} лет")
+        personal.append(f"{profile.age}")
     if profile.city:
         personal.append(profile.city)
-    if personal:
-        info_lines.append(f"👤 {', '.join(personal)}")
-    
     if profile.job:
-        info_lines.append(f"💼 <b>Работа:</b> {profile.job}")
+        personal.append(profile.job)
+    if personal:
+        parts.append(", ".join(personal))
     
-    # Железо (основное)
-    hardware = []
-    if profile.cpu:
-        hardware.append(f"CPU: {profile.cpu}")
+    # Железо (только если есть)
+    hw = []
     if profile.gpu:
-        hardware.append(f"GPU: {profile.gpu}")
+        hw.append(profile.gpu)
+    if profile.cpu:
+        hw.append(profile.cpu)
     if profile.ram:
-        hardware.append(f"RAM: {profile.ram}")
-    if hardware:
-        info_lines.append(f"🖥 <b>Сетап:</b> {', '.join(hardware)}")
+        hw.append(profile.ram)
+    if hw:
+        parts.append(f"🖥 {' / '.join(hw)}")
     
-    # Дополнительное железо
-    extra_hw = []
-    if profile.storage:
-        extra_hw.append(f"SSD: {profile.storage}")
-    if profile.motherboard:
-        extra_hw.append(f"MB: {profile.motherboard}")
-    if profile.psu:
-        extra_hw.append(f"PSU: {profile.psu}")
-    if profile.cooling:
-        extra_hw.append(f"Охлад: {profile.cooling}")
-    if extra_hw:
-        info_lines.append(f"⚙️ {', '.join(extra_hw)}")
-    
-    # Монитор и периферия
-    if profile.monitor:
-        info_lines.append(f"🖥 <b>Монитор:</b> {profile.monitor}")
-    if profile.peripherals:
-        info_lines.append(f"🎮 <b>Периферия:</b> {', '.join(profile.peripherals[:3])}")
-    
-    # ОС
-    if profile.os or profile.distro:
-        os_str = profile.distro or profile.os
+    # ОС (компактно)
+    if profile.distro:
+        os_str = profile.distro
         if profile.de:
-            os_str += f" ({profile.de})"
-        info_lines.append(f"💻 <b>ОС:</b> {os_str}")
+            os_str += f" + {profile.de}"
+        parts.append(f"💻 {os_str}")
+    elif profile.os:
+        parts.append(f"💻 {profile.os}")
     
-    # Устройства
+    # Устройства (только если есть)
+    devices = []
     if profile.steam_deck:
-        deck_str = "Steam Deck"
+        deck = "Steam Deck"
         if profile.steam_deck_mods:
-            deck_str += f" ({', '.join(profile.steam_deck_mods[:3])})"
-        info_lines.append(f"🎮 {deck_str}")
-    
+            deck += f" ({', '.join(profile.steam_deck_mods[:2])})"
+        devices.append(deck)
     if profile.laptop:
-        info_lines.append(f"💻 <b>Ноут:</b> {profile.laptop}")
-    
-    if profile.phone:
-        info_lines.append(f"📱 <b>Телефон:</b> {profile.phone}")
-    
+        devices.append(profile.laptop)
     if profile.console:
-        info_lines.append(f"🎮 <b>Консольщик:</b> {profile.console} (сочувствую)")
+        devices.append(f"{profile.console} 🎮")
+    if devices:
+        parts.append(" | ".join(devices))
     
-    # Игры
+    # Интересы (компактно)
+    interests = []
     if profile.games:
-        info_lines.append(f"🎯 <b>Играет в:</b> {', '.join(profile.games[:5])}")
-    
-    # Хобби и интересы
+        interests.extend(profile.games[:3])
     if profile.hobbies:
-        info_lines.append(f"🎨 <b>Хобби:</b> {', '.join(profile.hobbies[:5])}")
-    
-    if profile.music:
-        info_lines.append(f"🎵 <b>Музыка:</b> {', '.join(profile.music[:3])}")
-    
-    if profile.languages:
-        info_lines.append(f"💻 <b>Языки:</b> {', '.join(profile.languages[:5])}")
-    
-    if profile.pets:
-        info_lines.append(f"🐾 <b>Питомцы:</b> {', '.join(profile.pets)}")
-    
-    # Предпочтения
-    if profile.brand_preference:
-        info_lines.append(f"❤️ <b>Фанат:</b> {profile.brand_preference.upper()}")
+        interests.extend(profile.hobbies[:2])
+    if interests:
+        parts.append(f"🎯 {', '.join(interests)}")
     
     # Экспертиза
     if profile.expertise:
-        info_lines.append(f"🧠 <b>Шарит в:</b> {', '.join(profile.expertise[:5])}")
+        parts.append(f"🧠 {', '.join(profile.expertise[:3])}")
     
-    # Проблемы
-    if profile.current_problems:
-        info_lines.append(f"⚠️ <b>Проблемы:</b> {profile.current_problems[-1][:50]}...")
+    # Предпочтения
+    if profile.brand_preference:
+        parts.append(f"❤️ {profile.brand_preference.upper()}")
     
-    # Если нет никакой информации — показываем заглушку
-    if not info_lines:
-        lines.append("🤷 Пока ничего интересного не узнал.")
-        lines.append("Пусть расскажет про себя побольше.")
-    else:
-        lines.extend(info_lines)
-    
-    # Статистика
+    # Статистика (мелким шрифтом)
+    stats = []
     if profile.message_count > 0:
-        lines.append(f"\n📊 Сообщений: {profile.message_count}")
+        stats.append(f"{profile.message_count} сообщ.")
     if profile.first_seen:
-        lines.append(f"📅 Первый раз: {profile.first_seen[:10]}")
+        stats.append(f"с {profile.first_seen[:10]}")
+    if stats:
+        parts.append(f"<i>{' • '.join(stats)}</i>")
     
-    await msg.reply("\n".join(lines), parse_mode="HTML")
+    # Подсказка про очистку (только для своего профиля)
+    if target_user_id == msg.from_user.id and len(parts) > 2:
+        parts.append(f"<i>Ошибка? /clearprofile</i>")
+    
+    await msg.reply("\n".join(parts), parse_mode="HTML")
 
 
 @router.message(Command("mood"))
@@ -895,6 +896,7 @@ async def cmd_mood(msg: Message):
     """
     Показывает текущее настроение Олега.
     """
+    logger.info(f"[CMD] /mood handler called by {msg.from_user.id}")
     from app.services.mood import mood_service
     
     mood, trigger = mood_service.get_current_mood()
@@ -941,6 +943,49 @@ async def cmd_mood(msg: Message):
         lines.append(f"\n💬 {trigger}")
     
     await msg.reply("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("clearprofile"))
+async def cmd_clearprofile(msg: Message):
+    """
+    Очищает профиль пользователя из памяти Олега.
+    Использование: /clearprofile — очистить свой профиль
+    """
+    logger.info(f"[CMD] /clearprofile handler called by {msg.from_user.id}")
+    from app.services.user_memory import user_memory
+    from app.services.vector_db import vector_db
+    
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    
+    try:
+        # Удаляем профиль из кэша
+        cache_key = user_memory._get_cache_key(chat_id, user_id)
+        if cache_key in user_memory._cache:
+            del user_memory._cache[cache_key]
+        if cache_key in user_memory._cache_timestamps:
+            del user_memory._cache_timestamps[cache_key]
+        
+        # Удаляем из ChromaDB
+        collection_name = user_memory._get_collection_name(chat_id)
+        try:
+            vector_db.delete_facts(
+                collection_name=collection_name,
+                where={"user_id": user_id, "type": "profile"}
+            )
+        except Exception as e:
+            logger.debug(f"Profile deletion from ChromaDB: {e}")
+        
+        username = msg.from_user.username or msg.from_user.first_name
+        await msg.reply(
+            f"🗑 Профиль @{username} очищен.\n\n"
+            "Олег забыл всё что знал о тебе. "
+            "Новые факты будут собираться заново из твоих сообщений."
+        )
+        logger.info(f"Profile cleared for user {user_id} in chat {chat_id}")
+    except Exception as e:
+        logger.error(f"Error clearing profile: {e}")
+        await msg.reply("❌ Не удалось очистить профиль. Попробуй позже.")
 
 
 @router.message(Command("limit"))

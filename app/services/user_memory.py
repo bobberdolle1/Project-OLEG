@@ -211,6 +211,34 @@ class UserMemoryService:
         except Exception as e:
             logger.error(f"Error saving profile: {e}")
     
+    # Факты которые принадлежат Олегу (боту), а не пользователям
+    # Эти факты НЕ должны сохраняться в профили пользователей
+    OLEG_SETUP_KEYWORDS = [
+        'ptm7950', 'термопаста ptm', 'ptm 7950',  # Термопаста Олега
+        'steam deck', 'steamdeck', 'стим дек',  # Steam Deck Олега (если юзер сам не говорит)
+        'hyprland',  # DE Олега
+        'arch linux', 'арч линукс',  # Дистрибутив Олега
+        'minifuse', 'minilab',  # Аудио железо из примеров
+        'shp9500',  # Наушники из примеров
+    ]
+    
+    def _is_oleg_setup_fact(self, text: str) -> bool:
+        """Проверяет, является ли факт частью сетапа Олега (бота), а не пользователя."""
+        text_lower = text.lower()
+        
+        # Проверяем ключевые слова сетапа Олега
+        for keyword in self.OLEG_SETUP_KEYWORDS:
+            if keyword in text_lower:
+                # Исключение: если юзер явно говорит "у меня", "мой", "купил"
+                user_ownership_markers = ['у меня', 'мой ', 'моя ', 'моё ', 'мои ', 'купил', 'заказал', 'поставил себе', 'установил себе']
+                has_ownership = any(marker in text_lower for marker in user_ownership_markers)
+                
+                if not has_ownership:
+                    logger.debug(f"Filtered out Oleg's setup fact: {text[:50]}...")
+                    return True
+        
+        return False
+
     async def update_profile_from_facts(
         self, 
         chat_id: int, 
@@ -233,6 +261,10 @@ class UserMemoryService:
         
         # Обновляем на основе фактов
         for fact in facts:
+            # Фильтруем факты которые принадлежат Олегу, а не пользователю
+            fact_text = fact.get('text', '')
+            if self._is_oleg_setup_fact(fact_text):
+                continue
             text = fact.get('text', '').lower()
             original_text = fact.get('text', '')  # Оригинал для имён
             category = fact.get('metadata', {}).get('category', '')

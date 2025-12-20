@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "oleg-bot"
-version = "4.0.0"
+version = "8.0.0"
 description = "Цифровой гигачад — Telegram-бот с ИИ, модерацией и игровыми механиками"
 authors = ["Your Name <you@example.com>"]
 license = "MIT"

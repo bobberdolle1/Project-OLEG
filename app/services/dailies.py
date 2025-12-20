@@ -1141,16 +1141,16 @@ class DailiesService:
         session: Optional[AsyncSession] = None
     ) -> DailyQuote:
         """
-        Select a daily quote (from Golden Fund, LLM-generated, or predefined).
+        Select a daily quote (from Golden Fund or LLM-generated).
         
         Requirement 13.2: WHEN the time reaches 21:00 Moscow time
         THEN the Dailies System SHALL send a #dailyquote message
         with a wisdom quote (either from Golden Fund or generated).
         
         Priority:
-        1. Golden Fund (50% chance if available)
-        2. LLM-generated quote (30% chance)
-        3. Predefined category quotes (20% chance, or fallback)
+        1. Golden Fund (30% chance if available)
+        2. LLM-generated quote (70% chance, always try first if not Golden Fund)
+        3. Predefined category quotes (fallback only if LLM fails)
         
         Args:
             chat_id: Optional chat ID to prefer chat-specific quotes
@@ -1161,8 +1161,8 @@ class DailiesService:
         """
         roll = random.random()
         
-        # 50% chance: Try Golden Fund first
-        if roll < 0.5 and self.golden_fund_service:
+        # 30% chance: Try Golden Fund first (real user quotes are valuable)
+        if roll < 0.3 and self.golden_fund_service:
             try:
                 golden_quote = await self.golden_fund_service.get_random_golden_quote(
                     chat_id=chat_id
@@ -1178,18 +1178,18 @@ class DailiesService:
             except Exception as e:
                 logger.warning(f"Failed to get golden quote: {e}")
         
-        # 30% chance: Try LLM generation
-        if roll < 0.8:
-            llm_quote = await self._generate_llm_quote()
-            if llm_quote:
-                return DailyQuote(
-                    text=llm_quote,
-                    author="Олег",
-                    is_from_golden_fund=False,
-                    sticker_file_id=None
-                )
+        # 70% chance: Generate unique quote via LLM
+        llm_quote = await self._generate_llm_quote()
+        if llm_quote:
+            return DailyQuote(
+                text=llm_quote,
+                author="Олег",
+                is_from_golden_fund=False,
+                sticker_file_id=None
+            )
         
-        # Fallback: Pick from categorized quotes
+        # Fallback: Pick from categorized quotes (only if LLM unavailable)
+        logger.warning("LLM quote generation failed, using fallback static quotes")
         return self._select_category_quote()
     
     def _select_category_quote(self) -> DailyQuote:
@@ -1245,53 +1245,75 @@ class DailiesService:
         """
         try:
             from app.services.ollama_client import _ollama_chat
+            from datetime import datetime
             
-            # Vary the prompt based on day
-            themes = [
-                "программирование и код",
-                "жизнь и философия", 
-                "мотивация без кринжа",
-                "абсурдный юмор",
-                "IT-мудрость",
-                "прокрастинация и дедлайны",
-                "простые истины",
-            ]
-            theme = random.choice(themes)
+            # Vary the theme based on day of week
+            weekday = datetime.now().weekday()
+            themes_by_day = {
+                0: "понедельник и начало рабочей недели",
+                1: "код, баги и отладка",
+                2: "середина недели и усталость",
+                3: "дедлайны и прокрастинация",
+                4: "пятница и предвкушение выходных",
+                5: "выходные и отдых",
+                6: "воскресенье и подготовка к новой неделе",
+            }
+            theme = themes_by_day.get(weekday, "жизнь программиста")
             
-            prompt = f"""Придумай одну короткую цитату/мысль дня на тему: {theme}.
+            prompt = f"""Придумай короткую мысль/наблюдение дня. Сегодня тема: {theme}.
 
-Требования:
-- Максимум 1-2 предложения
-- Без банальщины типа "верь в себя" или "следуй за мечтой"
-- Можно с лёгкой иронией или сарказмом
-- Без кринжа и пафоса
-- Говори как умный, но не заносчивый чувак
-- Можно немного грубовато, но не токсично
+СТИЛЬ:
+- Как будто умный друг делится наблюдением за пивом
+- Можно с иронией, сарказмом, чёрным юмором
+- Без мотивационного булшита ("верь в себя", "ты можешь всё")
+- Без банальностей и очевидных истин
+- Грубовато, но не токсично
+- 1-2 предложения максимум
 
-Примеры хорошего стиля:
-- "Код работает — не трогай. Не работает — тоже не трогай."
-- "Дедлайн — лучшая мотивация. Особенно вчерашний."
-- "Простота — это не когда нечего добавить, а когда нечего убрать."
+ПЛОХИЕ ПРИМЕРЫ (НЕ ДЕЛАЙ ТАК):
+- "Жизнь коротка. Пиши понятный код." — слишком пафосно
+- "Верь в себя и всё получится" — кринж
+- "Каждый день — новый шанс" — банальщина
 
-Ответь ТОЛЬКО цитатой, без кавычек и пояснений."""
+ХОРОШИЕ ПРИМЕРЫ:
+- "Понедельник — это когда кофе не помогает, но ты всё равно пьёшь."
+- "Баг в пятницу вечером — это не баг, это тест на стрессоустойчивость."
+- "Оптимизация — это когда ты час ищешь способ сэкономить 5 минут."
+- "Документацию пишут те, кто уже забыл как работает код."
+- "Лучший код — тот, который удалили."
+
+Ответь ТОЛЬКО одной фразой, без кавычек и пояснений."""
 
             messages = [
-                {"role": "system", "content": "Ты — Олег, прямолинейный и ироничный бот. Говоришь коротко и по делу."},
+                {"role": "system", "content": "Ты — Олег, циничный но не злой бот. Говоришь как уставший сеньор, который всё видел."},
                 {"role": "user", "content": prompt}
             ]
             
-            quote = await _ollama_chat(messages, temperature=0.9)
+            quote = await _ollama_chat(messages, temperature=0.95)
             
-            # Clean up the quote
-            quote = quote.strip().strip('"\'')
-            
-            # Validate length and quality
-            if len(quote) < 10 or len(quote) > 200:
+            if not quote:
                 return None
             
-            # Skip if too generic
-            generic_phrases = ["верь в себя", "следуй за мечтой", "ты можешь всё", "никогда не сдавайся"]
-            if any(phrase in quote.lower() for phrase in generic_phrases):
+            # Clean up the quote
+            quote = quote.strip().strip('"\'«»„"')
+            
+            # Remove common prefixes LLM might add
+            bad_prefixes = ["цитата:", "мысль:", "вот:", "ответ:", "—", "-"]
+            for prefix in bad_prefixes:
+                if quote.lower().startswith(prefix):
+                    quote = quote[len(prefix):].strip()
+            
+            # Validate length
+            if len(quote) < 15 or len(quote) > 250:
+                return None
+            
+            # Skip if too generic/cringe
+            cringe_phrases = [
+                "верь в себя", "следуй за мечтой", "ты можешь всё", 
+                "никогда не сдавайся", "каждый день", "новый шанс",
+                "жизнь прекрасна", "будь собой", "мечты сбываются"
+            ]
+            if any(phrase in quote.lower() for phrase in cringe_phrases):
                 return None
             
             return quote

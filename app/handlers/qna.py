@@ -865,8 +865,48 @@ async def cmd_whois(msg: Message):
         await msg.reply("Не могу определить пользователя.")
         return
     
+    logger.info(f"[WHOIS] Looking for profile: chat={msg.chat.id}, user={target_user_id}, username={target_username}")
+    
     # Получаем профиль
     profile = await user_memory.get_profile(msg.chat.id, target_user_id)
+    
+    logger.info(f"[WHOIS] Profile found: {profile is not None}")
+    
+    if not profile:
+        # Пробуем создать базовый профиль из данных БД
+        try:
+            from app.database.session import get_session
+            from app.database.models import MessageLog, User
+            from sqlalchemy import select, func
+            
+            async with get_session()() as session:
+                # Считаем сообщения пользователя в этом чате
+                msg_count = await session.scalar(
+                    select(func.count(MessageLog.id)).where(
+                        MessageLog.chat_id == msg.chat.id,
+                        MessageLog.user_id == target_user_id
+                    )
+                )
+                
+                # Получаем первое сообщение
+                first_msg = await session.scalar(
+                    select(func.min(MessageLog.created_at)).where(
+                        MessageLog.chat_id == msg.chat.id,
+                        MessageLog.user_id == target_user_id
+                    )
+                )
+                
+                if msg_count and msg_count > 0:
+                    # Создаём базовый профиль
+                    from app.services.user_memory import UserProfile
+                    profile = UserProfile(
+                        username=target_username,
+                        message_count=msg_count,
+                        first_seen=first_msg.isoformat() if first_msg else None
+                    )
+                    logger.info(f"[WHOIS] Created basic profile from DB: {msg_count} messages")
+        except Exception as e:
+            logger.warning(f"[WHOIS] Failed to create basic profile: {e}")
     
     if not profile:
         await msg.reply(f"Олег пока ничего не знает о @{target_username}.")

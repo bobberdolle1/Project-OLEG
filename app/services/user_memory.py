@@ -154,22 +154,35 @@ class UserMemoryService:
         # Загружаем из ChromaDB
         try:
             collection_name = self._get_collection_name(chat_id)
+            
+            # Используем тот же формат where что и при сохранении
             results = vector_db.search_facts(
                 collection_name=collection_name,
-                query=f"user_profile_{user_id}",
-                n_results=1,
-                where={"$and": [{"user_id": user_id}, {"type": "profile"}]}
+                query=f"user profile {user_id}",
+                n_results=5,
+                where={"type": "profile"}
             )
             
-            if results:
-                profile_data = json.loads(results[0].get('text', '{}'))
-                profile = UserProfile.from_dict(profile_data)
+            # Фильтруем по user_id вручную (ChromaDB может иметь проблемы с int в where)
+            for result in results:
+                meta = result.get('metadata', {})
+                stored_user_id = meta.get('user_id')
                 
-                # Кэшируем
-                self._cache[cache_key] = profile
-                self._cache_timestamps[cache_key] = datetime.now()
-                
-                return profile
+                # Сравниваем как int (user_id может быть сохранён как строка)
+                if stored_user_id is not None:
+                    try:
+                        if int(stored_user_id) == int(user_id):
+                            profile_data = json.loads(result.get('text', '{}'))
+                            profile = UserProfile.from_dict(profile_data)
+                            
+                            # Кэшируем
+                            self._cache[cache_key] = profile
+                            self._cache_timestamps[cache_key] = datetime.now()
+                            
+                            return profile
+                    except (ValueError, TypeError):
+                        continue
+                        
         except Exception as e:
             logger.debug(f"Profile not found for user {user_id} in chat {chat_id}: {e}")
         

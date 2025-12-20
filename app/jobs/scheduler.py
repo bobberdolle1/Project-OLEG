@@ -697,6 +697,25 @@ async def job_dailies_evening_quote_and_stats(bot: Bot):
             logger.error(f"Error in evening quote/stats job: {e}")
 
 
+async def job_sync_sdoc_admins(bot: Bot):
+    """
+    Синхронизация админов группы SDOC.
+    Запускается каждые 6 часов.
+    """
+    try:
+        from app.services.sdoc_service import sdoc_service
+        
+        if not settings.sdoc_chat_id:
+            logger.debug("SDOC chat_id не указан, пропускаем синхронизацию админов")
+            return
+        
+        count = await sdoc_service.sync_admins(bot, settings.sdoc_chat_id)
+        logger.info(f"Синхронизировано {count} админов SDOC")
+        
+    except Exception as e:
+        logger.error(f"Ошибка синхронизации админов SDOC: {e}")
+
+
 async def setup_scheduler(bot: Bot):
     global _scheduler
     if _scheduler:
@@ -712,6 +731,15 @@ async def setup_scheduler(bot: Bot):
     _scheduler.add_job(job_sync_chat_members, CronTrigger(hour=3, minute=0), args=[bot], id="sync_chat_members")
     # Welcome 2.0: проверка истекших верификаций каждую минуту
     _scheduler.add_job(job_check_pending_verifications, IntervalTrigger(minutes=1), args=[bot], id="check_pending_verifications")
+    
+    # SDOC: синхронизация админов группы каждые 6 часов
+    if settings.sdoc_exclusive_mode and settings.sdoc_chat_id:
+        _scheduler.add_job(
+            job_sync_sdoc_admins,
+            IntervalTrigger(hours=6),
+            args=[bot],
+            id="sync_sdoc_admins"
+        )
     
     # Fortress Update: Tournament scheduler jobs (Requirements 10.1, 10.2, 10.3)
     # Daily tournament: starts at 00:00 UTC every day

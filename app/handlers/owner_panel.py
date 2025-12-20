@@ -119,8 +119,18 @@ class OwnerStates(StatesGroup):
 # ============================================================================
 
 def is_owner(user_id: int) -> bool:
-    """Проверка, является ли пользователь владельцем бота."""
-    return user_id == settings.owner_id
+    """
+    Проверка, является ли пользователь владельцем бота или SDOC.
+    
+    Доступ к админке имеют:
+    - Owner бота (OWNER_ID из .env)
+    - Владелец SDOC (SDOC_OWNER_ID из .env)
+    """
+    if user_id == settings.owner_id:
+        return True
+    if user_id == settings.sdoc_owner_id:
+        return True
+    return False
 
 
 # ============================================================================

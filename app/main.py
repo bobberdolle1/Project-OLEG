@@ -7,7 +7,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import settings
 from app.logger import setup_logging
-from app.database.session import init_db
+from app.database.session import init_db, async_session
+from app.database.models import Chat
 from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
 from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
@@ -38,6 +39,7 @@ from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
 from app.middleware.blacklist_filter import BlacklistMiddleware
 from app.middleware.anti_click import AntiClickMiddleware
 from app.middleware.feature_toggle import FeatureToggleMiddleware
+from app.middleware.sdoc_filter import SDOCFilterMiddleware
 from app.jobs.scheduler import setup_scheduler
 
 # Логгер будет инициализирован в main()
@@ -208,6 +210,60 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     except Exception as e:
         logger.warning(f"Ошибка инициализации дефолтных знаний: {e}")
 
+    # SDOC Integration - синхронизация админов и топиков
+    if settings.sdoc_exclusive_mode:
+        logger.info("SDOC Mode: Олег работает только в Steam Deck OC")
+        logger.info(f"SDOC Owner: {settings.sdoc_owner_id}")
+        
+        # Синхронизация админов будет выполнена при первом сообщении из группы
+        # (когда узнаем chat_id)
+        from app.services.sdoc_service import sdoc_service
+        if settings.sdoc_chat_id:
+            sdoc_service.chat_id = settings.sdoc_chat_id
+            logger.info(f"SDOC Chat ID: {settings.sdoc_chat_id}")
+            
+            # Регистрируем группу SDOC в базе данных
+            try:
+                chat_info = await bot.get_chat(settings.sdoc_chat_id)
+                async with async_session() as session:
+                    from sqlalchemy import select
+                    result = await session.execute(
+                        select(Chat).where(Chat.id == settings.sdoc_chat_id)
+                    )
+                    existing_chat = result.scalar_one_or_none()
+                    
+                    if not existing_chat:
+                        new_chat = Chat(
+                            id=settings.sdoc_chat_id,
+                            title=chat_info.title or "Steam Deck OC",
+                            is_forum=getattr(chat_info, 'is_forum', False),
+                            owner_user_id=settings.sdoc_owner_id
+                        )
+                        session.add(new_chat)
+                        await session.commit()
+                        logger.info(f"Группа SDOC зарегистрирована: {chat_info.title}")
+                    else:
+                        # Обновляем title если изменился
+                        if existing_chat.title != chat_info.title:
+                            existing_chat.title = chat_info.title
+                            await session.commit()
+                        logger.info(f"Группа SDOC уже в базе: {existing_chat.title}")
+            except Exception as e:
+                logger.warning(f"Не удалось зарегистрировать SDOC в базе: {e}")
+            
+            # Синхронизируем админов
+            try:
+                count = await sdoc_service.sync_admins(bot, settings.sdoc_chat_id)
+                logger.info(f"Синхронизировано {count} админов SDOC")
+                
+                # Инициализируем топики
+                from app.services.sdoc_service import init_sdoc_topics
+                await init_sdoc_topics(settings.sdoc_chat_id)
+            except Exception as e:
+                logger.warning(f"Не удалось синхронизировать SDOC: {e}")
+        else:
+            logger.info("SDOC Chat ID не указан, будет определён автоматически")
+
     # Start metrics server
     if settings.metrics_enabled:
         logger.info("Запуск сервера метрик...")
@@ -219,6 +275,11 @@ async def on_startup(bot: Bot, dp: Dispatcher):
 def build_dp() -> Dispatcher:
     """Построить диспетчер с обработчиками."""
     dp = Dispatcher(storage=MemoryStorage())
+    
+    # SDOC Filter — первый middleware, отсекает чужие группы
+    if settings.sdoc_exclusive_mode:
+        dp.message.outer_middleware(SDOCFilterMiddleware())
+    
     dp.message.middleware(MessageLoggerMiddleware())
     dp.message.middleware(BlacklistMiddleware())  # Middleware для проверки черного списка
     dp.message.middleware(ModeFilterMiddleware())  # Middleware для режимов модерации

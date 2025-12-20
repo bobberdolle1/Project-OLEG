@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = Field(..., min_length=10, description="Telegram bot token from BotFather")
     owner_id: Optional[int] = Field(None, description="Bot owner's Telegram ID")
+    
+    # SDOC (Steam Deck OC) - родной дом Олега
+    sdoc_chat_id: Optional[int] = Field(default=None, description="SDOC group chat ID (Олег работает только тут)")
+    sdoc_chat_username: str = Field(default="steamdeckoverclock", description="SDOC group username")
+    sdoc_owner_id: int = Field(default=703959426, description="SDOC owner Telegram ID (@k1gsss)")
+    sdoc_exclusive_mode: bool = Field(default=True, description="Олег работает только в SDOC и ЛС")
 
     # Ollama
     ollama_base_url: str = Field(

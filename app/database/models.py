@@ -845,3 +845,80 @@ class FishingStats(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_fishing'),
     )
+
+
+# ============================================================================
+# SDOC INTEGRATION - Олег как резидент Steam Deck OC
+# ============================================================================
+
+
+class GroupAdmin(Base):
+    """
+    Админы/приписочники группы SDOC.
+    
+    Синхронизируется с Telegram API getChatAdministrators.
+    Олег знает их по именам и может упоминать в разговоре.
+    """
+    __tablename__ = "group_admins"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    first_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # Кастомный титул в группе
+    role: Mapped[str] = mapped_column(String(20), default="administrator")  # creator, administrator
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+    
+    __table_args__ = (
+        UniqueConstraint('chat_id', 'user_id', name='uq_chat_admin'),
+    )
+
+
+class GroupMeme(Base):
+    """
+    Локальные мемы и приколы группы.
+    
+    Олег собирает их из чата и может использовать в разговоре.
+    Примеры: "Синица с яйцами", "Иваново", местные шутки.
+    """
+    __tablename__ = "group_memes"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    meme_type: Mapped[str] = mapped_column(String(32), index=True)  # quote, joke, reference, nickname
+    content: Mapped[str] = mapped_column(Text)
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Контекст/объяснение
+    author_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Кто автор
+    author_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)  # Сколько раз Олег использовал
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    __table_args__ = (
+        UniqueConstraint('chat_id', 'content', name='uq_chat_meme_content'),
+    )
+
+
+class SDOCTopic(Base):
+    """
+    Топики группы SDOC.
+    
+    Олег знает структуру группы и может направлять людей в нужные топики.
+    """
+    __tablename__ = "sdoc_topics"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    topic_id: Mapped[int] = mapped_column(BigInteger, index=True)  # message_thread_id
+    name: Mapped[str] = mapped_column(String(128))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(32), default="general")  # tech, fun, trade, meta
+    keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON список ключевых слов
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    __table_args__ = (
+        UniqueConstraint('chat_id', 'topic_id', name='uq_chat_topic'),
+    )

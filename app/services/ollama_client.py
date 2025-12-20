@@ -1174,6 +1174,10 @@ async def _get_private_chat_history(user_id: int, limit: int = 10) -> list[dict]
         
     Returns:
         Список сообщений в формате [{"role": "user"/"assistant", "content": "..."}]
+        
+    Note:
+        Исключает самое последнее сообщение пользователя, т.к. оно будет добавлено
+        отдельно в generate_text_reply (чтобы избежать дублирования).
     """
     async_session = get_session()
     history = []
@@ -1185,12 +1189,25 @@ async def _get_private_chat_history(user_id: int, limit: int = 10) -> list[dict]
                 select(MessageLog)
                 .where(MessageLog.chat_id == user_id)
                 .order_by(MessageLog.created_at.desc())
-                .limit(limit * 2)  # Берём больше, т.к. часть — сообщения бота
+                .limit(limit * 2 + 1)  # +1 чтобы пропустить текущее сообщение
             )
             messages = result.scalars().all()
             
             # Переворачиваем чтобы получить хронологический порядок
             messages = list(reversed(messages))
+            
+            # Пропускаем последнее сообщение пользователя (оно будет добавлено отдельно)
+            # Это предотвращает дублирование текущего сообщения в контексте
+            if messages:
+                last_msg = messages[-1]
+                # Если последнее сообщение от пользователя (не от бота) — пропускаем его
+                is_bot_message = (
+                    last_msg.user_id == 0 or 
+                    (last_msg.username and 'oleg' in last_msg.username.lower())
+                )
+                if not is_bot_message:
+                    messages = messages[:-1]
+                    logger.debug(f"[HISTORY] Пропущено последнее сообщение пользователя (будет добавлено отдельно)")
             
             for msg in messages:
                 if msg.text:

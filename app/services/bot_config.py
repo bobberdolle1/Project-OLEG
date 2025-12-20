@@ -18,7 +18,7 @@ async def get_bot_config(chat_id: int) -> dict:
     Получить настройки бота для чата.
     
     Returns:
-        dict с ключами: auto_reply_chance, quotes_enabled, voice_enabled, vision_enabled, games_enabled
+        dict с ключами: auto_reply_chance, quotes_enabled, voice_enabled, vision_enabled, games_enabled, pvp_accept_timeout
     """
     # Проверяем кэш
     if chat_id in _config_cache:
@@ -31,6 +31,7 @@ async def get_bot_config(chat_id: int) -> dict:
         "voice_enabled": True,
         "vision_enabled": True,
         "games_enabled": True,
+        "pvp_accept_timeout": 60,
     }
     
     try:
@@ -49,6 +50,7 @@ async def get_bot_config(chat_id: int) -> dict:
                     "voice_enabled": config.voice_enabled,
                     "vision_enabled": config.vision_enabled,
                     "games_enabled": config.games_enabled,
+                    "pvp_accept_timeout": getattr(config, 'pvp_accept_timeout', 60),
                 }
                 _config_cache[chat_id] = result
                 return result
@@ -73,3 +75,17 @@ async def is_feature_enabled(chat_id: int, feature: str) -> bool:
     """
     config = await get_bot_config(chat_id)
     return config.get(f"{feature}_enabled", True)
+
+
+async def get_pvp_accept_timeout(chat_id: int) -> int:
+    """
+    Получить время на принятие вызова в PvP/ПП (в секундах).
+    
+    Args:
+        chat_id: ID чата
+        
+    Returns:
+        Время в секундах (по умолчанию 60)
+    """
+    config = await get_bot_config(chat_id)
+    return config.get("pvp_accept_timeout", 60)

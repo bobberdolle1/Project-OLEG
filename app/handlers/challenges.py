@@ -507,13 +507,19 @@ async def start_pvp_challenge(
     game_engine.set_balance(challenger_id, chat_id, challenger_balance)
     game_engine.set_balance(target_id, chat_id, target_balance_val)
     
+    # Get timeout from chat settings
+    from app.services.bot_config import get_pvp_accept_timeout
+    timeout_seconds = await get_pvp_accept_timeout(chat_id)
+    timeout_minutes = max(1, timeout_seconds // 60)  # Convert to minutes, minimum 1
+    
     # Create challenge
     result = game_engine.create_challenge(
         chat_id=chat_id,
         challenger_id=challenger_id,
         target_id=target_id,
         game_type=GameType.PVP,
-        bet_amount=bet_amount
+        bet_amount=bet_amount,
+        timeout_minutes=timeout_minutes
     )
     
     if not result.success:
@@ -533,7 +539,7 @@ async def start_pvp_challenge(
         f"⚔️ <b>ВЫЗОВ НА ДУЭЛЬ!</b>\n\n"
         f"👊 <b>@{challenger_name}</b> вызывает <b>@{target_name}</b>{bet_text}!\n\n"
         f"🎮 <i>Зонный бой: выбирай атаку и защиту одновременно с соперником!</i>\n\n"
-        f"⏱ Время на ответ: 5 минут"
+        f"⏱ Время на ответ: {timeout_seconds} сек"
     )
     
     await msg.reply(

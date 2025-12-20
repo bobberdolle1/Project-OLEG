@@ -657,8 +657,26 @@ class AdminPanelService:
         Returns:
             Tuple of (menu text, InlineKeyboardMarkup)
         """
-        # For now, games are always enabled - this can be extended with a games config table
-        games_enabled = True
+        from app.database.models import BotConfig
+        
+        close_session = False
+        if session is None:
+            async_session = get_session()
+            session = async_session()
+            close_session = True
+        
+        try:
+            result = await session.execute(
+                select(BotConfig).filter_by(chat_id=chat_id)
+            )
+            config = result.scalar_one_or_none()
+            
+            games_enabled = config.games_enabled if config else True
+            pvp_timeout = config.pvp_accept_timeout if config else 60
+        finally:
+            if close_session:
+                await session.close()
+        
         tournaments_enabled = True
         
         text = (
@@ -666,9 +684,11 @@ class AdminPanelService:
             f"Управление игровыми командами:\n\n"
             f"• /grow — Выращивание\n"
             f"• /pvp — PvP битвы\n"
+            f"• /pp — Битва писюнов\n"
             f"• /roulette — Рулетка\n\n"
             f"Статус: {'✅ Включены' if games_enabled else '❌ Выключены'}\n"
-            f"Турниры: {'✅ Включены' if tournaments_enabled else '❌ Выключены'}"
+            f"Турниры: {'✅ Включены' if tournaments_enabled else '❌ Выключены'}\n\n"
+            f"⏱ <b>Время на принятие вызова:</b> {pvp_timeout} сек"
         )
         
         keyboard = InlineKeyboardBuilder()
@@ -682,12 +702,18 @@ class AdminPanelService:
             callback_data=f"{CALLBACK_PREFIX}games_{chat_id}_tournaments"
         )
         
+        # Время на принятие вызова
+        keyboard.button(text="30с", callback_data=f"{CALLBACK_PREFIX}games_{chat_id}_timeout_30")
+        keyboard.button(text="60с", callback_data=f"{CALLBACK_PREFIX}games_{chat_id}_timeout_60")
+        keyboard.button(text="120с", callback_data=f"{CALLBACK_PREFIX}games_{chat_id}_timeout_120")
+        keyboard.button(text="300с", callback_data=f"{CALLBACK_PREFIX}games_{chat_id}_timeout_300")
+        
         keyboard.button(
             text="🔙 Назад",
             callback_data=f"{CALLBACK_PREFIX}chat_{chat_id}"
         )
         
-        keyboard.adjust(1, 1, 1)
+        keyboard.adjust(1, 1, 4, 1)
         return text, keyboard.as_markup()
 
     

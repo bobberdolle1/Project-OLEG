@@ -271,7 +271,7 @@ async def cb_toggle_notification(callback: CallbackQuery, bot: Bot):
 @router.callback_query(F.data.startswith(f"{CALLBACK_PREFIX}games_"))
 async def cb_toggle_games(callback: CallbackQuery, bot: Bot):
     """
-    Handle games toggle.
+    Handle games toggle and timeout settings.
     
     **Validates: Requirements 16.5, 16.9**
     """
@@ -279,6 +279,38 @@ async def cb_toggle_games(callback: CallbackQuery, bot: Bot):
     parts = callback.data.split("_")
     chat_id = int(parts[2])
     action = parts[3]
+    
+    # Verify ownership
+    if not await admin_panel_service.verify_ownership(bot, user_id, chat_id):
+        await callback.answer("❌ У вас нет прав на управление этим чатом", show_alert=True)
+        return
+    
+    # Handle timeout change
+    if action == "timeout" and len(parts) > 4:
+        timeout_value = int(parts[4])
+        
+        from app.database.models import BotConfig
+        
+        async with get_session()() as session:
+            result = await session.execute(select(BotConfig).filter_by(chat_id=chat_id))
+            config = result.scalar_one_or_none()
+            
+            if not config:
+                config = BotConfig(chat_id=chat_id)
+                session.add(config)
+            
+            config.pvp_accept_timeout = timeout_value
+            await session.commit()
+        
+        # Сбрасываем кэш
+        from app.services.bot_config import invalidate_cache
+        invalidate_cache(chat_id)
+        
+        # Обновляем меню
+        text, keyboard = await admin_panel_service._build_games_menu(chat_id)
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await callback.answer(f"✅ Время на принятие: {timeout_value} сек")
+        return
     
     # For now, just show a message - games config can be extended later
     await callback.answer("🎮 Игры всегда включены в этой версии", show_alert=True)

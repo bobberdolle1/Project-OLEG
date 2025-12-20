@@ -643,6 +643,9 @@ class BotConfig(Base):
     vision_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # Анализ картинок
     games_enabled: Mapped[bool] = mapped_column(Boolean, default=True)   # Игровые команды
     
+    # Время на принятие вызова в PvP/ПП (в секундах)
+    pvp_accept_timeout: Mapped[int] = mapped_column(Integer, default=60)  # 60 секунд по умолчанию
+    
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 

@@ -1566,6 +1566,10 @@ async def cmd_pp(message: Message):
         await message.reply(f"❌ У тебя только {size} см, а ставишь {bet}!")
         return
     
+    # Получаем таймаут из настроек чата
+    from app.services.bot_config import get_pvp_accept_timeout
+    timeout = await get_pvp_accept_timeout(chat_id)
+    
     # Создаём вызов
     challenge_id = str(uuid.uuid4())[:8]
     pp_challenges[challenge_id] = {
@@ -1577,6 +1581,7 @@ async def cmd_pp(message: Message):
         "bet": bet,
         "chat_id": chat_id,
         "created_at": utc_now(),
+        "timeout": timeout,
     }
     
     bar = get_pp_bar(size)
@@ -1588,7 +1593,8 @@ async def cmd_pp(message: Message):
             f"🍆 <b>{username}</b> вызывает {mention}!\n\n"
             f"{bar}\n"
             f"📏 Размер: <b>{size} см</b>\n"
-            f"💰 Ставка: <b>{bet} см</b>\n\n"
+            f"💰 Ставка: <b>{bet} см</b>\n"
+            f"⏱ Время на принятие: <b>{timeout} сек</b>\n\n"
             f"<i>У соперника должно быть минимум {bet} см!</i>"
         )
     else:
@@ -1597,7 +1603,8 @@ async def cmd_pp(message: Message):
             f"🍆 <b>{username}</b> бросает вызов!\n\n"
             f"{bar}\n"
             f"📏 Размер: <b>{size} см</b>\n"
-            f"💰 Ставка: <b>{bet} см</b>\n\n"
+            f"💰 Ставка: <b>{bet} см</b>\n"
+            f"⏱ Время на принятие: <b>{timeout} сек</b>\n\n"
             f"<i>Кто осмелится принять бой?</i>"
         )
     
@@ -1684,6 +1691,15 @@ async def pp_callback(callback: CallbackQuery):
         
         if not challenge:
             return await callback.answer("❌ Вызов истёк или не найден", show_alert=True)
+        
+        # Проверяем таймаут
+        timeout = challenge.get("timeout", 60)
+        created_at = challenge.get("created_at")
+        if created_at:
+            elapsed = (utc_now() - created_at).total_seconds()
+            if elapsed > timeout:
+                del pp_challenges[challenge_id]
+                return await callback.answer(f"❌ Время на принятие вызова истекло ({timeout} сек)!", show_alert=True)
         
         if user_id != challenge["target_id"]:
             return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
@@ -1811,6 +1827,10 @@ async def pp_callback(callback: CallbackQuery):
         if bet < 1:
             return await callback.answer("❌ Минимальная ставка 1 см!", show_alert=True)
         
+        # Получаем таймаут из настроек чата
+        from app.services.bot_config import get_pvp_accept_timeout
+        timeout = await get_pvp_accept_timeout(chat_id)
+        
         # Создаём вызов
         challenge_id = str(uuid.uuid4())[:8]
         pp_challenges[challenge_id] = {
@@ -1821,6 +1841,7 @@ async def pp_callback(callback: CallbackQuery):
             "bet": bet,
             "chat_id": chat_id,
             "created_at": utc_now(),
+            "timeout": timeout,
         }
         
         bar = get_pp_bar(size)
@@ -1829,7 +1850,8 @@ async def pp_callback(callback: CallbackQuery):
             f"🍆 <b>{username}</b> бросает вызов!\n\n"
             f"{bar}\n"
             f"📏 Размер: <b>{size} см</b>\n"
-            f"💰 Ставка: <b>{bet} см</b>\n\n"
+            f"💰 Ставка: <b>{bet} см</b>\n"
+            f"⏱ Время на принятие: <b>{timeout} сек</b>\n\n"
             f"<i>Кто осмелится принять бой?</i>\n"
             f"<i>У соперника должно быть минимум {bet} см!</i>"
         )
@@ -1856,6 +1878,15 @@ async def pp_callback(callback: CallbackQuery):
         
         if not challenge:
             return await callback.answer("❌ Вызов истёк или не найден", show_alert=True)
+        
+        # Проверяем таймаут
+        timeout = challenge.get("timeout", 60)
+        created_at = challenge.get("created_at")
+        if created_at:
+            elapsed = (utc_now() - created_at).total_seconds()
+            if elapsed > timeout:
+                del pp_challenges[challenge_id]
+                return await callback.answer(f"❌ Время на принятие вызова истекло ({timeout} сек)!", show_alert=True)
         
         if user_id == challenge["challenger_id"]:
             return await callback.answer("❌ Нельзя биться с самим собой!", show_alert=True)

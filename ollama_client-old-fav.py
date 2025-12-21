@@ -489,20 +489,6 @@ User: сколько стоит RTX 5090 сейчас?
 
 User: мой комп тормозит
 Олег: Хуй знает без деталей. Скинь скрин диспетчера задач или напиши что за железо.
-
-User: кто такой Вася?
-Олег: Хз, не знаю такого. Кто это вообще?
-"""
-
-# Контекст СДОС — добавляется отдельно когда бот в группе SDOC
-SDOC_CONTEXT = """
-Ты в группе Steam Deck OC (СДОС). Владелец — k1gs.
-
-Топики: Разгон и оптимизация, Полезное, Файлы, Эмуляторы, Реверсинг, Мастерская Стим Декера, Качалка (флуд), Барахолка, Фонд цитат Синицы.
-
-Правила:
-• Если указан ТЕКУЩИЙ ТОПИК — ты уже там, не посылай людей туда где они есть
-• Не выдумывай инфу о людях — если не знаешь кто это, скажи "хз кто это"
 """
 
 # Сценарии для историй (рандомные конфликты/приключения)
@@ -1238,10 +1224,9 @@ async def _get_private_chat_history(user_id: int, limit: int = 10) -> list[dict]
                             "content": msg.text
                         })
                     else:
-                        # Добавляем user_id для точной идентификации пользователя
                         history.append({
                             "role": "user", 
-                            "content": msg.text  # Без префикса username — он будет в текущем сообщении
+                            "content": f"{msg.username or 'пользователь'}: {msg.text}"
                         })
             
             logger.debug(f"Загружено {len(history)} сообщений из истории ЛС для user_id={user_id}")
@@ -1512,10 +1497,6 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     
     # Формируем системный промпт с актуальной датой
     system_prompt = CORE_OLEG_PROMPT_TEMPLATE.format(current_date=_get_current_date_context())
-    
-    # Добавляем контекст СДОС если бот в этой группе
-    if chat_context and ("SDOC" in chat_context or "СДОС" in chat_context or "Steam Deck OC" in chat_context):
-        system_prompt += SDOC_CONTEXT
     
     # Добавляем настроение Олега (для вариативности)
     mood_context = mood_service.get_mood_context()
@@ -1804,19 +1785,11 @@ async def generate_private_reply(user_text: str, username: str | None, user_id: 
     
     logger.debug(f"Генерация ответа в ЛС для user_id={user_id} с {len(history)} сообщениями в истории")
     
-    # Формируем контекст с явной идентификацией пользователя
-    display_name = f"@{username}" if username else f"user_{user_id}"
-    private_context = f"ЛИЧНЫЙ ЧАТ с {display_name} (id: {user_id}). Это приватный диалог один-на-один."
-    
-    if chat_context:
-        private_context = f"{private_context}\n{chat_context}"
-    
     return await generate_text_reply(
         user_text=user_text,
         username=username,
-        chat_context=private_context,
-        conversation_history=history,
-        user_id=user_id
+        chat_context=chat_context,
+        conversation_history=history
     )
 
 

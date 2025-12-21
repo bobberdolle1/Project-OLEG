@@ -110,8 +110,9 @@ FEATURE_NAMES = {
 
 class OwnerStates(StatesGroup):
     """FSM состояния для панели владельца."""
-    waiting_broadcast_text = State()
+    waiting_broadcast_text = State()  # Legacy, now accepts any content
     waiting_broadcast_confirm = State()
+    waiting_broadcast_content = State()  # New: any content type
 
 
 # ============================================================================
@@ -579,7 +580,7 @@ async def cb_owner_broadcast(callback: CallbackQuery, state: FSMContext):
         "• <b>В ЛС бота</b> - пользователям, которые писали боту\n"
         "• <b>В группы</b> - во все группы где есть бот\n"
         "• <b>Везде</b> - и в ЛС, и в группы\n\n"
-        "Или используй <b>Полный мастер</b> для отправки фото/видео/кружочков",
+        "После выбора просто отправь контент (текст/фото/видео/кружочек/GIF)",
         reply_markup=kb.as_markup()
     )
     await callback.answer()
@@ -594,7 +595,7 @@ async def cb_owner_bc_target(callback: CallbackQuery, state: FSMContext):
     
     target = callback.data.replace("owner_bc_target_", "")
     await state.update_data(broadcast_target=target)
-    await state.set_state(OwnerStates.waiting_broadcast_text)
+    await state.set_state(OwnerStates.waiting_broadcast_content)
     
     target_labels = {
         "private": "👤 в ЛС бота",
@@ -606,28 +607,62 @@ async def cb_owner_bc_target(callback: CallbackQuery, state: FSMContext):
     kb.button(text="❌ Отмена", callback_data="owner_broadcast")
     
     await callback.message.edit_text(
-        f"📝 <b>Текстовая рассылка</b>\n\n"
+        f"📢 <b>Рассылка</b>\n\n"
         f"Цель: {target_labels.get(target, target)}\n\n"
-        "Отправь текст сообщения для рассылки:",
+        "Отправь контент для рассылки:\n"
+        "• Текст\n"
+        "• Фото (с подписью)\n"
+        "• Видео (с подписью)\n"
+        "• Кружочек\n"
+        "• GIF",
         reply_markup=kb.as_markup()
     )
     await callback.answer()
 
 
-@router.message(OwnerStates.waiting_broadcast_text)
-async def handle_broadcast_text(msg: Message, state: FSMContext, bot: Bot):
-    """Обработка текста для рассылки."""
+@router.message(OwnerStates.waiting_broadcast_content)
+async def handle_broadcast_content(msg: Message, state: FSMContext, bot: Bot):
+    """Обработка любого контента для рассылки."""
     if not is_owner(msg.from_user.id):
         return
     
-    if not msg.text:
-        await msg.reply("❌ Отправь текстовое сообщение.")
+    # Auto-detect content type
+    content_type = None
+    content_data = None
+    caption = None
+    file_id = None
+    
+    if msg.video_note:
+        content_type = "video_note"
+        file_id = msg.video_note.file_id
+    elif msg.video:
+        content_type = "video"
+        file_id = msg.video.file_id
+        caption = msg.caption
+    elif msg.animation:
+        content_type = "animation"
+        file_id = msg.animation.file_id
+        caption = msg.caption
+    elif msg.photo:
+        content_type = "photo"
+        file_id = msg.photo[-1].file_id
+        caption = msg.caption
+    elif msg.text:
+        content_type = "text"
+        content_data = msg.text
+    else:
+        await msg.reply("❌ Отправь текст, фото, видео, кружочек или GIF.")
         return
     
     data = await state.get_data()
     target = data.get("broadcast_target", "groups")
     
-    await state.update_data(broadcast_text=msg.text)
+    await state.update_data(
+        broadcast_content_type=content_type,
+        broadcast_text=content_data,
+        broadcast_file_id=file_id,
+        broadcast_caption=caption
+    )
     await state.set_state(OwnerStates.waiting_broadcast_confirm)
     
     # Получить количество получателей в зависимости от цели
@@ -650,11 +685,27 @@ async def handle_broadcast_text(msg: Message, state: FSMContext, bot: Bot):
     kb.button(text="❌ Отмена", callback_data="owner_broadcast")
     kb.adjust(2)
     
-    preview = msg.text[:300] + "..." if len(msg.text) > 300 else msg.text
+    # Build preview based on content type
+    type_labels = {
+        "text": "�� Текст",
+        "photo": "🖼 Фото",
+        "video": "🎬 Видео",
+        "video_note": "⚪ Кружочек",
+        "animation": "🎞 GIF"
+    }
+    type_label = type_labels.get(content_type, content_type)
+    
+    if content_type == "text":
+        preview = content_data[:300] + "..." if len(content_data) > 300 else content_data
+        preview_text = f"<b>Текст:</b>\n{preview}"
+    elif caption:
+        preview_text = f"<b>Тип:</b> {type_label}\n<b>Подпись:</b> {caption[:200]}"
+    else:
+        preview_text = f"<b>Тип:</b> {type_label}"
     
     await msg.answer(
         f"📢 <b>Подтверждение рассылки</b>\n\n"
-        f"<b>Текст:</b>\n{preview}\n\n"
+        f"{preview_text}\n\n"
         f"<b>Получатели:</b> {recipients_text}\n\n"
         f"Подтвердить отправку?",
         reply_markup=kb.as_markup()

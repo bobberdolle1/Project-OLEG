@@ -541,6 +541,12 @@ class DailiesService:
             toxicity_score = float(toxicity_row[0] or 0)
             toxicity_incidents = toxicity_row[1] or 0
             
+            # Fallback: calculate toxicity from messages if ToxicityLog is empty
+            if toxicity_score == 0 and toxicity_incidents == 0:
+                toxicity_score, toxicity_incidents = await self._calculate_toxicity_from_messages(
+                    chat_id, yesterday_start, yesterday_end, session
+                )
+            
             # ===== NEW: Peak activity hour =====
             peak_hour_result = await session.execute(
                 select(
@@ -657,10 +663,10 @@ class DailiesService:
         session: AsyncSession
     ) -> List[Dict[str, Any]]:
         """
-        Extract hot topics from messages using keyword clustering.
+        Extract hot topics from messages using LLM clustering.
         
-        Finds the most discussed topics by analyzing message content
-        and returns them with links to representative messages.
+        Uses LLM to identify and group discussion topics, then finds
+        representative messages for each topic.
         
         Args:
             chat_id: Telegram chat ID
@@ -669,11 +675,11 @@ class DailiesService:
             session: Database session
             
         Returns:
-            List of hot topics with message links
+            List of hot topics with message links and counts
         """
         from app.database.models import MessageLog
-        from collections import Counter
         import re
+        import json
         
         try:
             # Get messages with text
@@ -687,60 +693,131 @@ class DailiesService:
             )
             messages = messages_result.scalars().all()
             
-            if not messages:
+            if not messages or len(messages) < 10:
                 return []
             
-            # Extract keywords (words 4+ chars, excluding common words)
-            stop_words = {
-                'это', 'как', 'что', 'для', 'все', 'они', 'его', 'она', 'так',
-                'уже', 'или', 'если', 'есть', 'было', 'быть', 'был', 'была',
-                'были', 'будет', 'будут', 'очень', 'просто', 'можно', 'нужно',
-                'там', 'тут', 'здесь', 'когда', 'потом', 'тоже', 'только',
-                'ещё', 'еще', 'вот', 'чтобы', 'этот', 'этого', 'этом', 'этой',
-                'который', 'которая', 'которое', 'которые', 'него', 'неё',
-                'http', 'https', 'www', 'com', 'org', 'net'
-            }
+            # Prepare messages sample for LLM
+            messages_sample = []
+            for msg in messages[:200]:
+                if msg.text and len(msg.text) > 5:
+                    messages_sample.append({
+                        "id": msg.message_id,
+                        "text": msg.text[:200],
+                        "user": msg.username or "user"
+                    })
             
-            word_messages: Dict[str, List[MessageLog]] = {}
-            word_counts: Counter = Counter()
+            if len(messages_sample) < 10:
+                return []
             
-            for msg in messages:
-                if not msg.text:
-                    continue
-                # Extract words
-                words = re.findall(r'[а-яёa-z]{4,}', msg.text.lower())
-                seen_words = set()
-                for word in words:
-                    if word not in stop_words and word not in seen_words:
-                        seen_words.add(word)
-                        word_counts[word] += 1
-                        if word not in word_messages:
-                            word_messages[word] = []
-                        if len(word_messages[word]) < 3:
-                            word_messages[word].append(msg)
-            
-            # Get top 5 keywords as topics
-            hot_topics = []
-            for word, count in word_counts.most_common(5):
-                if count < 3:  # Skip topics mentioned less than 3 times
-                    continue
-                    
-                # Get representative message for link
-                representative_msg = word_messages[word][0] if word_messages[word] else None
+            # Use LLM to extract topics
+            try:
+                from app.services.ollama_client import _ollama_chat
                 
-                topic = {
-                    "keyword": word.capitalize(),
-                    "mentions": count,
-                    "message_id": representative_msg.message_id if representative_msg else None,
-                    "chat_id": chat_id
-                }
-                hot_topics.append(topic)
-            
-            return hot_topics
+                sample_text = "\n".join([
+                    f"[{m['id']}] {m['user']}: {m['text']}" 
+                    for m in messages_sample[:100]
+                ])
+                
+                prompt = f"""Проанализируй сообщения чата и выдели 5-8 основных тем обсуждения.
+
+Сообщения:
+{sample_text}
+
+Для каждой темы укажи:
+1. Краткое название темы (2-4 слова) с эмодзи
+2. Примерное количество сообщений по теме
+3. ID одного характерного сообщения из списка
+
+Ответь СТРОГО в JSON формате:
+[
+  {{"topic": "😂 Смешные моменты", "count": 45, "msg_id": 12345}},
+  {{"topic": "🔧 Технические проблемы", "count": 30, "msg_id": 12346}}
+]
+
+Только JSON, без пояснений!"""
+
+                llm_messages = [
+                    {"role": "system", "content": "Ты анализируешь чаты и выделяешь темы. Отвечай только JSON."},
+                    {"role": "user", "content": prompt}
+                ]
+                
+                response = await _ollama_chat(llm_messages, temperature=0.3)
+                
+                # Parse JSON response
+                # Try to extract JSON from response
+                json_match = re.search(r'\[.*\]', response, re.DOTALL)
+                if json_match:
+                    topics_data = json.loads(json_match.group())
+                else:
+                    topics_data = json.loads(response)
+                
+                hot_topics = []
+                for item in topics_data[:8]:
+                    topic = {
+                        "keyword": item.get("topic", "Тема"),
+                        "mentions": item.get("count", 10),
+                        "message_id": item.get("msg_id"),
+                        "chat_id": chat_id
+                    }
+                    hot_topics.append(topic)
+                
+                return hot_topics
+                
+            except Exception as llm_error:
+                logger.debug(f"LLM topic extraction failed: {llm_error}, falling back to keywords")
+                # Fallback to keyword extraction
+                return await self._extract_hot_topics_fallback(messages, chat_id)
             
         except Exception as e:
             logger.warning(f"Failed to extract hot topics: {e}")
             return []
+    
+    async def _extract_hot_topics_fallback(
+        self,
+        messages: List,
+        chat_id: int
+    ) -> List[Dict[str, Any]]:
+        """Fallback keyword-based topic extraction."""
+        from collections import Counter
+        import re
+        
+        stop_words = {
+            'это', 'как', 'что', 'для', 'все', 'они', 'его', 'она', 'так',
+            'уже', 'или', 'если', 'есть', 'было', 'быть', 'был', 'была',
+            'были', 'будет', 'будут', 'очень', 'просто', 'можно', 'нужно',
+            'там', 'тут', 'здесь', 'когда', 'потом', 'тоже', 'только',
+            'ещё', 'еще', 'вот', 'чтобы', 'этот', 'этого', 'этом', 'этой',
+            'надо', 'меня', 'тебя', 'нахуй', 'сука', 'блять', 'хуй',
+        }
+        
+        word_messages = {}
+        word_counts = Counter()
+        
+        for msg in messages:
+            if not msg.text:
+                continue
+            words = re.findall(r'[а-яёa-z]{4,}', msg.text.lower())
+            seen = set()
+            for word in words:
+                if word not in stop_words and word not in seen:
+                    seen.add(word)
+                    word_counts[word] += 1
+                    if word not in word_messages:
+                        word_messages[word] = msg
+        
+        hot_topics = []
+        for word, count in word_counts.most_common(5):
+            if count < 5:
+                continue
+            msg = word_messages.get(word)
+            hot_topics.append({
+                "keyword": word.capitalize(),
+                "mentions": count,
+                "message_id": msg.message_id if msg else None,
+                "chat_id": chat_id
+            })
+        
+        return hot_topics
     
     async def _extract_interesting_quotes(
         self,
@@ -811,6 +888,74 @@ class DailiesService:
             logger.warning(f"Failed to extract interesting quotes: {e}")
             return []
     
+    async def _calculate_toxicity_from_messages(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: datetime,
+        session: AsyncSession
+    ) -> tuple[float, int]:
+        """
+        Calculate toxicity score from message content as fallback.
+        
+        Returns:
+            (toxicity_score 0-100, incident_count)
+        """
+        from app.database.models import MessageLog
+        import re
+        
+        try:
+            messages_result = await session.execute(
+                select(MessageLog.text).filter(
+                    MessageLog.chat_id == chat_id,
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time,
+                    MessageLog.text.isnot(None)
+                ).limit(500)
+            )
+            texts = [row[0] for row in messages_result.all() if row[0]]
+            
+            if not texts:
+                return 0.0, 0
+            
+            # Toxic patterns (Russian mat and aggressive words)
+            toxic_patterns = [
+                r'\b[хx][уy][йиеяюёijey]\w*',
+                r'\b[пp][иiе][зz][дd]\w*',
+                r'\b[бb][лl][яa]\w*',
+                r'\b[еe][бb]\w*',
+                r'\b[сc][уy][кk]\w*',
+                r'\b[мm][уy][дd][аa]\w*',
+                r'\bf+u+c+k+\w*',
+                r'\bs+h+i+t+\w*',
+                r'\b(убью|сдохни|урод|дебил|идиот|кретин|даун|лох)\b',
+            ]
+            
+            toxic_count = 0
+            incident_messages = 0
+            
+            for text in texts:
+                text_lower = text.lower()
+                is_toxic = False
+                for pattern in toxic_patterns:
+                    if re.search(pattern, text_lower, re.IGNORECASE):
+                        toxic_count += 1
+                        is_toxic = True
+                        break
+                if is_toxic:
+                    incident_messages += 1
+            
+            # Calculate score (0-100)
+            total = len(texts)
+            toxicity_ratio = toxic_count / total if total > 0 else 0
+            toxicity_score = min(100, toxicity_ratio * 100)
+            
+            return toxicity_score, incident_messages
+            
+        except Exception as e:
+            logger.warning(f"Failed to calculate toxicity from messages: {e}")
+            return 0.0, 0
+
     async def _analyze_chat_mood(
         self,
         chat_id: int,

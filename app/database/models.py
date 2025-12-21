@@ -580,6 +580,7 @@ class StickerPack(Base):
     pack_title: Mapped[str] = mapped_column(String(64))
     sticker_count: Mapped[int] = mapped_column(Integer, default=0)
     is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Telegram user ID who created the pack
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     
     quotes: Mapped[list["Quote"]] = relationship(back_populates="sticker_pack")

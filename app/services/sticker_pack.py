@@ -35,6 +35,7 @@ class StickerPackInfo:
     is_full: bool
     is_current: bool
     chat_id: int
+    owner_user_id: Optional[int] = None  # Telegram user ID who owns the pack
 
 
 @dataclass
@@ -133,7 +134,8 @@ class StickerPackService:
                     sticker_count=pack.sticker_count,
                     is_full=pack.sticker_count >= MAX_STICKERS_PER_PACK,
                     is_current=pack.is_current,
-                    chat_id=pack.chat_id
+                    chat_id=pack.chat_id,
+                    owner_user_id=pack.owner_user_id
                 )
             return None
     
@@ -162,7 +164,8 @@ class StickerPackService:
                     sticker_count=pack.sticker_count,
                     is_full=pack.sticker_count >= MAX_STICKERS_PER_PACK,
                     is_current=pack.is_current,
-                    chat_id=pack.chat_id
+                    chat_id=pack.chat_id,
+                    owner_user_id=pack.owner_user_id
                 )
             return None
     
@@ -193,7 +196,8 @@ class StickerPackService:
                     sticker_count=pack.sticker_count,
                     is_full=pack.sticker_count >= MAX_STICKERS_PER_PACK,
                     is_current=pack.is_current,
-                    chat_id=pack.chat_id
+                    chat_id=pack.chat_id,
+                    owner_user_id=pack.owner_user_id
                 )
                 for pack in packs
             ]
@@ -201,7 +205,8 @@ class StickerPackService:
     async def create_new_pack(
         self, 
         chat_id: int, 
-        chat_title: str = "Chat"
+        chat_title: str = "Chat",
+        owner_user_id: Optional[int] = None
     ) -> StickerPackInfo:
         """
         Create a new sticker pack for a chat.
@@ -211,6 +216,7 @@ class StickerPackService:
         Args:
             chat_id: The chat ID
             chat_title: The chat's title for the pack name
+            owner_user_id: Telegram user ID who will own the pack
         
         Returns:
             StickerPackInfo for the new pack
@@ -225,6 +231,10 @@ class StickerPackService:
             )
             existing_packs = result.scalars().all()
             version = len(existing_packs) + 1
+            
+            # If no owner specified, try to get from existing pack
+            if owner_user_id is None and existing_packs:
+                owner_user_id = existing_packs[0].owner_user_id
             
             # Mark all existing packs as not current
             if existing_packs:
@@ -243,13 +253,14 @@ class StickerPackService:
                 pack_name=pack_name,
                 pack_title=pack_title,
                 sticker_count=0,
-                is_current=True
+                is_current=True,
+                owner_user_id=owner_user_id
             )
             session.add(new_pack)
             await session.commit()
             await session.refresh(new_pack)
             
-            logger.info(f"Created new sticker pack '{pack_name}' for chat {chat_id}")
+            logger.info(f"Created new sticker pack '{pack_name}' for chat {chat_id}, owner: {owner_user_id}")
             
             return StickerPackInfo(
                 id=new_pack.id,
@@ -258,7 +269,8 @@ class StickerPackService:
                 sticker_count=0,
                 is_full=False,
                 is_current=True,
-                chat_id=chat_id
+                chat_id=chat_id,
+                owner_user_id=owner_user_id
             )
 
     async def rotate_pack_if_needed(

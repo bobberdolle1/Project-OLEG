@@ -73,10 +73,13 @@ RECIPIENTS_LABELS = {
 
 class BroadcastStates(StatesGroup):
     """FSM states for broadcast wizard."""
-    waiting_content_type = State()   # Step 1: Select content type
+    waiting_content_type = State()   # Step 1: Select content type (legacy)
     waiting_recipients = State()      # Step 2: Select recipients
     waiting_content = State()         # Step 3: Send content
     waiting_confirmation = State()    # Step 4: Confirm and send
+    # Simplified flow
+    quick_waiting_content = State()   # Quick: just send content
+    quick_waiting_recipients = State() # Quick: select recipients after content
 
 
 # ============================================================================
@@ -272,6 +275,181 @@ async def cmd_broadcast(msg: Message, state: FSMContext):
         "<b>Шаг 1/4:</b> Выберите тип контента:",
         reply_markup=keyboard.as_markup()
     )
+
+
+@router.message(Command("bc"))
+async def cmd_quick_broadcast(msg: Message, state: FSMContext):
+    """
+    /bc command - quick broadcast (auto-detect content type).
+    
+    Just send any content and it will auto-detect the type.
+    """
+    if msg.chat.type != 'private':
+        await msg.reply("Рассылка доступна только в ЛС.")
+        return
+    
+    if not is_admin(msg.from_user.id):
+        await msg.answer("⛔ Доступ запрещён.")
+        return
+    
+    await state.set_state(BroadcastStates.quick_waiting_content)
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="❌ Отмена", callback_data="bc_cancel")
+    
+    await msg.answer(
+        "📢 <b>Быстрая рассылка</b>\n\n"
+        "Просто отправь контент (текст, фото, видео или кружочек).\n"
+        "Тип определится автоматически.",
+        reply_markup=keyboard.as_markup()
+    )
+
+
+@router.message(BroadcastStates.quick_waiting_content)
+async def handle_quick_content(msg: Message, state: FSMContext):
+    """Handle quick broadcast content - auto-detect type."""
+    if not is_admin(msg.from_user.id):
+        return
+    
+    # Auto-detect content type
+    content_type = None
+    content = None
+    caption = None
+    file_id = None
+    
+    if msg.video_note:
+        content_type = BroadcastContentType.VIDEO_NOTE
+        file_id = msg.video_note.file_id
+        content = "video_note"
+    elif msg.video:
+        content_type = BroadcastContentType.VIDEO
+        file_id = msg.video.file_id
+        caption = msg.caption
+        content = "video"
+    elif msg.photo:
+        content_type = BroadcastContentType.PHOTO
+        file_id = msg.photo[-1].file_id
+        caption = msg.caption
+        content = "photo"
+    elif msg.text:
+        content_type = BroadcastContentType.TEXT
+        content = msg.text
+    elif msg.animation:
+        # GIF support
+        content_type = BroadcastContentType.VIDEO
+        file_id = msg.animation.file_id
+        caption = msg.caption
+        content = "animation"
+    elif msg.document:
+        # Document with caption
+        await msg.reply("📎 Документы пока не поддерживаются. Отправь фото, видео или текст.")
+        return
+    else:
+        await msg.reply("❌ Не могу определить тип контента. Отправь текст, фото, видео или кружочек.")
+        return
+    
+    # Save content
+    await state.update_data(
+        content_type=content_type.value,
+        content=content,
+        caption=caption,
+        file_id=file_id
+    )
+    await state.set_state(BroadcastStates.quick_waiting_recipients)
+    
+    # Show recipients selection
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="👤 ЛС Бота", callback_data="qbc_private")
+    keyboard.button(text="👥 Группы", callback_data="qbc_groups")
+    keyboard.button(text="🌍 Везде", callback_data="qbc_all")
+    keyboard.button(text="❌ Отмена", callback_data="bc_cancel")
+    keyboard.adjust(3, 1)
+    
+    preview = f"Тип: {CONTENT_TYPE_LABELS[content_type]}"
+    if caption:
+        preview += f"\nПодпись: {caption[:50]}..."
+    elif content_type == BroadcastContentType.TEXT:
+        preview += f"\nТекст: {content[:50]}..."
+    
+    await msg.answer(
+        f"📢 <b>Быстрая рассылка</b>\n\n"
+        f"{preview}\n\n"
+        f"Куда отправить?",
+        reply_markup=keyboard.as_markup()
+    )
+
+
+@router.callback_query(F.data.startswith("qbc_"))
+async def cb_quick_recipients(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Handle quick broadcast recipients selection and send."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    recipients_map = {
+        "qbc_private": BroadcastRecipients.PRIVATE,
+        "qbc_groups": BroadcastRecipients.GROUPS,
+        "qbc_all": BroadcastRecipients.ALL,
+    }
+    
+    recipients = recipients_map.get(callback.data)
+    if not recipients:
+        await callback.answer("Неизвестный выбор", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    content_type = BroadcastContentType(data['content_type'])
+    content = data.get('content')
+    caption = data.get('caption')
+    file_id = data.get('file_id')
+    
+    await callback.answer("🚀 Отправка...")
+    
+    await callback.message.edit_text(
+        "📢 <b>Рассылка...</b>\n\n⏳ Подождите..."
+    )
+    
+    # Send
+    sent_count, failed_count = await BroadcastSender.send_broadcast(
+        bot=bot,
+        content_type=content_type,
+        recipients=recipients,
+        content=content,
+        caption=caption,
+        file_id=file_id
+    )
+    
+    await state.clear()
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="📢 Ещё рассылка", callback_data="bc_quick_new")
+    
+    await callback.message.edit_text(
+        f"📢 <b>Готово!</b>\n\n"
+        f"✅ Отправлено: {sent_count}\n"
+        f"❌ Ошибок: {failed_count}",
+        reply_markup=keyboard.as_markup()
+    )
+
+
+@router.callback_query(F.data == "bc_quick_new")
+async def cb_quick_new(callback: CallbackQuery, state: FSMContext):
+    """Start new quick broadcast."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await state.set_state(BroadcastStates.quick_waiting_content)
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="❌ Отмена", callback_data="bc_cancel")
+    
+    await callback.message.edit_text(
+        "📢 <b>Быстрая рассылка</b>\n\n"
+        "Просто отправь контент (текст, фото, видео или кружочек).",
+        reply_markup=keyboard.as_markup()
+    )
+    await callback.answer()
 
 
 # ============================================================================

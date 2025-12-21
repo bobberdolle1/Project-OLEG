@@ -12,7 +12,7 @@ from io import BytesIO
 from typing import List, Optional
 
 from aiogram import Router, F
-from aiogram.types import Message, BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputSticker
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -27,6 +27,7 @@ from app.services.quote_generator import (
     MessageData,
     MAX_CHAIN_MESSAGES,
 )
+from PIL import Image
 from app.services.alive_ui import alive_ui_service
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,40 @@ def build_quote_keyboard(quote_id: int, likes: int = 0, dislikes: int = 0) -> In
     kb.button(text="📦 В стикерпак", callback_data=f"quote_sticker:{quote_id}")
     kb.adjust(2, 1)
     return kb.as_markup()
+
+
+def resize_for_sticker(image_data: bytes) -> bytes:
+    """
+    Ресайзит изображение для отправки как стикер.
+    Telegram требует максимум 512px по одной стороне.
+    
+    Args:
+        image_data: Исходные байты изображения
+        
+    Returns:
+        Байты изображения в формате WebP с размером до 512px
+    """
+    img = Image.open(BytesIO(image_data))
+    
+    # Определяем новый размер (максимум 512px по большей стороне)
+    max_size = 512
+    width, height = img.size
+    
+    if width > max_size or height > max_size:
+        if width > height:
+            new_width = max_size
+            new_height = int(height * (max_size / width))
+        else:
+            new_height = max_size
+            new_width = int(width * (max_size / height))
+        
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    # Сохраняем в WebP
+    output = BytesIO()
+    img.save(output, format='WEBP', quality=95)
+    output.seek(0)
+    return output.read()
 
 
 async def get_user_avatar(bot, user_id: int) -> Optional[bytes]:
@@ -194,12 +229,6 @@ async def cmd_quote(msg: Message):
         await msg.reply("❌ Нужно ответить на сообщение, чтобы сделать из него цитату.")
         return
 
-    # Проверяем, не пытаются ли цитировать сообщение бота
-    reply_user = msg.reply_to_message.from_user
-    if reply_user and reply_user.is_bot:
-        await msg.reply("❌ Нельзя цитировать сообщения ботов.")
-        return
-
     # Получаем текст команды
     command_text = msg.text.split(maxsplit=1)
     param = command_text[1].strip() if len(command_text) > 1 else None
@@ -329,10 +358,11 @@ async def _generate_single_message_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
-        # Подготавливаем изображение для отправки как фото (размер > 512px)
+        # Подготавливаем изображение для отправки как стикер (размер до 512px)
         image_io.seek(0)
         image_data = image_io.read()
-        photo_file = BufferedInputFile(image_data, filename="quote.webp")
+        sticker_data = resize_for_sticker(image_data)
+        sticker_file = BufferedInputFile(sticker_data, filename="quote.webp")
         
         # Сначала сохраняем в БД чтобы получить ID для кнопок
         # Для пересланных сообщений со скрытым аккаунтом используем ID того, кто переслал
@@ -350,9 +380,9 @@ async def _generate_single_message_quote(msg: Message):
         # Создаём клавиатуру с кнопками
         keyboard = build_quote_keyboard(quote_id)
         
-        # Отправляем как фото с кнопками
-        sent_msg = await msg.answer_photo(
-            photo=photo_file,
+        # Отправляем как стикер с кнопками
+        sent_msg = await msg.answer_sticker(
+            sticker=sticker_file,
             reply_markup=keyboard,
         )
         
@@ -464,10 +494,11 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         # Создаем изображение цепочки цитат (Requirement 7.3, 7.5)
         image_io = await create_quote_chain_image(messages)
         
-        # Подготавливаем изображение для отправки
+        # Подготавливаем изображение для отправки как стикер
         image_io.seek(0)
         image_data = image_io.read()
-        photo_file = BufferedInputFile(image_data, filename="quote_chain.webp")
+        sticker_data = resize_for_sticker(image_data)
+        sticker_file = BufferedInputFile(sticker_data, filename="quote_chain.webp")
         
         # Сначала сохраняем в БД чтобы получить ID для кнопок
         save_user_id = first_user_id if first_user_id else msg.from_user.id
@@ -485,8 +516,8 @@ async def _generate_multi_message_quote(msg: Message, count: int):
         # Создаём клавиатуру с кнопками
         keyboard = build_quote_keyboard(quote_id)
         
-        caption = f"💬 Цитата ({len(messages)} сообщ.)"
-        sent_msg = await msg.answer_photo(photo=photo_file, caption=caption, reply_markup=keyboard)
+        # Отправляем как стикер (caption не поддерживается для стикеров)
+        sent_msg = await msg.answer_sticker(sticker=sticker_file, reply_markup=keyboard)
         
         # Обновляем message_id в БД
         await update_quote_message_id(quote_id, sent_msg.message_id)
@@ -542,10 +573,11 @@ async def _generate_roast_quote(msg: Message):
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
         
-        # Подготавливаем изображение для отправки
+        # Подготавливаем изображение для отправки как стикер
         image_io.seek(0)
         image_data = image_io.read()
-        photo_file = BufferedInputFile(image_data, filename="quote_roast.webp")
+        sticker_data = resize_for_sticker(image_data)
+        sticker_file = BufferedInputFile(sticker_data, filename="quote_roast.webp")
         
         # Сначала сохраняем в БД чтобы получить ID для кнопок
         save_user_id = user_id if user_id else msg.from_user.id
@@ -563,10 +595,9 @@ async def _generate_roast_quote(msg: Message):
         # Создаём клавиатуру с кнопками
         keyboard = build_quote_keyboard(quote_id)
         
-        # Отправляем изображение как фото
-        sent_msg = await msg.answer_photo(
-            photo=photo_file,
-            caption="🔥 Режим прожарки активирован",
+        # Отправляем как стикер (caption не поддерживается для стикеров)
+        sent_msg = await msg.answer_sticker(
+            sticker=sticker_file,
             reply_markup=keyboard
         )
         
@@ -790,7 +821,9 @@ async def cb_quote_dislike(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("quote_sticker:"))
 async def cb_quote_sticker(callback: CallbackQuery):
-    """Обработчик добавления цитаты в стикерпак."""
+    """Обработчик добавления цитаты в стикерпак через Telegram API."""
+    from app.services.sticker_pack import sticker_pack_service
+    
     quote_id = int(callback.data.split(":")[1])
     
     # Проверяем права админа
@@ -806,8 +839,179 @@ async def cb_quote_sticker(callback: CallbackQuery):
         await callback.answer("Ошибка проверки прав", show_alert=True)
         return
     
-    # TODO: Реализовать добавление в стикерпак через Telegram API
-    await callback.answer("📦 Функция стикерпака в разработке", show_alert=True)
+    try:
+        # Получаем цитату из БД
+        async_session = get_session()
+        async with async_session() as session:
+            from sqlalchemy import select
+            from app.database.models import Quote
+            
+            quote_result = await session.execute(select(Quote).filter_by(id=quote_id))
+            quote = quote_result.scalars().first()
+            
+            if not quote:
+                await callback.answer("❌ Цитата не найдена", show_alert=True)
+                return
+            
+            if quote.is_sticker:
+                await callback.answer("ℹ️ Эта цитата уже в стикерпаке", show_alert=True)
+                return
+            
+            if not quote.image_data:
+                await callback.answer("❌ Изображение цитаты не найдено", show_alert=True)
+                return
+            
+            # Получаем информацию о боте
+            bot_info = await callback.bot.get_me()
+            bot_username = bot_info.username
+            
+            # Получаем название чата
+            chat_title = callback.message.chat.title or "Chat"
+            chat_id = callback.message.chat.id
+            
+            # Проверяем/создаём стикерпак
+            current_pack = await sticker_pack_service.get_current_pack(chat_id)
+            
+            # Ресайзим изображение для стикера
+            sticker_data = resize_for_sticker(quote.image_data)
+            sticker_file = BufferedInputFile(sticker_data, filename="sticker.webp")
+            
+            if current_pack is None:
+                # Создаём новый стикерпак — текущий пользователь становится владельцем
+                pack_name = f"oleg_quotes_{abs(chat_id)}_v1_by_{bot_username}"
+                pack_title = f"Цитаты Олега - {chat_title}"[:64]
+                owner_user_id = callback.from_user.id
+                
+                try:
+                    # Создаём стикерпак через Telegram API
+                    input_sticker = InputSticker(
+                        sticker=sticker_file,
+                        format="static",
+                        emoji_list=["💬"]
+                    )
+                    
+                    await callback.bot.create_new_sticker_set(
+                        user_id=owner_user_id,
+                        name=pack_name,
+                        title=pack_title,
+                        stickers=[input_sticker],
+                        sticker_type="regular"
+                    )
+                    
+                    # Сохраняем в БД с owner_user_id
+                    current_pack = await sticker_pack_service.create_new_pack(
+                        chat_id, chat_title, owner_user_id=owner_user_id
+                    )
+                    
+                    # Получаем file_id созданного стикера
+                    sticker_set = await callback.bot.get_sticker_set(pack_name)
+                    sticker_file_id = sticker_set.stickers[0].file_id if sticker_set.stickers else None
+                    
+                    # Обновляем цитату
+                    quote.is_sticker = True
+                    quote.sticker_file_id = sticker_file_id
+                    quote.sticker_pack_id = current_pack.id
+                    await session.commit()
+                    
+                    await callback.answer(f"✅ Создан стикерпак! Ты его владелец.", show_alert=True)
+                    logger.info(f"Created sticker pack {pack_name} with owner {owner_user_id}")
+                    return
+                    
+                except TelegramBadRequest as e:
+                    if "PEER_ID_INVALID" in str(e):
+                        await callback.answer("❌ Сначала напиши боту в ЛС", show_alert=True)
+                    elif "STICKERSET_INVALID" in str(e):
+                        await callback.answer("❌ Ошибка создания стикерпака", show_alert=True)
+                    else:
+                        logger.error(f"Error creating sticker pack: {e}")
+                        await callback.answer(f"❌ Ошибка: {str(e)[:100]}", show_alert=True)
+                    return
+            else:
+                # Добавляем в существующий стикерпак
+                # Используем owner_user_id из БД
+                owner_user_id = current_pack.owner_user_id
+                
+                if not owner_user_id:
+                    await callback.answer("❌ Владелец стикерпака не найден", show_alert=True)
+                    return
+                
+                try:
+                    # Проверяем, не заполнен ли пак
+                    if current_pack.sticker_count >= 120:
+                        # Создаём новый том с тем же владельцем
+                        rotated = await sticker_pack_service.rotate_pack_if_needed(chat_id, chat_title)
+                        if rotated:
+                            current_pack = rotated
+                            pack_name = current_pack.name
+                            pack_title = current_pack.title
+                            
+                            input_sticker = InputSticker(
+                                sticker=sticker_file,
+                                format="static",
+                                emoji_list=["💬"]
+                            )
+                            
+                            await callback.bot.create_new_sticker_set(
+                                user_id=owner_user_id,
+                                name=pack_name,
+                                title=pack_title,
+                                stickers=[input_sticker],
+                                sticker_type="regular"
+                            )
+                            
+                            sticker_set = await callback.bot.get_sticker_set(pack_name)
+                            sticker_file_id = sticker_set.stickers[0].file_id if sticker_set.stickers else None
+                            
+                            quote.is_sticker = True
+                            quote.sticker_file_id = sticker_file_id
+                            quote.sticker_pack_id = current_pack.id
+                            await session.commit()
+                            
+                            await callback.answer(f"✅ Создан новый том стикерпака!", show_alert=True)
+                            return
+                    
+                    # Добавляем стикер в существующий пак от имени владельца
+                    input_sticker = InputSticker(
+                        sticker=sticker_file,
+                        format="static",
+                        emoji_list=["💬"]
+                    )
+                    
+                    await callback.bot.add_sticker_to_set(
+                        user_id=owner_user_id,
+                        name=current_pack.name,
+                        sticker=input_sticker
+                    )
+                    
+                    # Получаем file_id добавленного стикера
+                    sticker_set = await callback.bot.get_sticker_set(current_pack.name)
+                    sticker_file_id = sticker_set.stickers[-1].file_id if sticker_set.stickers else None
+                    
+                    # Обновляем БД
+                    await sticker_pack_service.add_sticker(
+                        chat_id=chat_id,
+                        quote_id=quote_id,
+                        sticker_file_id=sticker_file_id,
+                        chat_title=chat_title
+                    )
+                    
+                    sticker_count = current_pack.sticker_count + 1
+                    await callback.answer(f"✅ Добавлено в стикерпак ({sticker_count}/120)", show_alert=True)
+                    logger.info(f"Added sticker for quote {quote_id} to pack {current_pack.name}")
+                    
+                except TelegramBadRequest as e:
+                    if "PEER_ID_INVALID" in str(e):
+                        await callback.answer("❌ Владелец пака должен написать боту в ЛС", show_alert=True)
+                    elif "STICKERSET_INVALID" in str(e) or "STICKER_SET_INVALID" in str(e):
+                        await callback.answer("❌ Стикерпак не найден в Telegram", show_alert=True)
+                    else:
+                        logger.error(f"Error adding sticker: {e}")
+                        await callback.answer(f"❌ Ошибка: {str(e)[:100]}", show_alert=True)
+                    return
+                    
+    except Exception as e:
+        logger.error(f"Error in cb_quote_sticker: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 
 @router.message(Command("qs"))

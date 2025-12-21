@@ -33,3 +33,14 @@ async def init_db():
 def get_session() -> async_sessionmaker[AsyncSession]:
     assert _async_session is not None, "DB is not initialized"
     return _async_session
+
+
+def async_session() -> AsyncSession:
+    """Контекстный менеджер для получения сессии БД.
+    
+    Использование:
+        async with async_session() as session:
+            ...
+    """
+    assert _async_session is not None, "DB is not initialized"
+    return _async_session()

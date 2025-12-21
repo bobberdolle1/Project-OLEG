@@ -20,7 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.models import GroupAdmin, GroupMeme, SDOCTopic
 from app.database.session import async_session
-from app.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 from app.utils import utc_now
 
 

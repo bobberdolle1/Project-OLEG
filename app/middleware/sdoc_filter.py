@@ -11,7 +11,9 @@ from aiogram import BaseMiddleware, Bot
 from aiogram.types import Message, ChatMemberUpdated
 
 from app.config import settings
-from app.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 from app.services.sdoc_service import sdoc_service
 
 

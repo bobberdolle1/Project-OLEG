@@ -916,6 +916,13 @@ async def cmd_whois(msg: Message):
         )
         db_user = db_user_result.scalars().first()
         
+        # Получаем игровую статистику
+        from app.database.models import GameStat
+        game_stat_result = await session.execute(
+            select(GameStat).where(GameStat.user_id == target_user_id)
+        )
+        game_stat = game_stat_result.scalars().first()
+        
         msg_count = await session.scalar(
             select(func.count(MessageLog.id)).where(
                 MessageLog.chat_id == msg.chat.id,
@@ -1021,13 +1028,13 @@ async def cmd_whois(msg: Message):
         lines.append(f"   📅 В чате с {first_msg_date.strftime('%d.%m.%Y')}")
     
     # Игровая статистика
-    if db_user:
+    if game_stat:
         game_stats = []
-        if db_user.pp_size and db_user.pp_size > 0:
-            game_stats.append(f"📏 {db_user.pp_size} см")
-        if db_user.coins and db_user.coins > 0:
-            game_stats.append(f"🪙 {db_user.coins}")
-        if db_user.reputation and db_user.reputation != 0:
+        if game_stat.pp_size and game_stat.pp_size > 0:
+            game_stats.append(f"📏 {game_stat.pp_size} см")
+        if game_stat.coins and game_stat.coins > 0:
+            game_stats.append(f"🪙 {game_stat.coins}")
+        if db_user and db_user.reputation and db_user.reputation != 0:
             rep_emoji = "⭐" if db_user.reputation > 0 else "💩"
             game_stats.append(f"{rep_emoji} {db_user.reputation}")
         if game_stats:

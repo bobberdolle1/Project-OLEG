@@ -60,7 +60,7 @@ async def _get_chat_context(msg: Message) -> str | None:
     """
     Получает контекст чата для передачи в LLM.
     
-    Включает: название чата, описание (если есть), тип чата.
+    Включает: название чата, описание (если есть), тип чата, текущий топик.
     Это помогает боту понимать где он находится и адаптировать ответы.
     
     Args:
@@ -87,6 +87,18 @@ async def _get_chat_context(msg: Message) -> str | None:
     if msg.chat.is_forum:
         chat_type = "форум с топиками"
     context_parts.append(f"Тип: {chat_type}")
+    
+    # Информация о текущем топике (для форумов)
+    topic_id = getattr(msg, 'message_thread_id', None)
+    if msg.chat.is_forum and topic_id:
+        from app.services.sdoc_service import SDOC_TOPICS
+        topic_info = SDOC_TOPICS.get(topic_id)
+        if topic_info:
+            context_parts.append(f"ТЕКУЩИЙ ТОПИК: «{topic_info['name']}» (id: {topic_id})")
+        else:
+            context_parts.append(f"Текущий топик ID: {topic_id}")
+    elif msg.chat.is_forum and not topic_id:
+        context_parts.append("Текущий топик: General (основной)")
     
     # Пробуем получить описание чата
     try:
@@ -141,7 +153,26 @@ async def _log_bot_response(chat_id: int, message_id: int, text: str, bot_userna
 @router.message(Command("start"))
 async def cmd_start(msg: Message):
     """Команда /start — приветствие."""
-    await msg.reply("Я Олег. Чё надо? Пиши по делу.")
+    # В группах игнорируем /start без @username бота
+    if msg.chat.type != "private":
+        # Проверяем, адресована ли команда именно этому боту
+        if msg.text and msg.bot._me:
+            bot_username = msg.bot._me.username
+            # /start@OlegBot — обрабатываем, /start — игнорируем
+            if bot_username and f"@{bot_username.lower()}" not in msg.text.lower():
+                return  # Не наша команда, игнорируем
+        # В группе — короткое представление
+        await msg.reply("Я Олег. Чё надо? Пиши по делу.")
+    else:
+        # В ЛС — дружелюбное приветствие без лишней инфы
+        welcome_text = (
+            "Здарова! Я Олег — твой персональный кибер-кентуха.\n\n"
+            "Пиши что хочешь — отвечу, помогу, поясню за железо. "
+            "Можешь скинуть фото — проанализирую, голосовое — распознаю.\n\n"
+            "Если нужна админка для твоих чатов — жми /admin\n"
+            "Справка по командам — /help"
+        )
+        await msg.reply(welcome_text)
 
 
 import random as _random
@@ -832,194 +863,185 @@ async def cmd_reset_context(msg: Message):
 @router.message(Command("whois"))
 async def cmd_whois(msg: Message):
     """
-    Показывает профиль пользователя из памяти Олега.
-    Использование: /whois, /whois @username, или реплай на сообщение
+    Показывает досье на пользователя — информацию которую Олег собрал из сообщений.
+    Использование: /whois (реплай) или /whois @username или /whois (свой профиль)
     """
-    logger.info(f"[CMD] /whois handler called by {msg.from_user.id}")
     from app.services.user_memory import user_memory
-    from app.services.vector_db import vector_db
-    import re
+    from app.database.session import get_session
+    from app.database.models import MessageLog, User
+    from sqlalchemy import select, func
     
     # Определяем целевого пользователя
-    target_user = None
     target_user_id = None
     target_username = None
     
-    # Парсим аргументы команды
-    args = msg.text.split(maxsplit=1)
-    if len(args) > 1:
-        # /whois @username или /whois username
-        username_arg = args[1].strip().lstrip('@')
-        if username_arg:
-            target_username = username_arg
-    
     if msg.reply_to_message and msg.reply_to_message.from_user:
-        # Реплай на сообщение — смотрим профиль автора
-        target_user = msg.reply_to_message.from_user
-        target_user_id = target_user.id
-        target_username = target_user.username or target_user.first_name
-    elif target_username:
-        # Ищем по username в сохранённых профилях
-        collection_name = user_memory._get_collection_name(msg.chat.id)
-        try:
-            # Поиск по username в метаданных
-            results = vector_db.search_facts(
-                collection_name=collection_name,
-                query=f"profile {target_username}",
-                n_results=10,
-                where={"type": "profile"}
-            )
-            for r in results:
-                meta = r.get('metadata', {})
-                stored_username = meta.get('username', '').lower()
-                if stored_username == target_username.lower():
-                    target_user_id = meta.get('user_id')
-                    break
-        except Exception as e:
-            logger.debug(f"Username search error: {e}")
-        
-        if not target_user_id:
-            await msg.reply(f"Не нашёл @{target_username} в памяти. Может, опечатка?")
-            return
+        # Реплай на сообщение
+        target_user_id = msg.reply_to_message.from_user.id
+        target_username = msg.reply_to_message.from_user.username or msg.reply_to_message.from_user.first_name
     else:
-        # Свой профиль
-        target_user = msg.from_user
-        target_user_id = msg.from_user.id
-        target_username = target_user.username or target_user.first_name
+        # Парсим аргументы команды
+        args = msg.text.split(maxsplit=1)
+        if len(args) > 1:
+            username_arg = args[1].strip().lstrip('@')
+            if username_arg:
+                # Ищем по username в БД
+                async with get_session()() as session:
+                    result = await session.execute(
+                        select(User).where(User.username == username_arg)
+                    )
+                    found_user = result.scalars().first()
+                    if found_user:
+                        target_user_id = found_user.tg_user_id
+                        target_username = found_user.username or found_user.first_name
+                    else:
+                        await msg.reply(f"Не нашёл @{username_arg} в базе.")
+                        return
+        else:
+            # Свой профиль
+            target_user_id = msg.from_user.id
+            target_username = msg.from_user.username or msg.from_user.first_name
     
     if not target_user_id:
-        await msg.reply("Не могу определить пользователя.")
+        await msg.reply("Ответь на сообщение или укажи @username")
         return
     
-    logger.info(f"[WHOIS] Looking for profile: chat={msg.chat.id}, user={target_user_id}, username={target_username}")
-    
-    # Получаем профиль
+    # Получаем профиль из памяти Олега
     profile = await user_memory.get_profile(msg.chat.id, target_user_id)
     
-    logger.info(f"[WHOIS] Profile found: {profile is not None}")
+    # Получаем базовую статистику из БД
+    async with get_session()() as session:
+        db_user_result = await session.execute(
+            select(User).where(User.tg_user_id == target_user_id)
+        )
+        db_user = db_user_result.scalars().first()
+        
+        msg_count = await session.scalar(
+            select(func.count(MessageLog.id)).where(
+                MessageLog.chat_id == msg.chat.id,
+                MessageLog.user_id == target_user_id
+            )
+        )
+        
+        first_msg_date = await session.scalar(
+            select(func.min(MessageLog.created_at)).where(
+                MessageLog.chat_id == msg.chat.id,
+                MessageLog.user_id == target_user_id
+            )
+        )
     
-    if not profile:
-        # Пробуем создать базовый профиль из данных БД
-        try:
-            from app.database.session import get_session
-            from app.database.models import MessageLog, User
-            from sqlalchemy import select, func
-            
-            async with get_session()() as session:
-                # Считаем сообщения пользователя в этом чате
-                msg_count = await session.scalar(
-                    select(func.count(MessageLog.id)).where(
-                        MessageLog.chat_id == msg.chat.id,
-                        MessageLog.user_id == target_user_id
-                    )
-                )
-                
-                # Получаем первое сообщение
-                first_msg = await session.scalar(
-                    select(func.min(MessageLog.created_at)).where(
-                        MessageLog.chat_id == msg.chat.id,
-                        MessageLog.user_id == target_user_id
-                    )
-                )
-                
-                if msg_count and msg_count > 0:
-                    # Создаём базовый профиль
-                    from app.services.user_memory import UserProfile
-                    profile = UserProfile(
-                        username=target_username,
-                        message_count=msg_count,
-                        first_seen=first_msg.isoformat() if first_msg else None
-                    )
-                    logger.info(f"[WHOIS] Created basic profile from DB: {msg_count} messages")
-        except Exception as e:
-            logger.warning(f"[WHOIS] Failed to create basic profile: {e}")
+    # Формируем досье
+    name = target_username or f"ID:{target_user_id}"
+    lines = [f"📋 <b>Досье: @{name}</b>"]
     
-    if not profile:
-        await msg.reply(f"Олег пока ничего не знает о @{target_username}.")
+    if not profile and msg_count == 0:
+        lines.append("\n<i>Олег ничего не знает об этом человеке.</i>")
+        await msg.reply("\n".join(lines), parse_mode="HTML")
         return
     
-    # Формируем компактный вывод — только то что реально есть
-    username = profile.username or target_username or f"ID:{target_user_id}"
-    parts = [f"<b>@{username}</b>"]
+    # Личная информация
+    if profile:
+        personal = []
+        if profile.name:
+            personal.append(f"Имя: {profile.name}")
+        if profile.age:
+            personal.append(f"{profile.age} лет")
+        if profile.city:
+            personal.append(f"📍 {profile.city}")
+        if profile.job:
+            personal.append(f"💼 {profile.job}")
+        if personal:
+            lines.append("\n👤 " + " • ".join(personal))
+        
+        # Железо
+        hardware = []
+        if profile.gpu:
+            hardware.append(f"GPU: {profile.gpu}")
+        if profile.cpu:
+            hardware.append(f"CPU: {profile.cpu}")
+        if profile.ram:
+            hardware.append(f"RAM: {profile.ram}")
+        if hardware:
+            lines.append("\n🖥 <b>Сетап:</b> " + " | ".join(hardware))
+        
+        # Устройства
+        devices = []
+        if profile.steam_deck:
+            deck_str = "Steam Deck"
+            if profile.steam_deck_mods:
+                deck_str += f" ({', '.join(profile.steam_deck_mods[:3])})"
+            devices.append(deck_str)
+        if profile.laptop:
+            devices.append(f"💻 {profile.laptop}")
+        if profile.console:
+            devices.append(f"🎮 {profile.console}")
+        if devices:
+            lines.append("📱 " + " | ".join(devices))
+        
+        # ОС
+        if profile.os or profile.distro:
+            os_str = profile.distro or profile.os
+            if profile.de:
+                os_str += f" + {profile.de}"
+            lines.append(f"💿 {os_str}")
+        
+        # Предпочтения
+        if profile.brand_preference:
+            lines.append(f"❤️ Фанат {profile.brand_preference.upper()}")
+        
+        # Экспертиза
+        if profile.expertise:
+            lines.append(f"🧠 Шарит в: {', '.join(profile.expertise[:4])}")
+        
+        # Игры
+        if profile.games:
+            lines.append(f"🎮 Играет: {', '.join(profile.games[:5])}")
+        
+        # Хобби
+        if profile.hobbies:
+            lines.append(f"🎯 Хобби: {', '.join(profile.hobbies[:4])}")
+        
+        # Языки программирования
+        if profile.languages:
+            lines.append(f"💻 Кодит на: {', '.join(profile.languages[:4])}")
+        
+        # Питомцы
+        if profile.pets:
+            lines.append(f"🐾 Питомцы: {', '.join(profile.pets)}")
+        
+        # Текущие проблемы
+        if profile.current_problems:
+            lines.append(f"\n⚠️ <b>Последняя проблема:</b> {profile.current_problems[-1][:80]}...")
     
-    # Личное (компактно в одну строку)
-    personal = []
-    if profile.name:
-        personal.append(profile.name)
-    if profile.age:
-        personal.append(f"{profile.age}")
-    if profile.city:
-        personal.append(profile.city)
-    if profile.job:
-        personal.append(profile.job)
-    if personal:
-        parts.append(", ".join(personal))
+    # Статистика
+    lines.append("\n📊 <b>Статистика:</b>")
+    if msg_count:
+        lines.append(f"   💬 {msg_count} сообщений в этом чате")
+    if first_msg_date:
+        lines.append(f"   📅 В чате с {first_msg_date.strftime('%d.%m.%Y')}")
     
-    # Железо (только если есть)
-    hw = []
-    if profile.gpu:
-        hw.append(profile.gpu)
-    if profile.cpu:
-        hw.append(profile.cpu)
-    if profile.ram:
-        hw.append(profile.ram)
-    if hw:
-        parts.append(f"🖥 {' / '.join(hw)}")
+    # Игровая статистика
+    if db_user:
+        game_stats = []
+        if db_user.pp_size and db_user.pp_size > 0:
+            game_stats.append(f"📏 {db_user.pp_size} см")
+        if db_user.coins and db_user.coins > 0:
+            game_stats.append(f"🪙 {db_user.coins}")
+        if db_user.reputation and db_user.reputation != 0:
+            rep_emoji = "⭐" if db_user.reputation > 0 else "💩"
+            game_stats.append(f"{rep_emoji} {db_user.reputation}")
+        if game_stats:
+            lines.append(f"   🎰 {' | '.join(game_stats)}")
     
-    # ОС (компактно)
-    if profile.distro:
-        os_str = profile.distro
-        if profile.de:
-            os_str += f" + {profile.de}"
-        parts.append(f"💻 {os_str}")
-    elif profile.os:
-        parts.append(f"💻 {profile.os}")
+    # Подсказка
+    if not profile or (not profile.gpu and not profile.games and not profile.expertise):
+        lines.append("\n<i>💡 Олег собирает инфу из сообщений. Чем больше пишешь — тем полнее досье.</i>")
     
-    # Устройства (только если есть)
-    devices = []
-    if profile.steam_deck:
-        deck = "Steam Deck"
-        if profile.steam_deck_mods:
-            deck += f" ({', '.join(profile.steam_deck_mods[:2])})"
-        devices.append(deck)
-    if profile.laptop:
-        devices.append(profile.laptop)
-    if profile.console:
-        devices.append(f"{profile.console} 🎮")
-    if devices:
-        parts.append(" | ".join(devices))
+    # Кнопка очистки для своего профиля
+    if target_user_id == msg.from_user.id and profile:
+        lines.append("\n<i>Хочешь стереть? /clearprofile</i>")
     
-    # Интересы (компактно)
-    interests = []
-    if profile.games:
-        interests.extend(profile.games[:3])
-    if profile.hobbies:
-        interests.extend(profile.hobbies[:2])
-    if interests:
-        parts.append(f"🎯 {', '.join(interests)}")
-    
-    # Экспертиза
-    if profile.expertise:
-        parts.append(f"🧠 {', '.join(profile.expertise[:3])}")
-    
-    # Предпочтения
-    if profile.brand_preference:
-        parts.append(f"❤️ {profile.brand_preference.upper()}")
-    
-    # Статистика (мелким шрифтом)
-    stats = []
-    if profile.message_count > 0:
-        stats.append(f"{profile.message_count} сообщ.")
-    if profile.first_seen:
-        stats.append(f"с {profile.first_seen[:10]}")
-    if stats:
-        parts.append(f"<i>{' • '.join(stats)}</i>")
-    
-    # Подсказка про очистку (только для своего профиля)
-    if target_user_id == msg.from_user.id and len(parts) > 2:
-        parts.append(f"<i>Ошибка? /clearprofile</i>")
-    
-    await msg.reply("\n".join(parts), parse_mode="HTML")
+    await msg.reply("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("mood"))
@@ -1117,6 +1139,127 @@ async def cmd_clearprofile(msg: Message):
     except Exception as e:
         logger.error(f"Error clearing profile: {e}")
         await msg.reply("❌ Не удалось очистить профиль. Попробуй позже.")
+
+
+# Доступные поля для редактирования профиля
+EDITABLE_PROFILE_FIELDS = {
+    "имя": "name",
+    "name": "name",
+    "город": "city",
+    "city": "city",
+    "работа": "job",
+    "job": "job",
+    "возраст": "age",
+    "age": "age",
+    "gpu": "gpu",
+    "видеокарта": "gpu",
+    "cpu": "cpu",
+    "процессор": "cpu",
+    "ram": "ram",
+    "память": "ram",
+    "os": "os",
+    "ос": "os",
+    "distro": "distro",
+    "дистрибутив": "distro",
+    "ноутбук": "laptop",
+    "laptop": "laptop",
+}
+
+
+@router.message(Command("editprofile"))
+async def cmd_editprofile(msg: Message):
+    """
+    Редактирует поле профиля пользователя.
+    
+    Использование:
+    /editprofile — показать доступные поля
+    /editprofile gpu RTX 4090 — установить GPU
+    /editprofile город Москва — установить город
+    /editprofile gpu — удалить значение GPU
+    """
+    from app.services.user_memory import user_memory, UserProfile
+    
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    username = msg.from_user.username or msg.from_user.first_name
+    
+    # Парсим аргументы
+    args = msg.text.split(maxsplit=2)
+    
+    if len(args) < 2:
+        # Показываем справку
+        fields_list = ", ".join(sorted(set(EDITABLE_PROFILE_FIELDS.keys())))
+        await msg.reply(
+            "✏️ <b>Редактирование профиля</b>\n\n"
+            "<b>Использование:</b>\n"
+            "<code>/editprofile поле значение</code> — установить\n"
+            "<code>/editprofile поле</code> — удалить значение\n\n"
+            f"<b>Доступные поля:</b>\n{fields_list}\n\n"
+            "<b>Примеры:</b>\n"
+            "<code>/editprofile gpu RTX 4090</code>\n"
+            "<code>/editprofile город Питер</code>\n"
+            "<code>/editprofile имя Вася</code>\n"
+            "<code>/editprofile gpu</code> — удалить GPU",
+            parse_mode="HTML"
+        )
+        return
+    
+    field_name = args[1].lower()
+    value = args[2].strip() if len(args) > 2 else None
+    
+    # Проверяем поле
+    if field_name not in EDITABLE_PROFILE_FIELDS:
+        await msg.reply(
+            f"❌ Неизвестное поле: {field_name}\n\n"
+            f"Доступные: {', '.join(sorted(set(EDITABLE_PROFILE_FIELDS.keys())))}"
+        )
+        return
+    
+    profile_field = EDITABLE_PROFILE_FIELDS[field_name]
+    
+    try:
+        # Получаем или создаём профиль
+        profile = await user_memory.get_profile(chat_id, user_id)
+        if not profile:
+            profile = UserProfile(user_id=user_id, username=username)
+        
+        # Обновляем поле
+        old_value = getattr(profile, profile_field, None)
+        
+        if profile_field == "age" and value:
+            # Возраст — число
+            try:
+                value = int(value)
+                if not (10 <= value <= 100):
+                    await msg.reply("❌ Возраст должен быть от 10 до 100")
+                    return
+            except ValueError:
+                await msg.reply("❌ Возраст должен быть числом")
+                return
+        
+        setattr(profile, profile_field, value)
+        
+        # Сохраняем
+        await user_memory.save_profile(chat_id, user_id, profile)
+        
+        # Формируем ответ
+        field_display = field_name.capitalize()
+        if value:
+            if old_value:
+                await msg.reply(f"✅ {field_display}: {old_value} → {value}")
+            else:
+                await msg.reply(f"✅ {field_display}: {value}")
+        else:
+            if old_value:
+                await msg.reply(f"🗑 {field_display} удалено (было: {old_value})")
+            else:
+                await msg.reply(f"ℹ️ {field_display} и так пустое")
+        
+        logger.info(f"Profile field {profile_field} updated for user {user_id}: {old_value} -> {value}")
+        
+    except Exception as e:
+        logger.error(f"Error editing profile: {e}")
+        await msg.reply("❌ Не удалось обновить профиль. Попробуй позже.")
 
 
 @router.message(Command("limit"))

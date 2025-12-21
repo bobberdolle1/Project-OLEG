@@ -1033,6 +1033,19 @@ async def cmd_quote_save(msg: Message):
     if not (msg.reply_to_message.photo or msg.reply_to_message.sticker):
         await msg.reply("❌ Можно добавлять в стикерпак только изображения цитат.")
         return
+    
+    # Проверяем права админа
+    try:
+        chat_member = await msg.bot.get_chat_member(
+            chat_id=msg.chat.id,
+            user_id=msg.from_user.id
+        )
+        if chat_member.status not in ["administrator", "creator"]:
+            await msg.reply("❌ Только админы могут добавлять в стикерпак")
+            return
+    except Exception:
+        await msg.reply("❌ Ошибка проверки прав")
+        return
 
     try:
         # Find the quote in the database by message ID
@@ -1051,7 +1064,6 @@ async def cmd_quote_save(msg: Message):
             quote = quote_result.scalars().first()
             
             if not quote:
-                # Quote not found in database - it might be a photo that wasn't created via /q
                 await msg.reply(
                     "❌ Эта цитата не найдена в базе данных. "
                     "Сначала создайте цитату командой /q, затем добавьте её в стикерпак."
@@ -1062,54 +1074,151 @@ async def cmd_quote_save(msg: Message):
                 await msg.reply("ℹ️ Эта цитата уже добавлена в стикерпак.")
                 return
             
+            if not quote.image_data:
+                await msg.reply("❌ Изображение цитаты не найдено")
+                return
+            
+            # Получаем информацию о боте
+            bot_info = await msg.bot.get_me()
+            bot_username = bot_info.username
+            
             # Get chat title for pack naming
             chat_title = msg.chat.title or "Chat"
+            chat_id = msg.chat.id
             
-            # Check if pack rotation is needed and get/create current pack
-            current_pack = await sticker_pack_service.get_current_pack(msg.chat.id)
+            # Проверяем/создаём стикерпак
+            current_pack = await sticker_pack_service.get_current_pack(chat_id)
+            
+            # Ресайзим изображение для стикера
+            sticker_data = resize_for_sticker(quote.image_data)
+            sticker_file = BufferedInputFile(sticker_data, filename="sticker.webp")
+            
             if current_pack is None:
-                current_pack = await sticker_pack_service.create_new_pack(msg.chat.id, chat_title)
-                await msg.reply(f"📦 Создан новый стикерпак: {current_pack.title}")
-            
-            # Check if pack is full and needs rotation (Requirement 8.2)
-            rotated_pack = await sticker_pack_service.rotate_pack_if_needed(msg.chat.id, chat_title)
-            if rotated_pack:
-                await msg.reply(f"📦 Стикерпак заполнен! Создан новый: {rotated_pack.title}")
-                current_pack = rotated_pack
-            
-            # For now, we mark the quote as a sticker candidate
-            # In a full implementation, we would use Telegram Bot API to actually add to sticker pack
-            # This requires the bot to be the owner of the sticker pack
-            
-            # Generate a placeholder sticker file ID (in real implementation, this comes from Telegram API)
-            placeholder_file_id = f"sticker_{quote.id}_{msg.chat.id}"
-            
-            # Add sticker to pack (Property 21: Sticker record update)
-            result = await sticker_pack_service.add_sticker(
-                chat_id=msg.chat.id,
-                quote_id=quote.id,
-                sticker_file_id=placeholder_file_id,
-                chat_title=chat_title
-            )
-            
-            if result.success:
-                pack_info = await sticker_pack_service.get_current_pack(msg.chat.id)
-                sticker_count = pack_info.sticker_count if pack_info else 0
+                # Создаём новый стикерпак — текущий пользователь становится владельцем
+                pack_name = f"oleg_quotes_{abs(chat_id)}_v1_by_{bot_username}"
+                pack_title = f"Цитаты Олега - {chat_title}"[:64]
+                owner_user_id = msg.from_user.id
                 
-                response = f"✅ Цитата добавлена в стикерпак!\n"
-                response += f"📦 Пак: {current_pack.title}\n"
-                response += f"🎯 Стикеров в паке: {sticker_count}/120"
-                
-                if result.pack_rotated:
-                    response += f"\n\n🔄 Был создан новый пак: {result.new_pack_name}"
-                
-                await msg.reply(response)
-                logger.info(
-                    f"User {msg.from_user.username} added quote {quote.id} to sticker pack "
-                    f"'{current_pack.name}' (now {sticker_count} stickers)"
-                )
+                try:
+                    input_sticker = InputSticker(
+                        sticker=sticker_file,
+                        format="static",
+                        emoji_list=["💬"]
+                    )
+                    
+                    await msg.bot.create_new_sticker_set(
+                        user_id=owner_user_id,
+                        name=pack_name,
+                        title=pack_title,
+                        stickers=[input_sticker],
+                        sticker_type="regular"
+                    )
+                    
+                    current_pack = await sticker_pack_service.create_new_pack(
+                        chat_id, chat_title, owner_user_id=owner_user_id
+                    )
+                    
+                    sticker_set = await msg.bot.get_sticker_set(pack_name)
+                    sticker_file_id = sticker_set.stickers[0].file_id if sticker_set.stickers else None
+                    
+                    quote.is_sticker = True
+                    quote.sticker_file_id = sticker_file_id
+                    quote.sticker_pack_id = current_pack.id
+                    await session.commit()
+                    
+                    await msg.reply(f"✅ Создан стикерпак! Ты его владелец.\n📦 Пак: {pack_title}")
+                    logger.info(f"Created sticker pack {pack_name} with owner {owner_user_id}")
+                    return
+                    
+                except TelegramBadRequest as e:
+                    if "PEER_ID_INVALID" in str(e):
+                        await msg.reply("❌ Сначала напиши боту в ЛС, потом попробуй снова")
+                    elif "STICKERSET_INVALID" in str(e):
+                        await msg.reply("❌ Ошибка создания стикерпака")
+                    else:
+                        logger.error(f"Error creating sticker pack: {e}")
+                        await msg.reply(f"❌ Ошибка: {str(e)[:100]}")
+                    return
             else:
-                await msg.reply(f"❌ Ошибка: {result.error}")
+                # Добавляем в существующий стикерпак
+                owner_user_id = current_pack.owner_user_id
+                
+                if not owner_user_id:
+                    await msg.reply("❌ Владелец стикерпака не найден")
+                    return
+                
+                try:
+                    if current_pack.sticker_count >= 120:
+                        rotated = await sticker_pack_service.rotate_pack_if_needed(chat_id, chat_title)
+                        if rotated:
+                            current_pack = rotated
+                            pack_name = current_pack.name
+                            
+                            input_sticker = InputSticker(
+                                sticker=sticker_file,
+                                format="static",
+                                emoji_list=["💬"]
+                            )
+                            
+                            await msg.bot.create_new_sticker_set(
+                                user_id=owner_user_id,
+                                name=pack_name,
+                                title=current_pack.title,
+                                stickers=[input_sticker],
+                                sticker_type="regular"
+                            )
+                            
+                            sticker_set = await msg.bot.get_sticker_set(pack_name)
+                            sticker_file_id = sticker_set.stickers[0].file_id if sticker_set.stickers else None
+                            
+                            quote.is_sticker = True
+                            quote.sticker_file_id = sticker_file_id
+                            quote.sticker_pack_id = current_pack.id
+                            await session.commit()
+                            
+                            await msg.reply(f"✅ Стикерпак заполнен! Создан новый: {current_pack.title}")
+                            return
+                    
+                    input_sticker = InputSticker(
+                        sticker=sticker_file,
+                        format="static",
+                        emoji_list=["💬"]
+                    )
+                    
+                    await msg.bot.add_sticker_to_set(
+                        user_id=owner_user_id,
+                        name=current_pack.name,
+                        sticker=input_sticker
+                    )
+                    
+                    sticker_set = await msg.bot.get_sticker_set(current_pack.name)
+                    sticker_file_id = sticker_set.stickers[-1].file_id if sticker_set.stickers else None
+                    
+                    await sticker_pack_service.add_sticker(
+                        chat_id=chat_id,
+                        quote_id=quote.id,
+                        sticker_file_id=sticker_file_id,
+                        chat_title=chat_title
+                    )
+                    
+                    quote.is_sticker = True
+                    quote.sticker_file_id = sticker_file_id
+                    quote.sticker_pack_id = current_pack.id
+                    await session.commit()
+                    
+                    sticker_count = current_pack.sticker_count + 1
+                    await msg.reply(f"✅ Добавлено в стикерпак ({sticker_count}/120)\n📦 Пак: {current_pack.title}")
+                    logger.info(f"Added sticker for quote {quote.id} to pack {current_pack.name}")
+                    
+                except TelegramBadRequest as e:
+                    if "PEER_ID_INVALID" in str(e):
+                        await msg.reply("❌ Владелец пака должен написать боту в ЛС")
+                    elif "STICKERSET_INVALID" in str(e) or "STICKER_SET_INVALID" in str(e):
+                        await msg.reply("❌ Стикерпак не найден в Telegram")
+                    else:
+                        logger.error(f"Error adding sticker: {e}")
+                        await msg.reply(f"❌ Ошибка: {str(e)[:100]}")
+                    return
 
     except TelegramBadRequest as e:
         if "thread not found" in str(e).lower() or "message to reply not found" in str(e).lower():

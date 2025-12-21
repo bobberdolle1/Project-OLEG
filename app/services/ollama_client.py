@@ -1650,7 +1650,11 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                     return await _ollama_chat(messages, model=fallback_chat, enable_tools=False)
                 except Exception as last_err:
                     logger.error(f"All fallbacks failed: {last_err}")
-                    await notify_owner_service_down("Ollama", f"Все модели недоступны")
+                    await notify_owner_service_down("Ollama", f"Все модели недоступны: {last_err}")
+        else:
+            # Fallback отключен — уведомляем о проблеме с основной моделью
+            error_type = type(e).__name__
+            await notify_owner_service_down("Ollama", f"Модель {active_model} недоступна: {error_type}")
         
         if isinstance(e, httpx.TimeoutException):
             return _get_error_response("timeout", "Сервер ИИ тупит. Попробуй позже, чемпион.")
@@ -1660,6 +1664,7 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
             return _get_error_response("connection", "Не могу достучаться до сервера ИИ. Проверь, запущен ли Ollama.")
     except Exception as e:
         logger.error(f"Unexpected error in generate_text_reply: {e}")
+        await notify_owner_service_down("Ollama", f"Неожиданная ошибка: {type(e).__name__}: {e}")
         return _get_error_response("unknown", "Что-то пошло не так. Попробуй ещё раз или обратись к админу.")
 
 

@@ -229,6 +229,10 @@ async def cmd_say(msg: Message):
     and sends it as a voice note. Uses EdgeTTSService with proper
     temp file lifecycle management (Create → Send → Delete).
     
+    Supports:
+    - /say <text> — озвучить текст
+    - /say (реплаем на сообщение) — озвучить текст из реплая
+    
     **Validates: Requirements 5.1, 15.1, 15.2, 15.3**
     
     Args:
@@ -240,9 +244,19 @@ async def cmd_say(msg: Message):
         # Remove the /say command prefix
         text = text.replace("/say", "", 1).strip()
     
+    # Если текст пустой, но есть реплай — берём текст из реплая
+    if not text and msg.reply_to_message:
+        reply = msg.reply_to_message
+        if reply.text:
+            text = reply.text
+        elif reply.caption:
+            text = reply.caption
+    
     if not text:
         await msg.reply(
-            "Напиши текст после команды, например: /say Привет, я Олег!",
+            "Напиши текст после команды или ответь на сообщение:\n"
+            "• <code>/say Привет, я Олег!</code>\n"
+            "• <code>/say</code> (реплаем на сообщение)",
             parse_mode="HTML"
         )
         return

@@ -431,18 +431,28 @@ class AdminPanelService:
                 # Дефолтные значения
                 auto_reply = 5
                 quotes = voice = vision = games = True
+                persona = "oleg"
             else:
                 auto_reply = config.auto_reply_chance
                 quotes = config.quotes_enabled
                 voice = config.voice_enabled
                 vision = config.vision_enabled
                 games = config.games_enabled
+                persona = getattr(config, 'persona', 'oleg') or 'oleg'
         finally:
             if close_session:
                 await session.close()
         
+        # Названия персон
+        persona_names = {
+            "oleg": "😎 Олег (дерзкий)",
+            "dude": "🎳 The Dude (расслабленный)",
+        }
+        current_persona = persona_names.get(persona, persona_names["oleg"])
+        
         text = (
             f"🤖 <b>Настройки бота</b>\n\n"
+            f"<b>Персона:</b> {current_persona}\n"
             f"<b>Автоответ:</b> {auto_reply}%\n"
             f"Шанс что бот ответит на случайное сообщение.\n\n"
             f"<b>Функции:</b>\n"
@@ -453,6 +463,16 @@ class AdminPanelService:
         )
         
         keyboard = InlineKeyboardBuilder()
+        
+        # Персона
+        keyboard.button(
+            text=f"{'🔘' if persona == 'oleg' else '⚪'} Олег",
+            callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_persona_oleg"
+        )
+        keyboard.button(
+            text=f"{'🔘' if persona == 'dude' else '⚪'} The Dude",
+            callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_persona_dude"
+        )
         
         # Автоответ
         keyboard.button(text="0%", callback_data=f"{CALLBACK_PREFIX}bot_{chat_id}_reply_0")
@@ -483,7 +503,7 @@ class AdminPanelService:
             callback_data=f"{CALLBACK_PREFIX}chat_{chat_id}"
         )
         
-        keyboard.adjust(4, 2, 2, 1)
+        keyboard.adjust(2, 4, 2, 2, 1)
         return text, keyboard.as_markup()
 
     

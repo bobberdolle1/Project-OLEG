@@ -5,7 +5,7 @@ import random
 import re
 import asyncio
 import time
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
@@ -25,6 +25,20 @@ from app.utils import utc_now, safe_reply
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+async def keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event):
+    """
+    Периодически отправляет статус 'typing' пока не установлен stop_event.
+    Telegram сбрасывает статус через 5 секунд, поэтому обновляем каждые 4 секунды.
+    """
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id, "typing")
+        except Exception:
+            pass  # Игнорируем ошибки
+        await asyncio.sleep(4)
+
 
 # Дебаунс для сообщений — если юзер шлёт несколько сообщений подряд, отвечаем только на последнее
 # Ключ: (chat_id, user_id), значение: (message_id, timestamp, asyncio.Task)
@@ -501,6 +515,10 @@ async def _process_qna_message(msg: Message):
     user = await ensure_user(msg.from_user)
 
     logger.info(f"[QNA PROCESS] Обрабатываем от {user_tag}: \"{text[:50]}...\"")
+    
+    # Запускаем фоновую задачу для поддержания статуса "печатает..."
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(keep_typing(msg.bot, msg.chat.id, stop_typing))
 
     try:
         # Получаем контекст чата (название, описание, тип)
@@ -738,6 +756,14 @@ async def _process_qna_message(msg: Message):
             await safe_reply(msg, "Сервер сломался. Но только ненадолго, обещаю.")
         except Exception:
             pass  # Игнорируем если не можем ответить
+    finally:
+        # Останавливаем статус "печатает..."
+        stop_typing.set()
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
 
 
 @router.message(Command("myhistory"))

@@ -1103,6 +1103,9 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    # Сразу отвечаем на callback чтобы не протух
+    await callback.answer("⏳ Выполняется...")
+    
     await callback.message.edit_text("🗑 <b>Выполняется вайп...</b>\n\n⏳ Подождите...")
     
     results = []
@@ -1228,7 +1231,6 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
         "📚 Дефолтные знания восстановлены.",
         reply_markup=kb.as_markup()
     )
-    await callback.answer("Вайп выполнен!", show_alert=True)
 
 
 # ============================================================================
@@ -2014,6 +2016,9 @@ async def cb_owner_wipe_rag_exec(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    # Сразу отвечаем на callback чтобы не протух (Telegram даёт ~30 сек)
+    await callback.answer("⏳ Выполняется...")
+    
     mode = callback.data.split(":")[1]  # restore или clean
     restore_default = mode == "restore"
     
@@ -2060,7 +2065,6 @@ async def cb_owner_wipe_rag_exec(callback: CallbackQuery):
         "\n".join(results),
         reply_markup=kb.as_markup()
     )
-    await callback.answer("Готово!", show_alert=True)
 
 
 @router.callback_query(F.data == "owner_wipe_games")
@@ -2096,6 +2100,7 @@ async def cb_owner_wipe_games_exec(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    await callback.answer("⏳ Выполняется...")
     await callback.message.edit_text("🎮 <b>Вайп игр...</b>\n\n⏳ Подождите...")
     
     results = []
@@ -2131,7 +2136,6 @@ async def cb_owner_wipe_games_exec(callback: CallbackQuery):
         "\n".join(results),
         reply_markup=kb.as_markup()
     )
-    await callback.answer("Готово!", show_alert=True)
 
 
 @router.callback_query(F.data == "owner_wipe_quotes")
@@ -2162,6 +2166,8 @@ async def cb_owner_wipe_quotes_exec(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    await callback.answer("⏳ Выполняется...")
+    
     try:
         from app.database.models import Quote
         from sqlalchemy import delete
@@ -2184,7 +2190,6 @@ async def cb_owner_wipe_quotes_exec(callback: CallbackQuery):
         f"💬 <b>Вайп цитат завершён</b>\n\n✅ Удалено: {count}",
         reply_markup=kb.as_markup()
     )
-    await callback.answer("Готово!", show_alert=True)
 
 
 @router.callback_query(F.data == "owner_wipe_messages")
@@ -2217,6 +2222,8 @@ async def cb_owner_wipe_messages_exec(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    await callback.answer("⏳ Выполняется...")
+    
     results = []
     try:
         from app.database.models import MessageLog, UserQuestionHistory
@@ -2242,7 +2249,6 @@ async def cb_owner_wipe_messages_exec(callback: CallbackQuery):
         "📝 <b>Вайп логов завершён</b>\n\n" + "\n".join(results),
         reply_markup=kb.as_markup()
     )
-    await callback.answer("Готово!", show_alert=True)
 
 
 @router.callback_query(F.data == "owner_wipe_users")
@@ -2277,6 +2283,8 @@ async def cb_owner_wipe_users_exec(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
+    await callback.answer("⏳ Выполняется...")
+    
     results = []
     try:
         from app.database.models import User, Chat, PrivateChat, Admin, Blacklist
@@ -2308,7 +2316,6 @@ async def cb_owner_wipe_users_exec(callback: CallbackQuery):
         "👥 <b>Вайп пользователей завершён</b>\n\n" + "\n".join(results),
         reply_markup=kb.as_markup()
     )
-    await callback.answer("Готово!", show_alert=True)
 
 
 @router.callback_query(F.data == "owner_wipe_achievements")

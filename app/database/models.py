@@ -645,7 +645,7 @@ class BotConfig(Base):
     games_enabled: Mapped[bool] = mapped_column(Boolean, default=True)   # Игровые команды
     
     # Время на принятие вызова в PvP/ПП (в секундах)
-    pvp_accept_timeout: Mapped[int] = mapped_column(Integer, default=60)  # 60 секунд по умолчанию
+    pvp_accept_timeout: Mapped[int] = mapped_column(Integer, default=120)  # 2 минуты по умолчанию
     
     # Персона бота: "oleg" (дерзкий) или "dude" (расслабленный The Dude)
     persona: Mapped[str] = mapped_column(String(20), default="oleg")

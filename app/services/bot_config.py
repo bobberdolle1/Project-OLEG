@@ -31,7 +31,7 @@ async def get_bot_config(chat_id: int) -> dict:
         "voice_enabled": True,
         "vision_enabled": True,
         "games_enabled": True,
-        "pvp_accept_timeout": 60,
+        "pvp_accept_timeout": 120,  # 2 минуты
     }
     
     try:
@@ -50,7 +50,7 @@ async def get_bot_config(chat_id: int) -> dict:
                     "voice_enabled": config.voice_enabled,
                     "vision_enabled": config.vision_enabled,
                     "games_enabled": config.games_enabled,
-                    "pvp_accept_timeout": getattr(config, 'pvp_accept_timeout', 60),
+                    "pvp_accept_timeout": getattr(config, 'pvp_accept_timeout', 120),
                 }
                 _config_cache[chat_id] = result
                 return result
@@ -85,7 +85,7 @@ async def get_pvp_accept_timeout(chat_id: int) -> int:
         chat_id: ID чата
         
     Returns:
-        Время в секундах (по умолчанию 60)
+        Время в секундах (по умолчанию 120 = 2 минуты)
     """
     config = await get_bot_config(chat_id)
-    return config.get("pvp_accept_timeout", 60)
+    return config.get("pvp_accept_timeout", 120)

@@ -1684,30 +1684,44 @@ async def pp_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     username = callback.from_user.first_name or "Аноним"
     
-    # Обработка принятия/отклонения вызова
-    if parts[0] == "accept" and len(parts) >= 2:
+    # Обработка принятия вызова (fight: или accept:)
+    if parts[0] in ("accept", "fight") and len(parts) >= 2:
         challenge_id = parts[1]
         challenge = pp_challenges.get(challenge_id)
         
         if not challenge:
             return await callback.answer("❌ Вызов истёк или не найден", show_alert=True)
         
-        # Проверяем таймаут
-        timeout = challenge.get("timeout", 60)
+        # Нельзя принять свой вызов
+        if user_id == challenge["challenger_id"]:
+            return await callback.answer("❌ Нельзя принять свой же вызов!", show_alert=True)
+        
+        # Проверяем таймаут (2 минуты = 120 сек)
+        timeout = challenge.get("timeout", 120)
         created_at = challenge.get("created_at")
         if created_at:
             elapsed = (utc_now() - created_at).total_seconds()
             if elapsed > timeout:
                 del pp_challenges[challenge_id]
-                return await callback.answer(f"❌ Время на принятие вызова истекло ({timeout} сек)!", show_alert=True)
+                return await callback.answer(f"❌ Время на принятие вызова истекло!", show_alert=True)
         
-        if user_id != challenge["target_id"]:
+        # Проверяем target_id: 0 или None = открытый вызов (любой может принять)
+        target_id = challenge.get("target_id", 0)
+        target_username = challenge.get("target_username")
+        
+        if target_id and target_id != 0 and user_id != target_id:
+            # Вызов адресован конкретному человеку
             return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
+        
+        # Если вызов по @username — проверяем username (case-insensitive)
+        if (not target_id or target_id == 0) and target_username:
+            user_tg_username = callback.from_user.username or ""
+            if user_tg_username.lower() != target_username.lower():
+                return await callback.answer(f"❌ Этот вызов для @{target_username}!", show_alert=True)
         
         # Проверяем что у цели хватает см для ставки
         target_size, _, _ = await get_or_create_game_stat(user_id)
         if target_size < challenge["bet"]:
-            del pp_challenges[challenge_id]
             return await callback.answer(f"❌ У тебя только {target_size} см, а ставка {challenge['bet']} см!", show_alert=True)
         
         # Выполняем битву
@@ -1730,7 +1744,9 @@ async def pp_callback(callback: CallbackQuery):
         if not challenge:
             return await callback.answer("❌ Вызов уже истёк", show_alert=True)
         
-        if user_id != challenge["target_id"]:
+        # Отклонить может только тот кому адресован вызов (или любой для открытого)
+        target_id = challenge.get("target_id", 0)
+        if target_id and target_id != 0 and user_id != target_id:
             return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
         
         del pp_challenges[challenge_id]
@@ -1790,15 +1806,15 @@ async def pp_callback(callback: CallbackQuery):
             return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
         
         size, _, _ = await get_or_create_game_stat(user_id)
-        if size < 10:
-            return await callback.answer("❌ Минимум 10 см для боя с Олегом!", show_alert=True)
+        if size < 1:
+            return await callback.answer("❌ Сначала вырасти пипиську через /grow!", show_alert=True)
         
-        # Олег имеет случайный размер от 50% до 150% от игрока
+        # Олег имеет случайный размер от 50% до 150% от игрока (минимум 5)
         oleg_size = random.randint(int(size * 0.5), int(size * 1.5))
-        oleg_size = max(10, oleg_size)
+        oleg_size = max(5, oleg_size)
         
-        # Ставка = 10% от размера игрока
-        bet = max(5, size // 10)
+        # Ставка = 10% от размера игрока (минимум 1)
+        bet = max(1, size // 10)
         
         # Выполняем битву
         result_text = await execute_pp_battle(
@@ -1870,49 +1886,6 @@ async def pp_callback(callback: CallbackQuery):
         
         await callback.message.edit_text(text, reply_markup=keyboard)
         await callback.answer(f"⚔️ Вызов создан! Ставка: {bet} см")
-    
-    elif action == "fight" and len(parts) >= 2:
-        # Кто-то принимает открытый вызов
-        challenge_id = parts[1]
-        challenge = pp_challenges.get(challenge_id)
-        
-        if not challenge:
-            return await callback.answer("❌ Вызов истёк или не найден", show_alert=True)
-        
-        # Проверяем таймаут
-        timeout = challenge.get("timeout", 60)
-        created_at = challenge.get("created_at")
-        if created_at:
-            elapsed = (utc_now() - created_at).total_seconds()
-            if elapsed > timeout:
-                del pp_challenges[challenge_id]
-                return await callback.answer(f"❌ Время на принятие вызова истекло ({timeout} сек)!", show_alert=True)
-        
-        if user_id == challenge["challenger_id"]:
-            return await callback.answer("❌ Нельзя биться с самим собой!", show_alert=True)
-        
-        # Проверяем, был ли вызов для конкретного юзера
-        target_username = challenge.get("target_username")
-        tg_username = callback.from_user.username
-        if target_username and target_username.lower() != (tg_username or "").lower():
-            return await callback.answer(f"❌ Этот вызов для @{target_username}!", show_alert=True)
-        
-        # Проверяем размер соперника
-        target_size, _, _ = await get_or_create_game_stat(user_id, tg_username)
-        if target_size < challenge["bet"]:
-            return await callback.answer(f"❌ У тебя только {target_size} см, а ставка {challenge['bet']} см!", show_alert=True)
-        
-        # Выполняем битву
-        result_text = await execute_pp_battle(
-            chat_id,
-            challenge["challenger_id"], challenge["challenger_name"], challenge["challenger_size"],
-            user_id, username, target_size,
-            challenge["bet"]
-        )
-        
-        del pp_challenges[challenge_id]
-        await callback.message.edit_text(result_text)
-        await callback.answer("⚔️ Битва завершена!")
     
     elif action == "cancel_challenge" and len(parts) >= 3:
         # Отмена вызова создателем

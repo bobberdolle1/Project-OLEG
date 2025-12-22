@@ -1435,14 +1435,9 @@ async def update_pp_stats(tg_user_id: int, won: bool) -> None:
 
 
 def get_pp_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Create PP game keyboard."""
+    """Create PP game keyboard (для callback-ов, если нужно)."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📏 Измерить", callback_data=f"{PP_PREFIX}{user_id}:measure"),
-            InlineKeyboardButton(text="🤖 Бой с Олегом", callback_data=f"{PP_PREFIX}{user_id}:pve"),
-        ],
-        [
-            InlineKeyboardButton(text="🧴 Использовать мазь", callback_data=f"{PP_PREFIX}{user_id}:cream"),
             InlineKeyboardButton(text="🏆 Топ", callback_data=f"{PP_PREFIX}{user_id}:top"),
         ]
     ])
@@ -1485,8 +1480,9 @@ async def cmd_pp(message: Message):
     """PP battle game - использует размер из /grow.
     
     Использование:
-    - /pp — показать статистику и меню
-    - /pp @username [ставка] — вызвать на бой
+    - /pp — открытый вызов на бой (любой может принять)
+    - /pp @username [ставка] — вызвать конкретного человека
+    - /pp [ставка] — открытый вызов со ставкой
     - Ответ на сообщение: /pp [ставка] — вызвать автора сообщения
     """
     user_id = message.from_user.id
@@ -1497,20 +1493,20 @@ async def cmd_pp(message: Message):
     # Парсим аргументы
     args = message.text.split()[1:] if message.text else []
     target_username = None
+    target_id = 0  # 0 = открытый вызов
     bet = 20  # Дефолтная ставка
     
-    # Проверяем reply
+    # Проверяем reply — вызов автора сообщения
     if message.reply_to_message and message.reply_to_message.from_user:
         target_user = message.reply_to_message.from_user
         if target_user.id == user_id:
             await message.reply("❌ Нельзя вызвать самого себя!")
             return
         if target_user.is_bot:
-            await message.reply("❌ Нельзя вызвать бота! Используй кнопку 'Бой с Олегом'")
+            await message.reply("❌ Нельзя вызвать бота! Используй /ppo для боя с Олегом")
             return
         target_username = target_user.username
         target_id = target_user.id
-        target_name = target_user.first_name or "Аноним"
         # Ставка из аргументов
         if args and args[0].isdigit():
             bet = int(args[0])
@@ -1519,52 +1515,33 @@ async def cmd_pp(message: Message):
         target_username = args[0][1:]  # Убираем @
         if len(args) > 1 and args[1].isdigit():
             bet = int(args[1])
-        # Нужно найти target_id по username — создаём открытый вызов
-        target_id = 0  # Будет определён при принятии
-        target_name = target_username
+        target_id = 0  # Будет определён при принятии по username
+    # Проверяем числовую ставку
+    elif args and args[0].isdigit():
+        bet = int(args[0])
+        target_id = 0  # Открытый вызов
+    # Просто /pp — открытый вызов с дефолтной ставкой
     else:
-        # Просто /pp — показываем статистику
-        size, wins, losses = await get_or_create_game_stat(user_id, tg_username)
-        
-        if size == 0:
-            text = (
-                f"🍆 <b>Пиписька {username}</b>\n\n"
-                f"❓ Размер: <b>неизвестен</b>\n\n"
-                f"Сначала используй /grow чтобы вырастить пипиську!\n\n"
-                f"<i>Вызов на бой: /pp @username [ставка]</i>"
-            )
-            await message.reply(text)
-            return
-        
-        emoji = get_pp_size_emoji(size)
-        bar = get_pp_bar(size)
-        
-        total_battles = wins + losses
-        winrate = (wins / total_battles * 100) if total_battles > 0 else 0
-        
-        text = (
-            f"🍆 <b>Пиписька {username}</b>\n\n"
-            f"{bar}\n\n"
-            f"📏 Размер: <b>{size} см</b> {emoji}\n"
-            f"⚔️ PvP: {wins}W / {losses}L ({winrate:.0f}%)\n\n"
-            f"<i>Вызов: /pp @username [ставка] или ответом</i>"
-        )
-        
-        await message.reply(text, reply_markup=get_pp_keyboard(user_id))
-        return
+        target_id = 0
     
-    # Создаём вызов на бой
-    size, _, _ = await get_or_create_game_stat(user_id, tg_username)
+    # Получаем размер игрока
+    size, wins, losses = await get_or_create_game_stat(user_id, tg_username)
     
     if size == 0:
-        await message.reply("❌ Сначала вырасти пипиську через /grow!")
+        text = (
+            f"🍆 <b>Пиписька {username}</b>\n\n"
+            f"❓ Размер: <b>неизвестен</b>\n\n"
+            f"Сначала используй /grow чтобы вырастить пипиську!\n\n"
+            f"<i>/pp — вызов на бой | /ppo — бой с Олегом</i>"
+        )
+        await message.reply(text)
         return
     
+    # Ограничиваем ставку
     if bet < 1:
         bet = 1
     if bet > size:
-        await message.reply(f"❌ У тебя только {size} см, а ставишь {bet}!")
-        return
+        bet = min(bet, size)
     
     # Получаем таймаут из настроек чата
     from app.services.bot_config import get_pvp_accept_timeout
@@ -1576,7 +1553,7 @@ async def cmd_pp(message: Message):
         "challenger_id": user_id,
         "challenger_name": username,
         "challenger_size": size,
-        "target_id": target_id if target_id else 0,
+        "target_id": target_id,
         "target_username": target_username,
         "bet": bet,
         "chat_id": chat_id,
@@ -1587,14 +1564,14 @@ async def cmd_pp(message: Message):
     bar = get_pp_bar(size)
     
     if target_username:
-        mention = f"@{target_username}" if target_username else "любого смельчака"
+        mention = f"@{target_username}"
         text = (
             f"⚔️ <b>ВЫЗОВ НА БИТВУ ПИПИСЕК!</b>\n\n"
             f"🍆 <b>{username}</b> вызывает {mention}!\n\n"
             f"{bar}\n"
             f"📏 Размер: <b>{size} см</b>\n"
             f"💰 Ставка: <b>{bet} см</b>\n"
-            f"⏱ Время на принятие: <b>{timeout} сек</b>\n\n"
+            f"⏱ Время: <b>{timeout} сек</b>\n\n"
             f"<i>У соперника должно быть минимум {bet} см!</i>"
         )
     else:
@@ -1604,7 +1581,7 @@ async def cmd_pp(message: Message):
             f"{bar}\n"
             f"📏 Размер: <b>{size} см</b>\n"
             f"💰 Ставка: <b>{bet} см</b>\n"
-            f"⏱ Время на принятие: <b>{timeout} сек</b>\n\n"
+            f"⏱ Время: <b>{timeout} сек</b>\n\n"
             f"<i>Кто осмелится принять бой?</i>"
         )
     
@@ -1614,6 +1591,73 @@ async def cmd_pp(message: Message):
     ])
     
     await message.reply(text, reply_markup=keyboard)
+
+
+@router.message(Command("ppo"))
+async def cmd_pp_oleg(message: Message):
+    """Бой с Олегом (PvE) - отдельная команда."""
+    user_id = message.from_user.id
+    username = message.from_user.first_name or "Аноним"
+    tg_username = message.from_user.username
+    chat_id = message.chat.id
+    
+    size, _, _ = await get_or_create_game_stat(user_id, tg_username)
+    
+    if size < 1:
+        await message.reply("❌ Сначала вырасти пипиську через /grow!")
+        return
+    
+    # Олег имеет случайный размер от 50% до 150% от игрока (минимум 5)
+    oleg_size = random.randint(int(size * 0.5), int(size * 1.5))
+    oleg_size = max(5, oleg_size)
+    
+    # Ставка = 10% от размера игрока (минимум 1)
+    bet = max(1, size // 10)
+    
+    # Выполняем битву
+    result_text = await execute_pp_battle(
+        chat_id,
+        user_id, username, size,
+        0, "Олег 🤖", oleg_size,
+        bet
+    )
+    
+    await message.reply(result_text)
+
+
+@router.message(Command("ppstats"))
+async def cmd_pp_stats(message: Message):
+    """Показать статистику пиписьки."""
+    user_id = message.from_user.id
+    username = message.from_user.first_name or "Аноним"
+    tg_username = message.from_user.username
+    
+    size, wins, losses = await get_or_create_game_stat(user_id, tg_username)
+    
+    if size == 0:
+        text = (
+            f"🍆 <b>Пиписька {username}</b>\n\n"
+            f"❓ Размер: <b>неизвестен</b>\n\n"
+            f"Сначала используй /grow чтобы вырастить пипиську!"
+        )
+        await message.reply(text)
+        return
+    
+    emoji = get_pp_size_emoji(size)
+    bar = get_pp_bar(size)
+    
+    total_battles = wins + losses
+    winrate = (wins / total_battles * 100) if total_battles > 0 else 0
+    
+    text = (
+        f"🍆 <b>Пиписька {username}</b>\n\n"
+        f"{bar}\n\n"
+        f"📏 Размер: <b>{size} см</b> {emoji}\n"
+        f"⚔️ PvP: {wins}W / {losses}L ({winrate:.0f}%)\n\n"
+        f"<i>/pp — вызов | /ppo — бой с Олегом</i>"
+    )
+    
+    await message.reply(text)
 
 
 async def execute_pp_battle(

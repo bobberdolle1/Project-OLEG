@@ -1812,39 +1812,8 @@ async def pp_callback(callback: CallbackQuery):
     
     action = parts[1]
     
-    # Измерить может только владелец
-    if action == "measure":
-        if user_id != owner_id:
-            return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)
-        
-        size, wins, losses = await get_or_create_game_stat(user_id)
-        
-        # Случайное изменение при измерении (-2 до +3)
-        change = random.randint(-2, 3)
-        new_size = await update_pp_size(user_id, change)
-        
-        if change > 0:
-            result = f"📈 Подросла на {change} см!"
-        elif change < 0:
-            result = f"📉 Усохла на {abs(change)} см... Бывает."
-        else:
-            result = "📊 Без изменений."
-        
-        bar = get_pp_bar(new_size)
-        emoji = get_pp_size_emoji(new_size)
-        
-        text = (
-            f"📏 <b>Измерение пиписьки</b>\n\n"
-            f"{bar}\n\n"
-            f"Было: {size} см\n"
-            f"Стало: <b>{new_size} см</b> {emoji}\n\n"
-            f"{result}"
-        )
-        
-        await callback.message.edit_text(text, reply_markup=get_pp_keyboard(user_id))
-        await callback.answer()
-    
-    elif action == "pve":
+    # pve теперь через /ppo, но оставим для совместимости со старыми кнопками
+    if action == "pve":
         # Бой с Олегом (PvE)
         if user_id != owner_id:
             return await callback.answer("❌ Это не твоя пиписька!", show_alert=True)

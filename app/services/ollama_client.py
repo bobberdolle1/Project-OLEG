@@ -366,7 +366,14 @@ async def notify_owner_model_restored(primary: str, fallback: str):
 
 
 async def notify_owner_service_down(service: str, details: str = ""):
-    """Уведомить владельца о недоступности сервиса."""
+    """Уведомить владельца о недоступности сервиса и сбросить кэш статуса."""
+    global _ollama_available, _ollama_check_time
+    
+    # Сбрасываем кэш доступности чтобы статус в /owner был актуальным
+    _ollama_available = False
+    _ollama_check_time = 0
+    _model_status_cache.clear()
+    
     cache_key = f"down_{service}"
     if cache_key in _owner_notified_cache:
         return
@@ -393,8 +400,6 @@ async def notify_owner_service_down(service: str, details: str = ""):
         logger.warning(f"Owner notified about service down: {service}")
     except Exception as e:
         logger.error(f"Failed to notify owner about service down: {e}")
-    _ollama_available = None
-    _ollama_check_time = 0
 
 
 def detect_loop_in_text(text: str, min_pattern_len: int = 20, max_repeats: int = 3) -> tuple[bool, str]:

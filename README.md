@@ -51,19 +51,24 @@
 
 ---
 
-## 🚀 Что нового в 7.9
+## 🚀 Что нового в 8.0
 
-### 🧠 Anti-Hallucination & Web Search — Главные фичи
+### 🎭 Система персон — Главная фича
 
 ```diff
-+ 🔍 SearXNG в Docker — свой поисковик без лимитов и блокировок
-+ 🌐 Умный веб-поиск — SearXNG → Brave → DuckDuckGo (с ротацией UA)
-+ 📚 База знаний 2025 — RTX 50, RX 9000, Ryzen 9000, Core Ultra в RAG
-+ � Fallbйack модели — автопереключение на gemma3:12b при недоступности cloud
-+ � Voice /Vision в старых топиках — исправлена ошибка "thread not found"
-+ 🛡️ Мультиязычная защита от injection — 8 языков, base64, zero-width
-+ � Различсение пользователей — Олег не путает людей в групповых чатах
-+ �  Контекст чата — бот знает название и описание чата
++ 🎭 8 уникальных персон — Олег, The Dude, Сталин, Аниме-тян, Трамп, Путин, Поздняков, Z-Гик
++ 🎲 Рандомный режим — смена персоны каждое сообщение/час/12ч/день
++ 🏠 SDOC Integration — Олег как резидент Steam Deck OC
++ 💍 Система браков — /marry, /divorce, /marriages
++ 😊 Реакции на реакты — Олег реагирует на ❤️👍🔥 и 👎💩
++ 🔒 PP Cage — защитный предмет для PP в магазине
++ 🍆 PP Battle v2 — /pp, /ppo, /ppstats с таймаутами
++ 👤 Досье v2 — /whois с категориями, /editprofile
++ 🖼️ Цитатник v3 — светлая тема, стикеры, улучшенные аватарки
++ 📊 Daily Summary v2 — LLM-группировка тем
++ ✨ Markdown в ответах — жирный, курсив, код
++ 🛡️ Улучшенная защита — whitelist коротких фраз
++ 🧪 15 property-based tests — Hypothesis
 ```
 
 ### 🎮 Mini Games & Economy (v7.5)
@@ -694,6 +699,20 @@ pytest tests/integration/
 
 ## 📈 Roadmap
 
+### ✅ Реализовано (v8.0 SDOC Edition)
+- [x] 🎭 Система персон — 8 уникальных персон с рандомным режимом
+- [x] 🏠 SDOC Integration — эксклюзивный режим, синхронизация админов
+- [x] 💍 Система браков — /marry, /divorce, /marriages
+- [x] 😊 Реакции на реакты — позитивные и негативные реакции
+- [x] 🔒 PP Cage — защитный предмет в магазине
+- [x] 🍆 PP Battle v2 — /pp, /ppo, /ppstats
+- [x] 👤 Досье v2 — /whois с категориями, /editprofile
+- [x] 🖼️ Цитатник v3 — светлая тема, стикеры, аватарки
+- [x] 📊 Daily Summary v2 — LLM-группировка тем
+- [x] ✨ Markdown в ответах — форматирование
+- [x] 🛡️ Улучшенная защита — whitelist коротких фраз
+- [x] 🧪 15 property-based tests — Hypothesis
+
 ### ✅ Реализовано (v7.9 Anti-Hallucination & Web Search)
 - [x] 🔍 SearXNG в Docker — свой поисковик без лимитов
 - [x] 🌐 Умный веб-поиск — SearXNG → Brave → DDG с ротацией UA
@@ -773,7 +792,7 @@ pytest tests/integration/
 - [x] Worker Process — Arq для тяжёлых задач
 - [x] Усиленная безопасность — HMAC, rate limiting
 
-### 🔜 В планах (v8.0)
+### 🔜 В планах (v8.1+)
 - [ ] Webhook mode для высоких нагрузок
 - [ ] Multi-language (i18n)
 - [ ] Plugin system

@@ -214,20 +214,25 @@ class StateManager:
             chat_id: Telegram chat ID
             
         Returns:
-            True if user has an active game session
+            True if user has an active game session (not expired)
         """
-        key = self._make_key(user_id, chat_id)
+        session = await self.get_session(user_id, chat_id)
+        if not session:
+            return False
         
-        # Try Redis first
-        if self._redis_client and self._redis_client.is_available:
-            try:
-                exists = await self._redis_client.exists(key)
-                return exists
-            except Exception as e:
-                logger.error(f"Redis error checking game status: {e}")
+        # Check if session is expired (30 min timeout)
+        try:
+            created = datetime.fromisoformat(session.created_at)
+            now = datetime.utcnow()
+            if (now - created).total_seconds() > SESSION_TIMEOUT:
+                # Session expired, clean it up
+                await self.end_game(user_id, chat_id)
+                logger.info(f"Auto-expired game session for user {user_id} in chat {chat_id}")
+                return False
+        except Exception as e:
+            logger.warning(f"Error checking session timeout: {e}")
         
-        # Fallback to in-memory
-        return key in self._memory_store
+        return True
     
     async def get_session(self, user_id: int, chat_id: int) -> Optional[GameSession]:
         """Get current game session for user.

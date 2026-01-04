@@ -611,6 +611,23 @@ def update_grow_history(gs: GameStat, gain: int) -> None:
     gs.grow_history = history
 
 
+@router.message(Command("cancel", "отмена"))
+async def cmd_cancel(msg: Message):
+    """Отменить текущую игру."""
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    
+    session = await state_manager.get_session(user_id, chat_id)
+    if not session:
+        return await msg.reply("🎮 У тебя нет активных игр.")
+    
+    game_type = session.game_type
+    await state_manager.end_game(user_id, chat_id)
+    
+    await msg.reply(f"✅ Игра {game_type} отменена. Можешь начать новую!")
+    logger.info(f"User {user_id} cancelled game {game_type} in chat {chat_id}")
+
+
 @router.message(F.text.startswith("/grow"))
 async def cmd_grow(msg: Message):
     """

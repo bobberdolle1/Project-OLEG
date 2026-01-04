@@ -27,7 +27,7 @@ class QuoteTheme(Enum):
 @dataclass
 class QuoteStyle:
     """Style configuration for quote rendering."""
-    theme: QuoteTheme = QuoteTheme.DARK
+    theme: QuoteTheme = QuoteTheme.LIGHT  # RC8: Changed default to LIGHT theme
     gradient: Optional[Tuple[str, str]] = None
     font_family: str = "DejaVuSans"
     avatar_style: str = "circle"
@@ -57,7 +57,7 @@ TELEGRAM_COLORS = {
     "bubble_light": (239, 255, 219),       # Light green bubble (outgoing)
     "bubble_incoming": (255, 255, 255),    # White bubble (incoming)
     "background_dark": (17, 17, 17),       # Dark mode background
-    "background_light": (230, 235, 240),   # Light mode background
+    "background_light": (240, 242, 245),   # RC8: Lighter, more pleasant background
     "text_dark": (255, 255, 255),          # White text
     "text_light": (0, 0, 0),               # Black text
     "username_colors": [                    # Telegram username colors

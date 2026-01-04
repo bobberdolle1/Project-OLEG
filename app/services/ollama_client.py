@@ -1074,6 +1074,16 @@ def _get_injection_response() -> str:
     return random.choice(INJECTION_RESPONSES)
 
 
+# Whitelist коротких безопасных фраз (Requirements 1.1, 1.2)
+SAFE_SHORT_PHRASES = {
+    "да", "нет", "ок", "окей", "ага", "угу", "хз",
+    "норм", "пон", "ясн", "лол", "кек", "го", "ладно",
+    "yes", "no", "ok", "okay", "yep", "nope", "sure",
+    "hi", "hey", "bye", "thx", "thanks", "lol", "kek",
+    "привет", "пока", "спс", "спасибо", "пж", "плз",
+}
+
+
 def _contains_prompt_injection(text: str) -> bool:
     """
     Проверяет, содержит ли текст потенциальную промпт-инъекцию.
@@ -1084,6 +1094,18 @@ def _contains_prompt_injection(text: str) -> bool:
     Returns:
         True, если обнаружена потенциальная промпт-инъекция
     """
+    stripped_text = text.strip()
+    
+    # Короткие сообщения (< 15 символов) безопасны (Requirements 1.1, 1.2)
+    if len(stripped_text) < 15:
+        logger.debug(f"[INJECTION] Short message passed: '{stripped_text}'")
+        return False
+    
+    # Whitelist безопасных коротких фраз (Requirements 1.1, 1.2)
+    if stripped_text.lower() in SAFE_SHORT_PHRASES:
+        logger.debug(f"[INJECTION] Safe phrase passed: '{stripped_text}'")
+        return False
+    
     # Сначала проверяем подозрительные паттерны (base64, капс, спецсимволы)
     if _check_suspicious_patterns(text):
         return True

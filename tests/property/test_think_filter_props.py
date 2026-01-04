@@ -23,11 +23,11 @@ _spec.loader.exec_module(_think_filter_module)
 ThinkTagFilter = _think_filter_module.ThinkTagFilter
 
 
-# Strategy for generating text that doesn't contain think tags
+# Strategy for generating text that doesn't contain think tags or markdown
 text_without_think_tags = st.text(
     alphabet=st.characters(
         blacklist_categories=('Cs',),  # Exclude surrogates
-        blacklist_characters='<>'  # Exclude angle brackets to avoid accidental tags
+        blacklist_characters='<>*_`#[]'  # Exclude angle brackets and markdown chars
     ),
     min_size=0,
     max_size=200

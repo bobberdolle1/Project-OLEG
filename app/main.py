@@ -30,6 +30,8 @@ from app.handlers.mini_games import router as mini_games_router
 from app.handlers.shop import router as shop_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
+from app.handlers.reactions import router as oleg_reactions_router
+from app.handlers.marriages import router as marriages_router
 from app.handlers import antiraid
 from app.middleware.logging import MessageLoggerMiddleware
 from app.middleware.spam_filter import SpamFilterMiddleware, load_spam_patterns
@@ -329,7 +331,9 @@ def build_dp() -> Dispatcher:
         stickers_router,  # Реакции на стикеры
         vision.router,  # Роутер для обработки изображений
         random_responses.router,  # Роутер для рандомных ответов
-        reactions_router,  # Роутер для обработки реакций
+        reactions_router,  # Роутер для обработки реакций на цитаты
+        oleg_reactions_router,  # Роутер для реакций на сообщения Олега (Requirements 8.x)
+        marriages_router,  # Роутер для системы браков (Requirements 9.x)
         content_downloader_router,  # Роутер для скачивания контента
         chat_join_router,  # Роутер для обработки событий добавления в чат
         topic_listener_router,  # Роутер для глобального слушателя топиков (RAG) - должен быть последним

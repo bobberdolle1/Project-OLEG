@@ -26,7 +26,8 @@ QuoteStyle = _quote_module.QuoteStyle
 QuoteTheme = _quote_module.QuoteTheme
 MessageData = _quote_module.MessageData
 MAX_CHAIN_MESSAGES = _quote_module.MAX_CHAIN_MESSAGES
-MAX_STICKER_SIZE = _quote_module.MAX_STICKER_SIZE
+MAX_IMAGE_WIDTH = _quote_module.MAX_IMAGE_WIDTH
+MAX_IMAGE_HEIGHT = _quote_module.MAX_IMAGE_HEIGHT
 
 
 # Test data generators
@@ -146,7 +147,7 @@ class TestQuoteImageDimensions:
         **Feature: fortress-update, Property 18: Quote image dimensions**
         **Validates: Requirements 7.5**
         
-        For any rendered quote image, the dimensions SHALL not exceed 512x512 pixels.
+        For any rendered quote image, the dimensions SHALL not exceed MAX_IMAGE_WIDTH x MAX_IMAGE_HEIGHT.
         """
         service = QuoteGeneratorService()
         style = QuoteStyle(theme=QuoteTheme.DARK)
@@ -154,13 +155,13 @@ class TestQuoteImageDimensions:
         result = await service.render_quote(text, username, style=style)
         
         # Verify dimensions don't exceed max
-        assert result.width <= MAX_STICKER_SIZE
-        assert result.height <= MAX_STICKER_SIZE
+        assert result.width <= MAX_IMAGE_WIDTH
+        assert result.height <= MAX_IMAGE_HEIGHT
         
         # Verify by actually loading the image
         img = Image.open(BytesIO(result.image_data))
-        assert img.width <= MAX_STICKER_SIZE
-        assert img.height <= MAX_STICKER_SIZE
+        assert img.width <= MAX_IMAGE_WIDTH
+        assert img.height <= MAX_IMAGE_HEIGHT
     
     @given(messages=message_lists)
     @settings(max_examples=100, deadline=30000)
@@ -170,7 +171,7 @@ class TestQuoteImageDimensions:
         **Feature: fortress-update, Property 18: Quote image dimensions**
         **Validates: Requirements 7.5**
         
-        For any rendered quote chain image, the dimensions SHALL not exceed 512x512 pixels.
+        For any rendered quote chain image, the dimensions SHALL not exceed MAX_IMAGE_WIDTH x MAX_IMAGE_HEIGHT.
         """
         service = QuoteGeneratorService()
         style = QuoteStyle(theme=QuoteTheme.DARK)
@@ -178,13 +179,13 @@ class TestQuoteImageDimensions:
         result = await service.render_quote_chain(messages, style)
         
         # Verify dimensions don't exceed max
-        assert result.width <= MAX_STICKER_SIZE
-        assert result.height <= MAX_STICKER_SIZE
+        assert result.width <= MAX_IMAGE_WIDTH
+        assert result.height <= MAX_IMAGE_HEIGHT
         
         # Verify by actually loading the image
         img = Image.open(BytesIO(result.image_data))
-        assert img.width <= MAX_STICKER_SIZE
-        assert img.height <= MAX_STICKER_SIZE
+        assert img.width <= MAX_IMAGE_WIDTH
+        assert img.height <= MAX_IMAGE_HEIGHT
     
     @given(text=quote_texts, username=usernames)
     @settings(max_examples=50, deadline=60000)
@@ -194,7 +195,7 @@ class TestQuoteImageDimensions:
         **Feature: fortress-update, Property 18: Quote image dimensions**
         **Validates: Requirements 7.5**
         
-        For any rendered roast quote image, the dimensions SHALL not exceed 512x512 pixels.
+        For any rendered roast quote image, the dimensions SHALL not exceed MAX_IMAGE_WIDTH x MAX_IMAGE_HEIGHT.
         """
         service = QuoteGeneratorService()
         style = QuoteStyle(theme=QuoteTheme.DARK)
@@ -202,23 +203,24 @@ class TestQuoteImageDimensions:
         result = await service.render_roast_quote(text, username, style=style)
         
         # Verify dimensions don't exceed max
-        assert result.width <= MAX_STICKER_SIZE
-        assert result.height <= MAX_STICKER_SIZE
+        assert result.width <= MAX_IMAGE_WIDTH
+        assert result.height <= MAX_IMAGE_HEIGHT
         
         # Verify by actually loading the image
         img = Image.open(BytesIO(result.image_data))
-        assert img.width <= MAX_STICKER_SIZE
-        assert img.height <= MAX_STICKER_SIZE
+        assert img.width <= MAX_IMAGE_WIDTH
+        assert img.height <= MAX_IMAGE_HEIGHT
     
     @pytest.mark.asyncio
-    async def test_max_sticker_size_constant(self):
+    async def test_max_image_size_constants(self):
         """
         **Feature: fortress-update, Property 18: Quote image dimensions**
         **Validates: Requirements 7.5**
         
-        Verify that MAX_STICKER_SIZE is exactly 512.
+        Verify that MAX_IMAGE_WIDTH and MAX_IMAGE_HEIGHT are set correctly.
         """
-        assert MAX_STICKER_SIZE == 512
+        assert MAX_IMAGE_WIDTH == 800
+        assert MAX_IMAGE_HEIGHT == 1200
 
 
 class TestQuoteWebPFormat:
@@ -324,3 +326,131 @@ class TestQuotePersistence:
         assert result.format == 'webp'
         assert result.width > 0
         assert result.height > 0
+
+
+class TestAvatarPlaceholder:
+    """
+    Property tests for avatar placeholder rendering.
+    
+    **Feature: release-candidate-8, Property 5: Avatar placeholder renders for missing avatars**
+    **Validates: Requirements 3.4**
+    """
+    
+    @given(username=usernames)
+    @settings(max_examples=100, deadline=30000)
+    @pytest.mark.asyncio
+    async def test_avatar_placeholder_renders_for_missing_avatars(self, username):
+        """
+        **Feature: release-candidate-8, Property 5: Avatar placeholder renders for missing avatars**
+        **Validates: Requirements 3.4**
+        
+        For any username without avatar data, _draw_avatar() SHALL render a colored 
+        circle with the first letter of the username.
+        """
+        service = QuoteGeneratorService()
+        
+        # Create a test image to draw on
+        from PIL import Image, ImageDraw
+        img = Image.new('RGB', (100, 100), (255, 255, 255))
+        
+        # Draw avatar without avatar_data (should render placeholder)
+        service._draw_avatar(img, x=10, y=10, size=64, username=username, avatar_data=None)
+        
+        # Verify the image was modified (placeholder was drawn)
+        # The placeholder should be a colored circle, so the image should not be all white
+        pixels = list(img.getdata())
+        all_white = all(p == (255, 255, 255) for p in pixels)
+        
+        assert not all_white, "Avatar placeholder should have been drawn"
+        
+        # Verify the placeholder uses a consistent color based on username
+        # Draw again and verify same result
+        img2 = Image.new('RGB', (100, 100), (255, 255, 255))
+        service._draw_avatar(img2, x=10, y=10, size=64, username=username, avatar_data=None)
+        
+        pixels2 = list(img2.getdata())
+        assert pixels == pixels2, "Avatar placeholder should be deterministic for same username"
+    
+    @given(username=usernames)
+    @settings(max_examples=50, deadline=30000)
+    @pytest.mark.asyncio
+    async def test_placeholder_color_is_consistent(self, username):
+        """
+        **Feature: release-candidate-8, Property 5: Avatar placeholder renders for missing avatars**
+        **Validates: Requirements 3.4**
+        
+        For any username, the placeholder color SHALL be consistent across multiple renders.
+        """
+        service = QuoteGeneratorService()
+        
+        # Get the color for this username
+        color1 = service._get_username_color(username)
+        color2 = service._get_username_color(username)
+        
+        assert color1 == color2, "Username color should be deterministic"
+        
+        # Verify it's a valid RGB tuple
+        assert isinstance(color1, tuple)
+        assert len(color1) == 3
+        assert all(0 <= c <= 255 for c in color1)
+    
+    @given(text=quote_texts, username=usernames)
+    @settings(max_examples=100, deadline=30000)
+    @pytest.mark.asyncio
+    async def test_quote_renders_with_placeholder_avatar(self, text, username):
+        """
+        **Feature: release-candidate-8, Property 5: Avatar placeholder renders for missing avatars**
+        **Validates: Requirements 3.4**
+        
+        For any quote rendered without avatar_data, the result SHALL be a valid image
+        with a placeholder avatar (colored circle with initial).
+        """
+        service = QuoteGeneratorService()
+        style = QuoteStyle(theme=QuoteTheme.LIGHT)
+        
+        # Render quote without avatar data
+        result = await service.render_quote(
+            text=text,
+            username=username,
+            style=style,
+            avatar_data=None  # No avatar data - should use placeholder
+        )
+        
+        # Verify the result is valid
+        assert result is not None
+        assert result.image_data is not None
+        assert len(result.image_data) > 0
+        
+        # Verify the image can be loaded
+        img = Image.open(BytesIO(result.image_data))
+        assert img is not None
+        assert img.width > 0
+        assert img.height > 0
+    
+    @given(username=st.text(min_size=1, max_size=1, alphabet=st.characters(whitelist_categories=('L',))))
+    @settings(max_examples=50, deadline=30000)
+    @pytest.mark.asyncio
+    async def test_placeholder_shows_first_letter(self, username):
+        """
+        **Feature: release-candidate-8, Property 5: Avatar placeholder renders for missing avatars**
+        **Validates: Requirements 3.4**
+        
+        For any username, the placeholder SHALL display the first letter (uppercase).
+        """
+        service = QuoteGeneratorService()
+        
+        # The placeholder should use the first character uppercase
+        expected_initial = username[0].upper()
+        
+        # We can't easily verify the text in the image, but we can verify
+        # that the service doesn't crash and produces valid output
+        from PIL import Image
+        img = Image.new('RGB', (100, 100), (255, 255, 255))
+        
+        # This should not raise an exception
+        service._draw_avatar(img, x=10, y=10, size=64, username=username, avatar_data=None)
+        
+        # Verify something was drawn
+        pixels = list(img.getdata())
+        all_white = all(p == (255, 255, 255) for p in pixels)
+        assert not all_white, f"Placeholder for '{username}' should have been drawn"

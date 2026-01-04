@@ -57,6 +57,9 @@ class ItemType(str, Enum):
     PP_CREAM_MEDIUM = "pp_cream_medium"
     PP_CREAM_LARGE = "pp_cream_large"
     PP_CREAM_TITAN = "pp_cream_titan"
+    
+    # PP Protection
+    PP_CAGE = "pp_cage"
 
 
 @dataclass
@@ -298,6 +301,17 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         effect={"pp_boost_min": 10, "pp_boost_max": 20},
         stackable=True,
     ),
+    
+    # PP Protection
+    ItemType.PP_CAGE: ItemInfo(
+        item_type=ItemType.PP_CAGE,
+        name="Пенис-клетка",
+        emoji="🔒",
+        description="Защищает PP от негативных эффектов, но блокирует рост. Действует 24 часа.",
+        price=1000,
+        effect={"protection": True, "blocks_growth": True, "duration_hours": 24},
+        stackable=False,
+    ),
 }
 
 
@@ -511,6 +525,176 @@ class InventoryService:
         """Check if user has an item."""
         item = await self.get_item(user_id, chat_id, item_type)
         return item is not None and item.quantity > 0
+    
+    async def has_active_item(self, user_id: int, chat_id: int, item_type: str) -> bool:
+        """
+        Check if user has an active (equipped and not expired) item.
+        
+        For time-limited items like PP_CAGE, checks if the item is equipped
+        and hasn't expired based on item_data.expires_at.
+        
+        Args:
+            user_id: Telegram user ID
+            chat_id: Chat ID
+            item_type: Item type to check
+            
+        Returns:
+            True if item is active, False otherwise
+        """
+        import json
+        from datetime import datetime, timezone
+        
+        item = await self.get_item(user_id, chat_id, item_type)
+        if not item or item.quantity <= 0 or not item.equipped:
+            return False
+        
+        # Check expiration for time-limited items
+        if item.item_data:
+            try:
+                data = json.loads(item.item_data)
+                expires_at_str = data.get("expires_at")
+                if expires_at_str:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    now = datetime.now(timezone.utc)
+                    if now > expires_at:
+                        return False
+            except (json.JSONDecodeError, ValueError):
+                pass
+        
+        return True
+    
+    async def activate_item(
+        self, user_id: int, chat_id: int, item_type: str
+    ) -> InventoryResult:
+        """
+        Activate a time-limited item like PP_CAGE.
+        
+        Sets the item as equipped and stores expiration time in item_data.
+        
+        Args:
+            user_id: Telegram user ID
+            chat_id: Chat ID
+            item_type: Item type to activate
+            
+        Returns:
+            InventoryResult with success status
+        """
+        import json
+        from datetime import datetime, timezone, timedelta
+        
+        if item_type not in ITEM_CATALOG:
+            return InventoryResult(False, f"Неизвестный предмет: {item_type}")
+        
+        item_info = ITEM_CATALOG[item_type]
+        
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type
+                )
+            )
+            item = result.scalars().first()
+            
+            if not item or item.quantity <= 0:
+                return InventoryResult(False, f"У тебя нет {item_info.emoji} {item_info.name}")
+            
+            # Check if already active
+            if item.equipped and item.item_data:
+                try:
+                    data = json.loads(item.item_data)
+                    expires_at_str = data.get("expires_at")
+                    if expires_at_str:
+                        expires_at = datetime.fromisoformat(expires_at_str)
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        now = datetime.now(timezone.utc)
+                        if now < expires_at:
+                            remaining = expires_at - now
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            return InventoryResult(
+                                False, 
+                                f"{item_info.emoji} {item_info.name} уже активна! Осталось: {hours}ч {minutes}м",
+                                item_info,
+                                item.quantity
+                            )
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            
+            # Calculate expiration time
+            duration_hours = item_info.effect.get("duration_hours", 24)
+            now = datetime.now(timezone.utc)
+            expires_at = now + timedelta(hours=duration_hours)
+            
+            # Update item
+            item.equipped = True
+            item.item_data = json.dumps({
+                "activated_at": now.isoformat(),
+                "expires_at": expires_at.isoformat()
+            })
+            
+            await session.commit()
+            
+            return InventoryResult(
+                True,
+                f"🔒 {item_info.name} активирована на {duration_hours} часов!",
+                item_info,
+                item.quantity
+            )
+    
+    async def deactivate_item(
+        self, user_id: int, chat_id: int, item_type: str
+    ) -> InventoryResult:
+        """
+        Deactivate (remove) a time-limited item like PP_CAGE.
+        
+        Removes the item from inventory entirely.
+        
+        Args:
+            user_id: Telegram user ID
+            chat_id: Chat ID
+            item_type: Item type to deactivate
+            
+        Returns:
+            InventoryResult with success status
+        """
+        if item_type not in ITEM_CATALOG:
+            return InventoryResult(False, f"Неизвестный предмет: {item_type}")
+        
+        item_info = ITEM_CATALOG[item_type]
+        
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserInventory).where(
+                    UserInventory.user_id == user_id,
+                    UserInventory.chat_id == chat_id,
+                    UserInventory.item_type == item_type
+                )
+            )
+            item = result.scalars().first()
+            
+            if not item or item.quantity <= 0:
+                return InventoryResult(False, f"У тебя нет {item_info.emoji} {item_info.name}")
+            
+            if not item.equipped:
+                return InventoryResult(False, f"{item_info.emoji} {item_info.name} не активна")
+            
+            # Remove the item
+            await session.delete(item)
+            await session.commit()
+            
+            return InventoryResult(
+                True,
+                f"🔓 {item_info.name} снята!",
+                item_info,
+                0
+            )
     
     def get_item_info(self, item_type: str) -> Optional[ItemInfo]:
         """Get item info from catalog."""

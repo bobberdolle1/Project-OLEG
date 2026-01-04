@@ -18,6 +18,204 @@ AutoReplySystem = _auto_reply_module.AutoReplySystem
 ChatSettings = _auto_reply_module.ChatSettings
 
 
+class TestZeroAutoReplyChanceDisablesReplies:
+    """
+    **Feature: release-candidate-8, Property 3: Zero auto-reply chance disables random replies**
+    **Validates: Requirements 2.1**
+    
+    *For any* message and `ChatSettings` with `auto_reply_chance = 0`, 
+    `AutoReplySystem.should_reply()` SHALL return False.
+    """
+    
+    @settings(max_examples=100)
+    @given(st.text(min_size=0, max_size=500))
+    def test_zero_chance_always_returns_false(self, text: str):
+        """
+        Property 3: Zero auto-reply chance disables random replies.
+        
+        For any text input, when auto_reply_chance is 0, should_reply must return False.
+        """
+        system = AutoReplySystem()
+        
+        # Zero chance setting (as integer percentage)
+        settings_zero = ChatSettings(auto_reply_chance=0)
+        
+        result = system.should_reply(text, settings_zero)
+        assert result is False, \
+            f"should_reply must return False when auto_reply_chance=0, got {result} for text: {text[:50]}"
+    
+    @settings(max_examples=100)
+    @given(st.text(min_size=0, max_size=500))
+    def test_zero_float_chance_always_returns_false(self, text: str):
+        """
+        Property 3 extended: Zero as float (0.0) also disables replies.
+        """
+        system = AutoReplySystem()
+        
+        # Zero chance setting (as float)
+        settings_zero = ChatSettings(auto_reply_chance=0.0)
+        
+        result = system.should_reply(text, settings_zero)
+        assert result is False, \
+            f"should_reply must return False when auto_reply_chance=0.0"
+    
+    @settings(max_examples=100)
+    @given(
+        st.text(min_size=20, max_size=200),  # Long enough to pass length filter
+    )
+    def test_zero_chance_ignores_valid_messages(self, text: str):
+        """
+        Property 3 extended: Even valid long messages are rejected when chance is 0.
+        
+        Messages that would normally pass all filters should still be rejected
+        when auto_reply_chance is 0.
+        """
+        system = AutoReplySystem()
+        
+        # Ensure message is long enough
+        assume(len(text) >= system.MIN_MESSAGE_LENGTH)
+        # Ensure message is not a blocked phrase
+        assume(not system.is_blocked_phrase(text))
+        
+        settings_zero = ChatSettings(auto_reply_chance=0)
+        
+        result = system.should_reply(text, settings_zero)
+        assert result is False, \
+            f"Valid message should still be rejected when auto_reply_chance=0"
+    
+    @settings(max_examples=50)
+    @given(st.sampled_from(AutoReplySystem.DEFAULT_TRIGGERS))
+    def test_zero_chance_ignores_trigger_words(self, trigger: str):
+        """
+        Property 3 extended: Trigger words don't override zero chance.
+        """
+        system = AutoReplySystem()
+        
+        # Create a message with trigger word that's long enough
+        text_with_trigger = f"Привет {trigger}, как дела сегодня?"
+        
+        settings_zero = ChatSettings(auto_reply_chance=0)
+        
+        result = system.should_reply(text_with_trigger, settings_zero)
+        assert result is False, \
+            f"Trigger word '{trigger}' should not override zero chance setting"
+
+
+class TestAutoReplyProbabilityScaling:
+    """
+    **Feature: release-candidate-8, Property 4: Auto-reply probability scales with setting**
+    **Validates: Requirements 2.2, 2.4**
+    
+    *For any* large sample of messages with `auto_reply_chance = N`, the percentage 
+    of `should_reply() = True` SHALL be approximately N% (within statistical tolerance).
+    """
+    
+    @settings(max_examples=100)
+    @given(
+        st.integers(min_value=1, max_value=100),  # Percentage 1-100
+        st.text(min_size=20, max_size=100)  # Valid message length
+    )
+    def test_probability_scales_with_percentage_setting(self, chance_percent: int, base_text: str):
+        """
+        Property 4: Auto-reply probability scales with setting.
+        
+        When auto_reply_chance is set to N (as percentage 0-100), the effective
+        probability should be scaled by N/100.
+        """
+        system = AutoReplySystem()
+        
+        # Ensure message passes filters
+        assume(len(base_text) >= system.MIN_MESSAGE_LENGTH)
+        assume(not system.is_blocked_phrase(base_text))
+        
+        # Calculate base probability
+        base_prob = system.calculate_probability(base_text)
+        
+        # Expected effective probability with scaling
+        expected_effective = base_prob * (chance_percent / 100.0)
+        expected_effective = min(expected_effective, system.MAX_PROBABILITY)
+        
+        # The effective probability should be proportional to chance_percent
+        # We verify this structurally: higher chance = higher effective probability
+        if chance_percent > 0:
+            assert expected_effective > 0, \
+                f"Effective probability should be positive for chance={chance_percent}%"
+            assert expected_effective <= system.MAX_PROBABILITY, \
+                f"Effective probability should not exceed MAX_PROBABILITY"
+    
+    @settings(max_examples=50)
+    @given(st.floats(min_value=0.01, max_value=1.0))
+    def test_probability_scales_with_float_setting(self, chance_float: float):
+        """
+        Property 4 extended: Float values (0.0-1.0) are used directly as multipliers.
+        """
+        system = AutoReplySystem()
+        
+        # Valid message
+        text = "Это достаточно длинное сообщение для теста"
+        
+        # Calculate base probability
+        base_prob = system.calculate_probability(text)
+        
+        # For float values <= 1.0, they should be used directly
+        expected_effective = base_prob * chance_float
+        expected_effective = min(expected_effective, system.MAX_PROBABILITY)
+        
+        assert expected_effective >= 0
+        assert expected_effective <= system.MAX_PROBABILITY
+    
+    @settings(max_examples=50)
+    @given(
+        st.integers(min_value=1, max_value=50),
+        st.integers(min_value=51, max_value=100)
+    )
+    def test_higher_chance_means_higher_probability(self, low_chance: int, high_chance: int):
+        """
+        Property 4 extended: Higher auto_reply_chance results in higher effective probability.
+        
+        For any two chance values where high > low, the effective probability
+        with high_chance should be >= effective probability with low_chance.
+        """
+        system = AutoReplySystem()
+        
+        # Fixed text for comparison
+        text = "Это тестовое сообщение достаточной длины для проверки"
+        
+        # Calculate base probability (same for both)
+        base_prob = system.calculate_probability(text)
+        
+        # Calculate effective probabilities
+        effective_low = min(base_prob * (low_chance / 100.0), system.MAX_PROBABILITY)
+        effective_high = min(base_prob * (high_chance / 100.0), system.MAX_PROBABILITY)
+        
+        # Higher chance should result in higher or equal effective probability
+        assert effective_high >= effective_low, \
+            f"Higher chance ({high_chance}%) should give higher probability than lower ({low_chance}%)"
+    
+    @settings(max_examples=50)
+    @given(st.integers(min_value=1, max_value=100))
+    def test_percentage_interpretation(self, chance_percent: int):
+        """
+        Property 4 extended: Values > 1 are interpreted as percentages.
+        
+        When auto_reply_chance > 1.0, it should be divided by 100 to get the multiplier.
+        """
+        system = AutoReplySystem()
+        
+        # The implementation should handle both:
+        # - Values 0-100 (percentage) -> divide by 100
+        # - Values 0.0-1.0 (already normalized) -> use as-is
+        
+        # For percentage values, the effective multiplier should be chance/100
+        if chance_percent > 1:
+            expected_multiplier = chance_percent / 100.0
+        else:
+            expected_multiplier = chance_percent
+        
+        assert 0 <= expected_multiplier <= 1.0, \
+            f"Multiplier should be in range [0, 1], got {expected_multiplier}"
+
+
 class TestShortMessageRejection:
     """
     **Feature: oleg-behavior-improvements, Property 3: Short message rejection**

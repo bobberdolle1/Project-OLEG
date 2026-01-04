@@ -148,24 +148,45 @@ def get_inventory_keyboard(user_id: int, items: list) -> InlineKeyboardMarkup:
 @router.message(Command("fish"))
 async def cmd_fish(message: Message):
     """Start fishing game."""
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    balance = await get_user_balance(user_id, chat_id)
-    
-    # Get equipped rod
-    equipped_rod = await inventory_service.get_equipped_rod(user_id, chat_id)
-    rod_bonus = int(equipped_rod.effect.get("rod_bonus", 0) * 100)
-    
-    text = (
-        "🎣 <b>РЫБАЛКА</b>\n\n"
-        "Лови рыбу и продавай за монеты!\n"
-        f"🎣 Удочка: {equipped_rod.emoji} {equipped_rod.name}\n"
-        f"📈 Бонус: +{rod_bonus}% к редким рыбам\n\n"
-        f"💰 Баланс: {balance} монет\n\n"
-        "Нажми «Забросить» чтобы начать!"
-    )
-    
-    await message.reply(text, reply_markup=get_fishing_keyboard(user_id), parse_mode="HTML")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        balance = await get_user_balance(user_id, chat_id)
+        
+        # Get equipped rod with fallback to basic rod
+        try:
+            equipped_rod = await inventory_service.get_equipped_rod(user_id, chat_id)
+        except Exception as rod_error:
+            logger.warning(f"Failed to get equipped rod for user {user_id}: {rod_error}")
+            # Fallback to basic rod from catalog
+            equipped_rod = ITEM_CATALOG.get(ItemType.BASIC_ROD)
+            if not equipped_rod:
+                # Ultimate fallback - create minimal rod info
+                from app.services.inventory import ItemInfo
+                equipped_rod = ItemInfo(
+                    item_type="basic_rod",
+                    name="Базовая удочка",
+                    emoji="🎣",
+                    description="Простая удочка для начинающих",
+                    price=0,
+                    effect={"rod_bonus": 0.0}
+                )
+        
+        rod_bonus = int(equipped_rod.effect.get("rod_bonus", 0) * 100)
+        
+        text = (
+            "🎣 <b>РЫБАЛКА</b>\n\n"
+            "Лови рыбу и продавай за монеты!\n"
+            f"🎣 Удочка: {equipped_rod.emoji} {equipped_rod.name}\n"
+            f"📈 Бонус: +{rod_bonus}% к редким рыбам\n\n"
+            f"💰 Баланс: {balance} монет\n\n"
+            "Нажми «Забросить» чтобы начать!"
+        )
+        
+        await message.reply(text, reply_markup=get_fishing_keyboard(user_id), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Fishing error for user {message.from_user.id}: {e}")
+        await message.reply("🎣 Упс, удочка сломалась. Попробуй позже!")
 
 
 @router.callback_query(F.data.startswith(FISH_PREFIX))
@@ -186,33 +207,44 @@ async def callback_fishing(callback: CallbackQuery):
         return await callback.answer()
     
     if action == "cast":
-        # Get equipped rod bonus
-        equipped_rod = await inventory_service.get_equipped_rod(user_id, chat_id)
-        rod_bonus = equipped_rod.effect.get("rod_bonus", 0.0)
-        
-        result = fishing_game.cast(user_id, rod_bonus)
-        
-        if not result.success:
-            return await callback.answer(result.message, show_alert=True)
-        
-        # Record catch in stats
-        if result.fish:
-            await fishing_stats_service.record_catch(
-                user_id, chat_id, 
-                result.fish.rarity.value, 
-                result.fish.name,
-                result.coins_earned
-            )
-        
-        # Add coins
-        if result.coins_earned > 0:
-            new_balance = await update_user_balance(user_id, chat_id, result.coins_earned)
-        else:
-            new_balance = await get_user_balance(user_id, chat_id)
-        
-        text = f"{result.message}\n\n💰 Баланс: {new_balance} монет"
-        await callback.message.edit_text(text, reply_markup=get_fishing_keyboard(user_id), parse_mode="HTML")
-        await callback.answer()
+        try:
+            # Get equipped rod bonus with fallback
+            try:
+                equipped_rod = await inventory_service.get_equipped_rod(user_id, chat_id)
+                rod_bonus = equipped_rod.effect.get("rod_bonus", 0.0)
+            except Exception as rod_error:
+                logger.warning(f"Failed to get equipped rod for user {user_id}: {rod_error}")
+                rod_bonus = 0.0
+            
+            result = fishing_game.cast(user_id, rod_bonus)
+            
+            if not result.success:
+                return await callback.answer(result.message, show_alert=True)
+            
+            # Record catch in stats
+            if result.fish:
+                try:
+                    await fishing_stats_service.record_catch(
+                        user_id, chat_id, 
+                        result.fish.rarity.value, 
+                        result.fish.name,
+                        result.coins_earned
+                    )
+                except Exception as stats_error:
+                    logger.warning(f"Failed to record fishing stats for user {user_id}: {stats_error}")
+            
+            # Add coins
+            if result.coins_earned > 0:
+                new_balance = await update_user_balance(user_id, chat_id, result.coins_earned)
+            else:
+                new_balance = await get_user_balance(user_id, chat_id)
+            
+            text = f"{result.message}\n\n💰 Баланс: {new_balance} монет"
+            await callback.message.edit_text(text, reply_markup=get_fishing_keyboard(user_id), parse_mode="HTML")
+            await callback.answer()
+        except Exception as e:
+            logger.error(f"Fishing cast error for user {user_id}: {e}")
+            await callback.answer("🎣 Упс, удочка сломалась. Попробуй позже!", show_alert=True)
     
     elif action == "stats":
         stats = await fishing_stats_service.get_stats(user_id, chat_id)
@@ -1204,6 +1236,9 @@ async def cmd_transfer(message: Message):
 @router.message(Command("inventory"))
 async def cmd_inventory(message: Message):
     """Show user inventory."""
+    import json
+    from datetime import datetime, timezone
+    
     user_id = message.from_user.id
     chat_id = message.chat.id
     
@@ -1224,6 +1259,7 @@ async def cmd_inventory(message: Message):
         consumables = []
         lootboxes = []
         roosters = []
+        pp_items = []
         other = []
         
         for item in items:
@@ -1238,6 +1274,32 @@ async def cmd_inventory(message: Message):
                     roosters.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
                 elif item.item_type in ["lucky_charm", "energy_drink", "shield", "vip_status", "double_xp"]:
                     consumables.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
+                elif item.item_type.startswith("pp_"):
+                    # PP items (creams and cage)
+                    if item.item_type == ItemType.PP_CAGE:
+                        # Show cage status
+                        status = ""
+                        if item.equipped and item.item_data:
+                            try:
+                                data = json.loads(item.item_data)
+                                expires_at_str = data.get("expires_at")
+                                if expires_at_str:
+                                    expires_at = datetime.fromisoformat(expires_at_str)
+                                    if expires_at.tzinfo is None:
+                                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                                    now = datetime.now(timezone.utc)
+                                    if now < expires_at:
+                                        remaining = expires_at - now
+                                        hours = int(remaining.total_seconds() // 3600)
+                                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                                        status = f" ✅ ({hours}ч {minutes}м)"
+                                    else:
+                                        status = " ⏰ (истекла)"
+                            except (json.JSONDecodeError, ValueError):
+                                status = " ✅" if item.equipped else ""
+                        pp_items.append(f"  {item_info.emoji} {item_info.name}{status}")
+                    else:
+                        pp_items.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
                 else:
                     other.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
             else:
@@ -1252,11 +1314,14 @@ async def cmd_inventory(message: Message):
             text += "<b>🐔 Петухи:</b>\n" + "\n".join(roosters) + "\n\n"
         if consumables:
             text += "<b>🧪 Расходники:</b>\n" + "\n".join(consumables) + "\n\n"
+        if pp_items:
+            text += "<b>🍆 PP предметы:</b>\n" + "\n".join(pp_items) + "\n\n"
         if other:
             text += "<b>📋 Прочее:</b>\n" + "\n".join(other) + "\n\n"
         
         text += f"💰 Баланс: {balance} монет\n\n"
-        text += "<i>Используй /loot для открытия лутбоксов</i>"
+        text += "<i>Используй /loot для открытия лутбоксов</i>\n"
+        text += "<i>Используй /cage для управления клеткой</i>"
     
     await message.reply(text, parse_mode="HTML")
 
@@ -1337,6 +1402,135 @@ async def cmd_use(message: Message):
 
 
 # ============================================================================
+# PP CAGE MANAGEMENT (Requirements 10.5)
+# ============================================================================
+
+@router.message(Command("cage"))
+async def cmd_cage(message: Message):
+    """
+    Manage PP Cage - activate or deactivate.
+    
+    Usage:
+      /cage - show status
+      /cage on - activate cage
+      /cage off - deactivate cage
+      
+    Requirements: 10.5
+    """
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    parts = message.text.split()
+    action = parts[1].lower() if len(parts) > 1 else None
+    
+    # Check if user has the cage
+    has_cage = await inventory_service.has_item(user_id, chat_id, ItemType.PP_CAGE)
+    is_active = await inventory_service.has_active_item(user_id, chat_id, ItemType.PP_CAGE)
+    
+    if action == "on":
+        if not has_cage:
+            return await message.reply(
+                "🔒 <b>Пенис-клетка</b>\n\n"
+                "❌ У тебя нет клетки!\n"
+                "Купи в /shop в разделе 'Защита PP'",
+                parse_mode="HTML"
+            )
+        
+        if is_active:
+            return await message.reply(
+                "🔒 <b>Пенис-клетка</b>\n\n"
+                "⚠️ Клетка уже активна!\n"
+                "Используй /cage off чтобы снять",
+                parse_mode="HTML"
+            )
+        
+        result = await inventory_service.activate_item(user_id, chat_id, ItemType.PP_CAGE)
+        await message.reply(
+            f"🔒 <b>Пенис-клетка</b>\n\n"
+            f"{result.message}\n\n"
+            f"⚠️ Пока клетка активна:\n"
+            f"  • PP защищён от потерь в PvP\n"
+            f"  • /grow заблокирован\n\n"
+            f"Используй /cage off чтобы снять раньше",
+            parse_mode="HTML"
+        )
+    
+    elif action == "off":
+        if not is_active:
+            return await message.reply(
+                "🔒 <b>Пенис-клетка</b>\n\n"
+                "❌ Клетка не активна!\n"
+                "Используй /cage on чтобы надеть",
+                parse_mode="HTML"
+            )
+        
+        result = await inventory_service.deactivate_item(user_id, chat_id, ItemType.PP_CAGE)
+        await message.reply(
+            f"🔓 <b>Пенис-клетка</b>\n\n"
+            f"{result.message}\n\n"
+            f"✅ Теперь можно использовать /grow\n"
+            f"⚠️ PP больше не защищён от потерь",
+            parse_mode="HTML"
+        )
+    
+    else:
+        # Show status
+        if is_active:
+            # Get remaining time
+            import json
+            from datetime import datetime, timezone
+            
+            item = await inventory_service.get_item(user_id, chat_id, ItemType.PP_CAGE)
+            remaining_text = ""
+            if item and item.item_data:
+                try:
+                    data = json.loads(item.item_data)
+                    expires_at_str = data.get("expires_at")
+                    if expires_at_str:
+                        expires_at = datetime.fromisoformat(expires_at_str)
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        now = datetime.now(timezone.utc)
+                        if now < expires_at:
+                            remaining = expires_at - now
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            remaining_text = f"⏰ Осталось: {hours}ч {minutes}м\n\n"
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            
+            await message.reply(
+                f"🔒 <b>Пенис-клетка</b>\n\n"
+                f"✅ Статус: АКТИВНА\n"
+                f"{remaining_text}"
+                f"Эффекты:\n"
+                f"  • PP защищён от потерь в PvP\n"
+                f"  • /grow заблокирован\n\n"
+                f"Команды:\n"
+                f"  /cage off — снять клетку",
+                parse_mode="HTML"
+            )
+        elif has_cage:
+            await message.reply(
+                f"🔓 <b>Пенис-клетка</b>\n\n"
+                f"❌ Статус: НЕ АКТИВНА\n\n"
+                f"У тебя есть клетка в инвентаре.\n\n"
+                f"Команды:\n"
+                f"  /cage on — надеть клетку",
+                parse_mode="HTML"
+            )
+        else:
+            await message.reply(
+                f"🔒 <b>Пенис-клетка</b>\n\n"
+                f"❌ У тебя нет клетки!\n\n"
+                f"Клетка защищает PP от потерь в PvP,\n"
+                f"но блокирует /grow на 24 часа.\n\n"
+                f"Купи в /shop в разделе 'Защита PP'",
+                parse_mode="HTML"
+            )
+
+
+# ============================================================================
 # PP BATTLE GAME (Битва пиписек) - использует GameStat.size_cm от /grow
 # ============================================================================
 
@@ -1403,8 +1597,52 @@ async def get_or_create_game_stat(tg_user_id: int, username: str = None) -> tupl
         return gs.size_cm, gs.pvp_wins, getattr(gs, 'pvp_losses', 0)
 
 
-async def update_pp_size(tg_user_id: int, change: int) -> int:
-    """Update PP size (GameStat.size_cm) and return new value."""
+async def apply_pp_change(user_id: int, chat_id: int, change: int) -> int:
+    """
+    Apply PP size change with PP_CAGE protection check.
+    
+    If change is negative and user has active PP_CAGE, the change is blocked.
+    
+    Args:
+        user_id: Telegram user ID
+        chat_id: Chat ID
+        change: Amount to change (positive or negative)
+        
+    Returns:
+        Actual change applied (0 if blocked by PP_CAGE)
+        
+    Requirements: 10.3
+    """
+    from app.services.inventory import inventory_service, ItemType as InvItemType
+    
+    if change < 0:
+        # Check if PP_CAGE is active
+        if await inventory_service.has_active_item(user_id, chat_id, InvItemType.PP_CAGE):
+            return 0  # Protection activated, no change
+    
+    return change
+
+
+async def update_pp_size(tg_user_id: int, change: int, chat_id: int = 0) -> int:
+    """
+    Update PP size (GameStat.size_cm) and return new value.
+    
+    If chat_id is provided and change is negative, checks for PP_CAGE protection.
+    """
+    # Apply PP_CAGE protection if chat_id is provided
+    if chat_id and change < 0:
+        actual_change = await apply_pp_change(tg_user_id, chat_id, change)
+        if actual_change == 0:
+            # PP_CAGE blocked the change, return current size
+            async_session = get_session()
+            async with async_session() as session:
+                res = await session.execute(
+                    select(GameStat).where(GameStat.tg_user_id == tg_user_id)
+                )
+                gs = res.scalars().first()
+                return gs.size_cm if gs else 0
+        change = actual_change
+    
     async_session = get_session()
     async with async_session() as session:
         res = await session.execute(
@@ -1693,14 +1931,27 @@ async def execute_pp_battle(
     # Обновляем статистику (только для реальных игроков, не для Олега id=0)
     if winner_id > 0:
         await update_pp_stats(winner_id, won=True)
-        await update_pp_size(winner_id, bet)
+        await update_pp_size(winner_id, bet, chat_id)
         winner_new_size, _, _ = await get_or_create_game_stat(winner_id)
     else:
         winner_new_size = target_size + bet  # Олег "выиграл"
     
     if loser_id > 0:
         await update_pp_stats(loser_id, won=False)
-        await update_pp_size(loser_id, -bet)
+        # Pass chat_id for PP_CAGE protection check (Requirements 10.3)
+        actual_loss = await apply_pp_change(loser_id, chat_id, -bet)
+        if actual_loss == 0:
+            # PP_CAGE protected the loser
+            loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
+            return (
+                f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
+                f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
+                f"🍆 {target_name}: {target_size} см (сила: {target_power})\n\n"
+                f"🏆 <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
+                f"💪 {winner_name}: +{bet} см → <b>{winner_new_size} см</b>\n"
+                f"🔒 {loser_name}: Клетка защитила! Размер: <b>{loser_new_size} см</b>"
+            )
+        await update_pp_size(loser_id, -bet, chat_id)
         loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
     else:
         loser_new_size = target_size - bet  # Олег "проиграл"

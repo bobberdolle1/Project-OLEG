@@ -199,12 +199,12 @@ class AutoReplySystem:
         
         Args:
             text: Текст сообщения
-            chat_settings: Настройки чата
+            chat_settings: Настройки чата (auto_reply_chance может быть 0-100 или 0.0-1.0)
             
         Returns:
             True если бот должен ответить
         """
-        # Requirements 5.4, 5.5: Respect disabled setting
+        # Requirements 2.1: При auto_reply_chance = 0 сразу возвращаем False
         if chat_settings.auto_reply_chance <= 0:
             return False
         
@@ -221,9 +221,16 @@ class AutoReplySystem:
         # Вычисляем вероятность
         probability = self.calculate_probability(text)
         
-        # Модифицируем базовую вероятность настройкой чата
-        # auto_reply_chance из Chat model используется как множитель
-        effective_probability = probability * chat_settings.auto_reply_chance
+        # Requirements 2.4: Правильно масштабируем вероятность
+        # auto_reply_chance может быть:
+        # - 0-100 (процент) - делим на 100
+        # - 0.0-1.0 (уже нормализовано) - используем как есть
+        chance = chat_settings.auto_reply_chance
+        if chance > 1.0:
+            # Значение в процентах (0-100), нормализуем
+            chance = chance / 100.0
+        
+        effective_probability = probability * chance
         
         # Ограничиваем максимумом
         effective_probability = min(effective_probability, self.MAX_PROBABILITY)

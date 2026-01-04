@@ -926,3 +926,51 @@ class SDOCTopic(Base):
     __table_args__ = (
         UniqueConstraint('chat_id', 'topic_id', name='uq_chat_topic'),
     )
+
+
+# ============================================================================
+# MARRIAGE SYSTEM v8.0 - Requirements 9.1-9.6
+# ============================================================================
+
+
+class Marriage(Base):
+    """
+    Marriage between two users in a chat (Requirements 9.1, 9.2).
+    
+    Stores active and divorced marriages.
+    user1_id is always < user2_id to ensure uniqueness.
+    """
+    __tablename__ = "marriages"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user1_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    user2_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    married_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    divorced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint('user1_id', 'user2_id', 'chat_id', name='uq_marriage_users_chat'),
+        CheckConstraint('user1_id < user2_id', name='ck_marriage_user_order'),
+    )
+
+
+class MarriageProposal(Base):
+    """
+    Marriage proposal between users (Requirements 9.1, 9.3, 9.4).
+    
+    Proposals expire after 5 minutes if not accepted/rejected.
+    """
+    __tablename__ = "marriage_proposals"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    to_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending, accepted, rejected, expired
+    
+    __table_args__ = (
+        UniqueConstraint('from_user_id', 'to_user_id', 'chat_id', 'status', name='uq_proposal_pending'),
+    )

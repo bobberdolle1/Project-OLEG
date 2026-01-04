@@ -81,18 +81,59 @@ def resize_for_sticker(image_data: bytes) -> bytes:
     return output.read()
 
 
-async def get_user_avatar(bot, user_id: int) -> Optional[bytes]:
-    """Загружает аватарку пользователя из Telegram."""
-    try:
-        photos = await bot.get_user_profile_photos(user_id, limit=1)
-        if photos.total_count > 0:
-            photo = photos.photos[0][-1]  # Берём самое большое фото
-            file = await bot.get_file(photo.file_id)
-            file_bytes = await bot.download_file(file.file_path)
-            return file_bytes.read()
-    except Exception as e:
-        logger.debug(f"Failed to get avatar for user {user_id}: {e}")
-    return None
+async def get_user_avatar(bot, user_id: int, max_retries: int = 3) -> Optional[bytes]:
+    """
+    Загружает аватарку пользователя из Telegram с retry логикой.
+    
+    RC8: Added retry logic and improved error handling.
+    Requirements: 3.1
+    
+    Args:
+        bot: Telegram bot instance
+        user_id: ID пользователя
+        max_retries: Максимальное количество попыток загрузки
+        
+    Returns:
+        Байты аватарки или None если загрузка не удалась
+    """
+    import asyncio
+    
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            photos = await bot.get_user_profile_photos(user_id, limit=1)
+            if photos.total_count > 0:
+                photo = photos.photos[0][-1]  # Берём самое большое фото
+                file = await bot.get_file(photo.file_id)
+                file_bytes = await bot.download_file(file.file_path)
+                avatar_data = file_bytes.read()
+                
+                # Validate that we got actual image data
+                if avatar_data and len(avatar_data) > 0:
+                    logger.debug(f"Successfully loaded avatar for user {user_id} on attempt {attempt + 1}")
+                    return avatar_data
+                else:
+                    logger.warning(f"Empty avatar data for user {user_id} on attempt {attempt + 1}")
+                    
+            else:
+                # User has no profile photos - this is not an error
+                logger.debug(f"User {user_id} has no profile photos")
+                return None
+                
+        except Exception as e:
+            last_error = e
+            logger.debug(f"Failed to get avatar for user {user_id} (attempt {attempt + 1}/{max_retries}): {e}")
+            
+            # Wait before retry (exponential backoff)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.5 * (attempt + 1))
+    
+    # All retries failed
+    if last_error:
+        logger.warning(f"Failed to get avatar for user {user_id} after {max_retries} attempts: {last_error}")
+    
+    return None  # Placeholder will be rendered automatically by _draw_avatar
 
 
 async def get_user_info(bot, chat_id: int, user) -> dict:
@@ -141,7 +182,8 @@ async def create_quote_image(
     Returns:
         BytesIO объект с изображением в формате WebP
     """
-    style = QuoteStyle(theme=QuoteTheme.DARK)
+    # RC8: Use default QuoteStyle which now defaults to LIGHT theme
+    style = QuoteStyle()
     quote_image = await quote_generator_service.render_quote(
         text=text,
         username=username,
@@ -169,7 +211,8 @@ async def create_quote_chain_image(messages: List[MessageData]) -> BytesIO:
     Returns:
         BytesIO объект с изображением в формате WebP
     """
-    style = QuoteStyle(theme=QuoteTheme.DARK)
+    # RC8: Use default QuoteStyle which now defaults to LIGHT theme
+    style = QuoteStyle()
     quote_image = await quote_generator_service.render_quote_chain(
         messages=messages,
         style=style
@@ -193,7 +236,8 @@ async def create_quote_with_comment(text: str, username: str, comment: str = Non
     Returns:
         BytesIO объект с изображением в формате WebP
     """
-    style = QuoteStyle(theme=QuoteTheme.DARK)
+    # RC8: Use default QuoteStyle which now defaults to LIGHT theme
+    style = QuoteStyle()
     quote_image = await quote_generator_service.render_roast_quote(
         text=text,
         username=username,

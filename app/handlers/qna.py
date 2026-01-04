@@ -27,14 +27,20 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-async def keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event):
+async def keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event, thread_id: int = None):
     """
     Периодически отправляет статус 'typing' пока не установлен stop_event.
     Telegram сбрасывает статус через 5 секунд, поэтому обновляем каждые 4 секунды.
+    
+    Args:
+        bot: Bot instance
+        chat_id: ID чата
+        stop_event: Event для остановки typing
+        thread_id: ID топика для супергрупп с форумами (message_thread_id)
     """
     while not stop_event.is_set():
         try:
-            await bot.send_chat_action(chat_id, "typing")
+            await bot.send_chat_action(chat_id, "typing", message_thread_id=thread_id)
         except Exception:
             pass  # Игнорируем ошибки
         await asyncio.sleep(4)
@@ -549,7 +555,7 @@ async def _process_qna_message(msg: Message):
     
     # Запускаем фоновую задачу для поддержания статуса "печатает..."
     stop_typing = asyncio.Event()
-    typing_task = asyncio.create_task(keep_typing(msg.bot, msg.chat.id, stop_typing))
+    typing_task = asyncio.create_task(keep_typing(msg.bot, msg.chat.id, stop_typing, topic_id))
 
     try:
         # Получаем контекст чата (название, описание, тип)
@@ -859,6 +865,97 @@ async def cmd_reset_context(msg: Message):
 # Обработчик голосовых перенесён в app/handlers/voice.py
 
 
+def format_whois_profile(profile, username: str) -> list[str]:
+    """
+    Форматирует профиль пользователя для вывода в /whois.
+    
+    Args:
+        profile: UserProfile объект или None
+        username: Имя пользователя для отображения
+        
+    Returns:
+        Список строк для вывода
+    """
+    lines = []
+    
+    if not profile:
+        return lines
+    
+    # Личная информация
+    personal = []
+    if profile.name:
+        personal.append(f"Имя: {profile.name}")
+    if profile.age:
+        personal.append(f"{profile.age} лет")
+    if profile.city:
+        personal.append(f"📍 {profile.city}")
+    if profile.job:
+        personal.append(f"💼 {profile.job}")
+    if personal:
+        lines.append("\n👤 " + " • ".join(personal))
+    
+    # Железо
+    hardware = []
+    if profile.gpu:
+        hardware.append(f"GPU: {profile.gpu}")
+    if profile.cpu:
+        hardware.append(f"CPU: {profile.cpu}")
+    if profile.ram:
+        hardware.append(f"RAM: {profile.ram}")
+    if hardware:
+        lines.append("\n🖥 <b>Сетап:</b> " + " | ".join(hardware))
+    
+    # Устройства
+    devices = []
+    if profile.steam_deck:
+        deck_str = "Steam Deck"
+        if profile.steam_deck_mods:
+            deck_str += f" ({', '.join(profile.steam_deck_mods[:3])})"
+        devices.append(deck_str)
+    if profile.laptop:
+        devices.append(f"💻 {profile.laptop}")
+    if profile.console:
+        devices.append(f"🎮 {profile.console}")
+    if devices:
+        lines.append("📱 " + " | ".join(devices))
+    
+    # ОС
+    if profile.os or profile.distro:
+        os_str = profile.distro or profile.os
+        if profile.de:
+            os_str += f" + {profile.de}"
+        lines.append(f"💿 {os_str}")
+    
+    # Предпочтения
+    if profile.brand_preference:
+        lines.append(f"❤️ Фанат {profile.brand_preference.upper()}")
+    
+    # Экспертиза
+    if profile.expertise:
+        lines.append(f"🧠 Шарит в: {', '.join(profile.expertise[:4])}")
+    
+    # Игры
+    if profile.games:
+        lines.append(f"🎮 Играет: {', '.join(profile.games[:5])}")
+    
+    # Хобби
+    if profile.hobbies:
+        lines.append(f"🎯 Хобби: {', '.join(profile.hobbies[:4])}")
+    
+    # Языки программирования
+    if profile.languages:
+        lines.append(f"💻 Кодит на: {', '.join(profile.languages[:4])}")
+    
+    # Питомцы
+    if profile.pets:
+        lines.append(f"🐾 Питомцы: {', '.join(profile.pets)}")
+    
+    # Текущие проблемы
+    if profile.current_problems:
+        lines.append(f"\n⚠️ <b>Последняя проблема:</b> {profile.current_problems[-1][:80]}...")
+    
+    return lines
+
 
 @router.message(Command("whois"))
 async def cmd_whois(msg: Message):
@@ -939,93 +1036,23 @@ async def cmd_whois(msg: Message):
     
     # Формируем досье
     name = target_username or f"ID:{target_user_id}"
-    lines = [f"📋 <b>Досье: @{name}</b>"]
+    lines = [f"📋 <b>Досье Олега: @{name}</b>"]
     
     if not profile and msg_count == 0:
-        lines.append("\n<i>Олег ничего не знает об этом человеке.</i>")
+        lines.append("\n<i>🔍 Олег ещё не собрал информацию об этом человеке. Чем больше общаешься — тем полнее досье.</i>")
         await msg.reply("\n".join(lines), parse_mode="HTML")
         return
     
-    # Личная информация
-    if profile:
-        personal = []
-        if profile.name:
-            personal.append(f"Имя: {profile.name}")
-        if profile.age:
-            personal.append(f"{profile.age} лет")
-        if profile.city:
-            personal.append(f"📍 {profile.city}")
-        if profile.job:
-            personal.append(f"💼 {profile.job}")
-        if personal:
-            lines.append("\n👤 " + " • ".join(personal))
-        
-        # Железо
-        hardware = []
-        if profile.gpu:
-            hardware.append(f"GPU: {profile.gpu}")
-        if profile.cpu:
-            hardware.append(f"CPU: {profile.cpu}")
-        if profile.ram:
-            hardware.append(f"RAM: {profile.ram}")
-        if hardware:
-            lines.append("\n🖥 <b>Сетап:</b> " + " | ".join(hardware))
-        
-        # Устройства
-        devices = []
-        if profile.steam_deck:
-            deck_str = "Steam Deck"
-            if profile.steam_deck_mods:
-                deck_str += f" ({', '.join(profile.steam_deck_mods[:3])})"
-            devices.append(deck_str)
-        if profile.laptop:
-            devices.append(f"💻 {profile.laptop}")
-        if profile.console:
-            devices.append(f"🎮 {profile.console}")
-        if devices:
-            lines.append("📱 " + " | ".join(devices))
-        
-        # ОС
-        if profile.os or profile.distro:
-            os_str = profile.distro or profile.os
-            if profile.de:
-                os_str += f" + {profile.de}"
-            lines.append(f"💿 {os_str}")
-        
-        # Предпочтения
-        if profile.brand_preference:
-            lines.append(f"❤️ Фанат {profile.brand_preference.upper()}")
-        
-        # Экспертиза
-        if profile.expertise:
-            lines.append(f"🧠 Шарит в: {', '.join(profile.expertise[:4])}")
-        
-        # Игры
-        if profile.games:
-            lines.append(f"🎮 Играет: {', '.join(profile.games[:5])}")
-        
-        # Хобби
-        if profile.hobbies:
-            lines.append(f"🎯 Хобби: {', '.join(profile.hobbies[:4])}")
-        
-        # Языки программирования
-        if profile.languages:
-            lines.append(f"💻 Кодит на: {', '.join(profile.languages[:4])}")
-        
-        # Питомцы
-        if profile.pets:
-            lines.append(f"🐾 Питомцы: {', '.join(profile.pets)}")
-        
-        # Текущие проблемы
-        if profile.current_problems:
-            lines.append(f"\n⚠️ <b>Последняя проблема:</b> {profile.current_problems[-1][:80]}...")
+    # Добавляем информацию из профиля
+    profile_lines = format_whois_profile(profile, name)
+    lines.extend(profile_lines)
     
     # Статистика
-    lines.append("\n📊 <b>Статистика:</b>")
+    lines.append("\n📊 <b>Статистика (по данным Олега):</b>")
     if msg_count:
         lines.append(f"   💬 {msg_count} сообщений в этом чате")
     if first_msg_date:
-        lines.append(f"   📅 В чате с {first_msg_date.strftime('%d.%m.%Y')}")
+        lines.append(f"   📅 Олег видит с {first_msg_date.strftime('%d.%m.%Y')}")
     
     # Игровая статистика
     if game_stat:
@@ -1040,9 +1067,22 @@ async def cmd_whois(msg: Message):
         if game_stats:
             lines.append(f"   🎰 {' | '.join(game_stats)}")
     
+    # Статус брака (Requirements 9.6)
+    from app.handlers.marriages import get_spouse_id
+    spouse_id = await get_spouse_id(target_user_id, msg.chat.id)
+    if spouse_id:
+        # Получаем имя супруга
+        async with get_session()() as session:
+            spouse_result = await session.execute(
+                select(User).where(User.tg_user_id == spouse_id)
+            )
+            spouse_user = spouse_result.scalars().first()
+            spouse_name = spouse_user.username or spouse_user.first_name if spouse_user else f"ID:{spouse_id}"
+        lines.append(f"   💍 В браке с @{spouse_name}")
+    
     # Подсказка
-    if not profile or (not profile.gpu and not profile.games and not profile.expertise):
-        lines.append("\n<i>💡 Олег собирает инфу из сообщений. Чем больше пишешь — тем полнее досье.</i>")
+    if not profile or (not profile.gpu and not profile.games and not profile.expertise and not profile.name):
+        lines.append("\n<i>🔍 Олег ещё собирает информацию. Чем больше общаешься — тем полнее досье.</i>")
     
     # Кнопка очистки для своего профиля
     if target_user_id == msg.from_user.id and profile:

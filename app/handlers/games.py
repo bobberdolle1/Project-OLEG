@@ -618,8 +618,19 @@ async def cmd_grow(msg: Message):
 
     Случайное увеличение размера (1-20 см) с кулдауном.
     """
+    from app.services.inventory import inventory_service, ItemType as InvItemType
+    
     async_session = get_session()
     user = await ensure_user(msg.from_user) # Get the User object here
+    
+    # Check if PP_CAGE is active (Requirements 10.4)
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    if await inventory_service.has_active_item(user_id, chat_id, InvItemType.PP_CAGE):
+        return await msg.reply(
+            "🔒 Клетка не даёт расти! Сними её через /inventory или подожди пока истечёт."
+        )
+    
     async with async_session() as session:
         res = await session.execute(
             select(GameStat).where(

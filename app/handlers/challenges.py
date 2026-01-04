@@ -138,94 +138,117 @@ async def update_challenge_status_in_db(challenge_id: str, status: str):
             await session.commit()
 
 
-def create_challenge_keyboard(challenge_id: str) -> InlineKeyboardMarkup:
-    """Create inline keyboard for challenge accept/decline."""
+def create_challenge_keyboard(challenge_id: str, thread_id: int = None) -> InlineKeyboardMarkup:
+    """Create inline keyboard for challenge accept/decline.
+    
+    Args:
+        challenge_id: Unique challenge identifier
+        thread_id: Optional message_thread_id for topic routing
+    """
+    # Include thread_id in callback_data (0 means no thread)
+    thread_suffix = f":{thread_id or 0}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="⚔️ Принять бой",
-                callback_data=f"{ACCEPT_PREFIX}{challenge_id}"
+                callback_data=f"{ACCEPT_PREFIX}{challenge_id}{thread_suffix}"
             ),
             InlineKeyboardButton(
                 text="🏃 Отклонить",
-                callback_data=f"{DECLINE_PREFIX}{challenge_id}"
+                callback_data=f"{DECLINE_PREFIX}{challenge_id}{thread_suffix}"
             )
         ]
     ])
 
 
-def create_attack_keyboard(owner_id: int) -> InlineKeyboardMarkup:
+def create_attack_keyboard(owner_id: int, thread_id: int = None) -> InlineKeyboardMarkup:
     """Create inline keyboard for attack zone selection.
     
     Requirements: 6.1 - Attack zones: [Голова] [Тело] [Ноги]
+    
+    Args:
+        owner_id: User ID who owns this keyboard
+        thread_id: Optional message_thread_id for topic routing
     """
+    # Include thread_id in callback_data (0 means no thread)
+    thread_suffix = f":{thread_id or 0}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="🎯 Голова",
-                callback_data=f"duel:{owner_id}:attack:head"
+                callback_data=f"duel:{owner_id}:attack:head{thread_suffix}"
             ),
             InlineKeyboardButton(
                 text="💪 Тело",
-                callback_data=f"duel:{owner_id}:attack:body"
+                callback_data=f"duel:{owner_id}:attack:body{thread_suffix}"
             ),
             InlineKeyboardButton(
                 text="🦵 Ноги",
-                callback_data=f"duel:{owner_id}:attack:legs"
+                callback_data=f"duel:{owner_id}:attack:legs{thread_suffix}"
             )
         ]
     ])
 
 
-def create_defend_keyboard(owner_id: int, attack_zone: str) -> InlineKeyboardMarkup:
+def create_defend_keyboard(owner_id: int, attack_zone: str, thread_id: int = None) -> InlineKeyboardMarkup:
     """Create inline keyboard for defense zone selection.
     
     Requirements: 6.1 - Defend zones: [Голова] [Тело] [Ноги]
+    
+    Args:
+        owner_id: User ID who owns this keyboard
+        attack_zone: The attack zone selected
+        thread_id: Optional message_thread_id for topic routing
     """
+    # Include thread_id in callback_data (0 means no thread)
+    thread_suffix = f":{thread_id or 0}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="🎯 Голова",
-                callback_data=f"duel:{owner_id}:defend:{attack_zone}:head"
+                callback_data=f"duel:{owner_id}:defend:{attack_zone}:head{thread_suffix}"
             ),
             InlineKeyboardButton(
                 text="💪 Тело",
-                callback_data=f"duel:{owner_id}:defend:{attack_zone}:body"
+                callback_data=f"duel:{owner_id}:defend:{attack_zone}:body{thread_suffix}"
             ),
             InlineKeyboardButton(
                 text="🦵 Ноги",
-                callback_data=f"duel:{owner_id}:defend:{attack_zone}:legs"
+                callback_data=f"duel:{owner_id}:defend:{attack_zone}:legs{thread_suffix}"
             )
         ]
     ])
 
 
-def create_pvp_move_keyboard(duel_id: str, user_id: int, phase: str) -> InlineKeyboardMarkup:
+def create_pvp_move_keyboard(duel_id: str, user_id: int, phase: str, thread_id: int = None) -> InlineKeyboardMarkup:
     """Create keyboard for PvP move selection.
     
     Args:
         duel_id: Unique duel identifier
         user_id: Player making the move
         phase: 'attack' or 'defend'
+        thread_id: Optional message_thread_id for topic routing
     """
     emoji = "⚔️" if phase == "attack" else "🛡️"
+    # Include thread_id in callback_data (0 means no thread)
+    thread_suffix = f":{thread_id or 0}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text=f"{emoji} 🎯 Голова",
-                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:head"
+                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:head{thread_suffix}"
             ),
         ],
         [
             InlineKeyboardButton(
                 text=f"{emoji} 💪 Тело",
-                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:body"
+                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:body{thread_suffix}"
             ),
         ],
         [
             InlineKeyboardButton(
                 text=f"{emoji} 🦵 Ноги",
-                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:legs"
+                callback_data=f"pvp:{duel_id}:{user_id}:{phase}:legs{thread_suffix}"
             ),
         ]
     ])
@@ -420,7 +443,11 @@ async def start_pve_duel(
     - 4.2: PvE mode without arguments
     - 4.4: Instant Oleg acceptance
     - 4.3: Oleg makes moves using random selection
+    - 5.1, 5.2, 5.3: Preserve message_thread_id for topic routing
     """
+    # Capture thread_id for topic routing (Requirements 5.1, 5.2, 5.3)
+    thread_id = getattr(msg, 'message_thread_id', None)
+    
     # Ensure balance exists
     balance = await ensure_user_balance(challenger_id, chat_id)
     
@@ -448,11 +475,11 @@ async def start_pve_duel(
     
     sent_msg = await msg.reply(
         status_text,
-        reply_markup=create_attack_keyboard(challenger_id),
+        reply_markup=create_attack_keyboard(challenger_id, thread_id),
         parse_mode="HTML"
     )
     
-    # Register game session
+    # Register game session with thread_id
     await state_manager.register_game(
         user_id=challenger_id,
         chat_id=chat_id,
@@ -471,11 +498,12 @@ async def start_pve_duel(
             "player1_name": challenger_name,
             "player2_name": "🤖 Олег",
             "phase": "attack",  # attack or defend
-            "attack_zone": None
+            "attack_zone": None,
+            "thread_id": thread_id  # Store thread_id for topic routing
         }
     )
     
-    logger.info(f"PvE duel started: {challenger_id} vs Oleg, bet={bet_amount}")
+    logger.info(f"PvE duel started: {challenger_id} vs Oleg, bet={bet_amount}, thread_id={thread_id}")
 
 
 async def start_pvp_challenge(
@@ -489,7 +517,11 @@ async def start_pvp_challenge(
     """Start a PvP challenge (wait for opponent confirmation).
     
     Requirement 4.1: PvP mode with @username argument
+    Requirements 5.1, 5.2, 5.3: Preserve message_thread_id for topic routing
     """
+    # Capture thread_id for topic routing (Requirements 5.1, 5.2, 5.3)
+    thread_id = getattr(msg, 'message_thread_id', None)
+    
     # Ensure balances exist
     challenger_balance = await ensure_user_balance(challenger_id, chat_id)
     target_balance_val = await ensure_user_balance(target_id, chat_id)
@@ -544,11 +576,11 @@ async def start_pvp_challenge(
     
     await msg.reply(
         challenge_text,
-        reply_markup=create_challenge_keyboard(challenge.id),
+        reply_markup=create_challenge_keyboard(challenge.id, thread_id),
         parse_mode="HTML"
     )
     
-    logger.info(f"PvP challenge created: {challenger_id} vs {target_id}, bet={bet_amount}")
+    logger.info(f"PvP challenge created: {challenger_id} vs {target_id}, bet={bet_amount}, thread_id={thread_id}")
 
 
 @router.callback_query(F.data.startswith(ACCEPT_PREFIX))
@@ -557,7 +589,12 @@ async def callback_accept_challenge(callback: CallbackQuery):
     if not callback.data or not callback.from_user:
         return
     
-    challenge_id = callback.data[len(ACCEPT_PREFIX):]
+    # Parse callback data: challenge_accept:{challenge_id}:{thread_id}
+    data_part = callback.data[len(ACCEPT_PREFIX):]
+    parts = data_part.split(":")
+    challenge_id = parts[0]
+    thread_id = int(parts[1]) if len(parts) > 1 and parts[1] != "0" else None
+    
     acceptor_id = callback.from_user.id
     acceptor_name = callback.from_user.username or callback.from_user.first_name
     chat_id = callback.message.chat.id if callback.message else 0
@@ -604,6 +641,7 @@ async def callback_accept_challenge(callback: CallbackQuery):
         "challenge_id": challenge_id,
         "chat_id": chat_id,
         "message_id": callback.message.message_id,
+        "thread_id": thread_id,  # Store thread_id for topic routing
         "player1_id": challenge.challenger_id,
         "player2_id": challenge.target_id,
         "player1_name": challenger_name,
@@ -642,7 +680,8 @@ async def callback_accept_challenge(callback: CallbackQuery):
         p1_msg = await bot.send_message(
             chat_id=chat_id,
             text=f"🎯 <b>{challenger_name}</b>, выбери зону АТАКИ:",
-            reply_markup=create_pvp_move_keyboard(duel_id, challenge.challenger_id, "attack"),
+            reply_markup=create_pvp_move_keyboard(duel_id, challenge.challenger_id, "attack", thread_id),
+            message_thread_id=thread_id,
             parse_mode="HTML"
         )
         pvp_duels[duel_id]["p1_msg_id"] = p1_msg.message_id
@@ -654,7 +693,8 @@ async def callback_accept_challenge(callback: CallbackQuery):
         p2_msg = await bot.send_message(
             chat_id=chat_id,
             text=f"🎯 <b>{acceptor_name}</b>, выбери зону АТАКИ:",
-            reply_markup=create_pvp_move_keyboard(duel_id, acceptor_id, "attack"),
+            reply_markup=create_pvp_move_keyboard(duel_id, acceptor_id, "attack", thread_id),
+            message_thread_id=thread_id,
             parse_mode="HTML"
         )
         pvp_duels[duel_id]["p2_msg_id"] = p2_msg.message_id
@@ -662,7 +702,7 @@ async def callback_accept_challenge(callback: CallbackQuery):
         logger.warning(f"Failed to send acceptor message: {e}")
     
     await callback.answer("⚔️ Бой начался!")
-    logger.info(f"PvP duel started: {duel_id} - {challenger_name} vs {acceptor_name}")
+    logger.info(f"PvP duel started: {duel_id} - {challenger_name} vs {acceptor_name}, thread_id={thread_id}")
 
 
 @router.callback_query(F.data.startswith(DECLINE_PREFIX))
@@ -671,7 +711,12 @@ async def callback_decline_challenge(callback: CallbackQuery):
     if not callback.data or not callback.from_user:
         return
     
-    challenge_id = callback.data[len(DECLINE_PREFIX):]
+    # Parse callback data: challenge_decline:{challenge_id}:{thread_id}
+    data_part = callback.data[len(DECLINE_PREFIX):]
+    parts = data_part.split(":")
+    challenge_id = parts[0]
+    # thread_id not needed for decline, but parse for consistency
+    
     decliner_id = callback.from_user.id
     
     result = game_engine.decline_challenge(challenge_id, decliner_id)
@@ -700,7 +745,7 @@ async def callback_pvp_move(callback: CallbackQuery):
     if not callback.data or not callback.from_user:
         return
     
-    # Parse: pvp:{duel_id}:{user_id}:{phase}:{zone} or pvp:{duel_id}:wait
+    # Parse: pvp:{duel_id}:{user_id}:{phase}:{zone}:{thread_id} or pvp:{duel_id}:wait
     parts = callback.data.split(":")
     if len(parts) < 3:
         return
@@ -718,6 +763,8 @@ async def callback_pvp_move(callback: CallbackQuery):
     expected_user_id = int(parts[2])
     phase = parts[3]  # attack or defend
     zone = parts[4]   # head, body, legs or "pick"
+    # Parse thread_id from callback data (last part)
+    thread_id = int(parts[5]) if len(parts) > 5 and parts[5] != "0" else None
     
     # Handle "pick" - show zone selection
     if zone == "pick":
@@ -734,6 +781,7 @@ async def callback_pvp_move(callback: CallbackQuery):
         is_player1 = user_id == duel["player1_id"]
         player_prefix = "p1" if is_player1 else "p2"
         current_phase = duel[f"{player_prefix}_phase"]
+        duel_thread_id = duel.get("thread_id")
         
         if current_phase == "done":
             await callback.answer("✅ Ты уже сделал ход!", show_alert=False)
@@ -742,7 +790,7 @@ async def callback_pvp_move(callback: CallbackQuery):
         await callback.message.edit_text(
             f"⚔️ <b>Раунд {duel['round']}</b>\n\n"
             f"🎯 Выбери зону {'АТАКИ' if current_phase == 'attack' else 'ЗАЩИТЫ'}:",
-            reply_markup=create_pvp_move_keyboard(duel_id, user_id, current_phase),
+            reply_markup=create_pvp_move_keyboard(duel_id, user_id, current_phase, duel_thread_id),
             parse_mode="HTML"
         )
         await callback.answer()
@@ -761,6 +809,7 @@ async def callback_pvp_move(callback: CallbackQuery):
         return
     
     duel = pvp_duels[duel_id]
+    duel_thread_id = duel.get("thread_id")
     
     # Determine which player
     is_player1 = user_id == duel["player1_id"]
@@ -788,7 +837,7 @@ async def callback_pvp_move(callback: CallbackQuery):
                 f"⚔️ <b>{player_name}</b>\n"
                 f"Атака: {ZONE_NAMES[Zone(zone)]}\n\n"
                 f"🛡️ <b>Теперь выбери зону ЗАЩИТЫ:</b>",
-                reply_markup=create_pvp_move_keyboard(duel_id, user_id, "defend"),
+                reply_markup=create_pvp_move_keyboard(duel_id, user_id, "defend", duel_thread_id),
                 parse_mode="HTML"
             )
         except Exception as e:
@@ -873,6 +922,9 @@ async def process_pvp_round(callback: CallbackQuery, duel_id: str):
     duel["p1_msg_id"] = None
     duel["p2_msg_id"] = None
     
+    # Get thread_id for topic routing
+    thread_id = duel.get("thread_id")
+    
     # Общее сообщение с результатом раунда (без кнопок)
     status_msg = (
         f"⚔️ <b>Раунд {duel['round']}</b>\n\n"
@@ -895,7 +947,8 @@ async def process_pvp_round(callback: CallbackQuery, duel_id: str):
         p1_msg = await bot.send_message(
             chat_id=chat_id,
             text=f"🎯 <b>{duel['player1_name']}</b>, выбери зону АТАКИ:",
-            reply_markup=create_pvp_move_keyboard(duel_id, duel["player1_id"], "attack"),
+            reply_markup=create_pvp_move_keyboard(duel_id, duel["player1_id"], "attack", thread_id),
+            message_thread_id=thread_id,
             parse_mode="HTML"
         )
         duel["p1_msg_id"] = p1_msg.message_id
@@ -907,7 +960,8 @@ async def process_pvp_round(callback: CallbackQuery, duel_id: str):
         p2_msg = await bot.send_message(
             chat_id=chat_id,
             text=f"🎯 <b>{duel['player2_name']}</b>, выбери зону АТАКИ:",
-            reply_markup=create_pvp_move_keyboard(duel_id, duel["player2_id"], "attack"),
+            reply_markup=create_pvp_move_keyboard(duel_id, duel["player2_id"], "attack", thread_id),
+            message_thread_id=thread_id,
             parse_mode="HTML"
         )
         duel["p2_msg_id"] = p2_msg.message_id
@@ -996,19 +1050,21 @@ async def finish_pvp_duel(callback: CallbackQuery, duel_id: str, last_round: str
     logger.info(f"PvP duel finished: {duel_id}, winner={winner_name}")
 
 
-@router.callback_query(F.data.regexp(r"^duel:\d+:attack:(head|body|legs)$"))
+@router.callback_query(F.data.regexp(r"^duel:\d+:attack:(head|body|legs)(:\d+)?$"))
 async def callback_duel_attack(callback: CallbackQuery):
     """Handle attack zone selection.
     
     Requirements: 6.1 - Attack zones selection
+    Requirements: 5.1, 5.2, 5.3 - Preserve message_thread_id for topic routing
     """
     if not callback.data or not callback.from_user:
         return
     
-    # Parse callback data: duel:{owner_id}:attack:{zone}
+    # Parse callback data: duel:{owner_id}:attack:{zone}:{thread_id}
     parts = callback.data.split(":")
     owner_id = int(parts[1])
     zone_str = parts[3]
+    thread_id = int(parts[4]) if len(parts) > 4 and parts[4] != "0" else None
     
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id if callback.message else 0
@@ -1029,6 +1085,10 @@ async def callback_duel_attack(callback: CallbackQuery):
     session.state["attack_zone"] = attack_zone
     session.state["phase"] = "defend"
     await state_manager.update_state(user_id, chat_id, session.state)
+    
+    # Get thread_id from session state if not in callback
+    if thread_id is None:
+        thread_id = session.state.get("thread_id")
     
     # Get duel state for display
     duel_data = session.state["duel_state"]
@@ -1051,27 +1111,29 @@ async def callback_duel_attack(callback: CallbackQuery):
     
     await callback.message.edit_text(
         status_text,
-        reply_markup=create_defend_keyboard(owner_id, attack_zone),
+        reply_markup=create_defend_keyboard(owner_id, attack_zone, thread_id),
         parse_mode="HTML"
     )
     
     await callback.answer(f"Атака: {zone_display}")
 
 
-@router.callback_query(F.data.regexp(r"^duel:\d+:defend:(head|body|legs):(head|body|legs)$"))
+@router.callback_query(F.data.regexp(r"^duel:\d+:defend:(head|body|legs):(head|body|legs)(:\d+)?$"))
 async def callback_duel_defend(callback: CallbackQuery):
     """Handle defense zone selection and execute combat round.
     
     Requirements: 6.1 - Defense zones and RPS mechanics
+    Requirements: 5.1, 5.2, 5.3 - Preserve message_thread_id for topic routing
     """
     if not callback.data or not callback.from_user:
         return
     
-    # Parse callback data: duel:{owner_id}:defend:{attack_zone}:{defend_zone}
+    # Parse callback data: duel:{owner_id}:defend:{attack_zone}:{defend_zone}:{thread_id}
     parts = callback.data.split(":")
     owner_id = int(parts[1])
     attack_zone_str = parts[3]
     defend_zone_str = parts[4]
+    thread_id = int(parts[5]) if len(parts) > 5 and parts[5] != "0" else None
     
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id if callback.message else 0
@@ -1086,6 +1148,10 @@ async def callback_duel_defend(callback: CallbackQuery):
     if not session or session.game_type != "duel":
         await callback.answer("❌ Игра не найдена", show_alert=True)
         return
+    
+    # Get thread_id from session state if not in callback
+    if thread_id is None:
+        thread_id = session.state.get("thread_id")
     
     # Get duel state
     duel_data = session.state["duel_state"]
@@ -1161,7 +1227,7 @@ async def callback_duel_defend(callback: CallbackQuery):
     
     await callback.message.edit_text(
         status_text,
-        reply_markup=create_attack_keyboard(owner_id),
+        reply_markup=create_attack_keyboard(owner_id, thread_id),
         parse_mode="HTML"
     )
     

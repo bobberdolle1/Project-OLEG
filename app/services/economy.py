@@ -41,6 +41,8 @@ class ItemType(str, Enum):
     PP_CREAM_MEDIUM = "pp_cream_medium"  # +2-5 см
     PP_CREAM_LARGE = "pp_cream_large"  # +5-10 см
     PP_CREAM_TITAN = "pp_cream_titan"  # +10-20 см (редкий)
+    # PP Protection
+    PP_CAGE = "pp_cage"  # Защита PP, блокирует рост
 
 
 class Rarity(str, Enum):
@@ -142,6 +144,11 @@ SHOP_ITEMS: Dict[ItemType, ShopItem] = {
     ItemType.PP_CREAM_TITAN: ShopItem(
         ItemType.PP_CREAM_TITAN, "Эликсир 'Годзилла'", "+10-20 см к размеру",
         2000, "🧪", Rarity.EPIC
+    ),
+    # PP Protection
+    ItemType.PP_CAGE: ShopItem(
+        ItemType.PP_CAGE, "Пенис-клетка", "Защита PP от негативных эффектов, блокирует рост (24ч)",
+        1000, "🔒", Rarity.RARE, duration_hours=24
     ),
 }
 

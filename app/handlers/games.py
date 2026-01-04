@@ -5,13 +5,13 @@ import random
 from datetime import datetime, timedelta
 import io
 from aiogram import Router, Bot
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import Message, BufferedInputFile, CallbackQuery
 from aiogram import F
 from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, GameStat, Wallet
+from app.database.models import User, GameStat, Wallet, Marriage
 from app.services.achievements import check_and_award_achievements
 from app.services.quests import check_and_update_quests
 from app.services.profile import get_full_user_profile
@@ -846,9 +846,18 @@ async def cmd_profile(msg: Message, bot: Bot):
     """
     Displays the user's comprehensive profile data as a generated image.
     
-    Generates a PNG profile card with avatar, username, league badge, ELO, and stats.
-    **Validates: Requirements 12.1, 12.2, 12.3, 12.4**
+    Generates a PNG profile card with:
+    - Avatar with league-colored ring
+    - Username and rank title
+    - League badge with progress to next
+    - Stats (size, balance, wins, reputation, etc.)
+    - Social info (marriage, guild, duo)
+    - Achievement and quest progress
+    - Growth sparkline
     """
+    from app.database.models import Marriage, UserAchievement, UserQuest
+    from sqlalchemy import or_
+    
     async_session = get_session()
     user = await ensure_user(msg.from_user)
 
@@ -857,9 +866,9 @@ async def cmd_profile(msg: Message, bot: Bot):
             await get_full_user_profile(session, user.tg_user_id)
 
         if not user:
-            return await msg.reply("Ваш профиль не найден. Пожалуйста, начните играть (например, /grow).")
+            return await msg.reply("Профиль не найден. Начни играть с /grow!")
 
-        # Get league status (Requirement 12.2)
+        # Get league status
         try:
             league_status = await league_service.get_status(user.tg_user_id, session)
             elo = league_status.elo
@@ -869,26 +878,78 @@ async def cmd_profile(msg: Message, bot: Bot):
             elo = 1000
             league = League.SCRAP
         
-        # Try to get user avatar (Requirement 12.2)
+        # Get avatar
         avatar_bytes = None
         try:
             photos = await bot.get_user_profile_photos(msg.from_user.id, limit=1)
             if photos.total_count > 0:
-                photo = photos.photos[0][-1]  # Get largest size
+                photo = photos.photos[0][-1]
                 file = await bot.get_file(photo.file_id)
                 avatar_data = io.BytesIO()
                 await bot.download_file(file.file_path, avatar_data)
                 avatar_bytes = avatar_data.getvalue()
         except Exception as e:
-            logger.warning(f"Failed to get avatar for user {msg.from_user.id}: {e}")
+            logger.debug(f"Failed to get avatar: {e}")
         
-        # Calculate wins/losses (using pvp_wins as wins, estimate losses)
+        # Get rank title
+        rank_title = get_rank_by_size(game_stat.size_cm)
+        
+        # Calculate wins/losses
         wins = game_stat.pvp_wins
-        # Estimate losses based on reputation (each loss = -2 rep, each win = +5 rep)
-        # This is an approximation since we don't track losses directly
         losses = max(0, (wins * 5 - game_stat.reputation) // 2) if game_stat.reputation < wins * 5 else 0
         
-        # Create profile data (Requirement 12.2)
+        # Get marriage info
+        spouse_name = None
+        try:
+            marriage = await session.scalar(
+                select(Marriage).where(
+                    or_(
+                        Marriage.user1_id == user.tg_user_id,
+                        Marriage.user2_id == user.tg_user_id
+                    ),
+                    Marriage.divorced_at.is_(None)
+                )
+            )
+            if marriage:
+                spouse_id = marriage.user2_id if marriage.user1_id == user.tg_user_id else marriage.user1_id
+                spouse = await session.scalar(select(User).where(User.tg_user_id == spouse_id))
+                if spouse:
+                    spouse_name = spouse.username or spouse.first_name
+        except Exception:
+            pass
+        
+        # Guild name
+        guild_name = None
+        if guild_memberships:
+            guild_name = guild_memberships[0].guild.name
+        
+        # Duo partner
+        duo_partner = None
+        if duo_team:
+            partner = duo_team.user1 if duo_team.user2.id == user.id else duo_team.user2
+            duo_partner = partner.username or partner.first_name
+        
+        # Count achievements
+        achievements_count = len(user_achievements) if user_achievements else 0
+        
+        # Count completed quests
+        quests_done = sum(1 for uq in user_quests if uq.completed_at) if user_quests else 0
+        quests_total = len(user_quests) if user_quests else 3
+        
+        # Growth history from game_stat
+        growth_history = []
+        if game_stat.grow_history:
+            growth_history = [entry.get("size", 0) for entry in game_stat.grow_history]
+        
+        # Next league ELO threshold
+        next_league_elo = {
+            League.SCRAP: 1200,
+            League.SILICON: 1500,
+            League.QUANTUM: 2000,
+            League.ELITE: 3000,
+        }.get(league, 3000)
+        
+        # Create profile data
         profile_data = ProfileData(
             username=user.username or user.first_name or f"User {user.tg_user_id}",
             avatar_bytes=avatar_bytes,
@@ -897,45 +958,40 @@ async def cmd_profile(msg: Message, bot: Bot):
             wins=wins,
             losses=losses,
             size_cm=game_stat.size_cm,
+            rank_title=rank_title,
             reputation=game_stat.reputation,
             balance=wallet.balance if wallet else 0,
             grow_count=game_stat.grow_count,
             casino_jackpots=game_stat.casino_jackpots,
+            spouse_name=spouse_name,
+            guild_name=guild_name,
+            duo_partner=duo_partner,
+            achievements_count=achievements_count,
+            achievements_total=24,
+            quests_done=quests_done,
+            quests_total=quests_total,
+            growth_history=growth_history,
+            next_league_elo=next_league_elo,
         )
         
-        # Generate profile image (Requirement 12.1, 12.3)
+        # Generate profile image
         try:
             image_bytes = profile_generator.generate(profile_data)
             photo = BufferedInputFile(image_bytes, filename="profile.png")
             
-            # Build caption with additional info
-            caption_parts = []
+            # Build interactive keyboard
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            kb = InlineKeyboardBuilder()
+            kb.button(text="🎮 Игры", callback_data="gamehub_main")
+            kb.button(text="🏪 Магазин", callback_data="shop_main")
+            kb.button(text="📜 Квесты", callback_data="profile_quests")
+            kb.button(text="🏆 Достижения", callback_data="profile_achievements")
+            kb.adjust(2, 2)
             
-            if guild_memberships:
-                guild_name = guild_memberships[0].guild.name
-                guild_role = guild_memberships[0].role
-                caption_parts.append(f"🛡️ Гильдия: {guild_name} ({guild_role})")
-            
-            if duo_team:
-                partner = duo_team.user1 if duo_team.user2.id == user.id else duo_team.user2
-                caption_parts.append(f"🤝 Дуэт: @{partner.username or str(partner.tg_user_id)}")
-            
-            if user_achievements:
-                achievements_text = ", ".join(ua.achievement.name for ua in user_achievements[:3])
-                if len(user_achievements) > 3:
-                    achievements_text += f" (+{len(user_achievements) - 3})"
-                caption_parts.append(f"🏆 {achievements_text}")
-            
-            caption_parts.append("📋 /games")
-            
-            caption = "\n".join(caption_parts) if caption_parts else None
-            
-            # Send profile image (Requirement 12.4)
-            await msg.reply_photo(photo=photo, caption=caption, parse_mode="HTML")
+            await msg.reply_photo(photo=photo, reply_markup=kb.as_markup())
             
         except Exception as e:
             logger.error(f"Failed to generate profile image: {e}")
-            # Fallback to text profile
             await _send_text_profile(msg, user, game_stat, wallet, league, elo, 
                                     guild_memberships, duo_team, user_achievements, user_quests)
 
@@ -980,6 +1036,78 @@ async def _send_text_profile(msg: Message, user, game_stat, wallet, league, elo,
 
     profile_text += "\n📋 /games"
     await msg.reply(profile_text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "profile_quests")
+async def cb_profile_quests(callback: CallbackQuery):
+    """Show quests from profile button."""
+    from app.services.quests import get_user_quests, assign_daily_quests
+    
+    user_id = callback.from_user.id
+    quests = await get_user_quests(user_id)
+    
+    if not quests:
+        assigned = await assign_daily_quests(user_id, count=3)
+        if assigned:
+            quests = await get_user_quests(user_id)
+    
+    if not quests:
+        await callback.answer("📜 Квесты временно недоступны", show_alert=True)
+        return
+    
+    text = "📜 <b>Твои квесты:</b>\n\n"
+    for quest, user_quest in quests:
+        progress_pct = min(100, int((user_quest.progress / quest.target_value) * 100))
+        filled = progress_pct // 10
+        bar = "█" * filled + "░" * (10 - filled)
+        text += f"<b>{quest.name}</b>\n[{bar}] {user_quest.progress}/{quest.target_value}\n🎁 {quest.reward_amount} монет\n\n"
+    
+    await callback.answer()
+    await callback.message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "profile_achievements")
+async def cb_profile_achievements(callback: CallbackQuery):
+    """Show achievements from profile button."""
+    from app.services.achievements import check_and_award_achievements
+    from app.database.models import UserAchievement, Achievement
+    from sqlalchemy import func
+    
+    user_id = callback.from_user.id
+    
+    # Check for new achievements
+    await check_and_award_achievements(user_id)
+    
+    async_session = get_session()
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_user_id == user_id))
+        if not user:
+            await callback.answer("Профиль не найден", show_alert=True)
+            return
+        
+        # Get user achievements
+        result = await session.execute(
+            select(UserAchievement, Achievement)
+            .join(Achievement)
+            .where(UserAchievement.user_id == user.id)
+        )
+        user_achs = result.fetchall()
+        
+        # Count total
+        total = await session.scalar(select(func.count(Achievement.id)))
+    
+    text = f"🏆 <b>Твои достижения ({len(user_achs)}/{total}):</b>\n\n"
+    
+    if user_achs:
+        for ua, ach in user_achs:
+            text += f"{ach.name}\n"
+    else:
+        text += "<i>Пока нет достижений. Играй чтобы получить!</i>\n"
+    
+    text += "\n/achievements — все доступные"
+    
+    await callback.answer()
+    await callback.message.answer(text, parse_mode="HTML")
 
 
 @router.message(F.text.startswith("/pvp"))

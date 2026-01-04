@@ -1,9 +1,6 @@
 """Tips command handler for chat owners.
 
 Provides actionable recommendations for improving chat management.
-
-**Feature: fortress-update**
-**Validates: Requirements 15.7**
 """
 
 import logging
@@ -11,75 +8,54 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.services.notifications import notification_service
-
 logger = logging.getLogger(__name__)
 
 router = Router()
 
+# Готовые советы для админов
+TIPS = [
+    "💡 Используй /режим для настройки строгости модерации (light/normal/dictatorship)",
+    "💡 Команда /admin в ЛС открывает полную панель управления чатом",
+    "💡 Включи GIF-патруль для автоматической проверки GIF на NSFW контент",
+    "💡 Настрой антирейд через /admin — он автоматически банит при массовом вступлении",
+    "💡 Используй /warn вместо сразу /ban — система страйков работает автоматически",
+    "💡 Бот может анализировать токсичность сообщений — включи в настройках",
+    "💡 Команда /whois покажет информацию о пользователе и его историю",
+    "💡 Настрой автоответы бота через /owner панель (только для владельца бота)",
+    "💡 Бот умеет пересказывать длинные сообщения — используй /tldr",
+    "💡 Цитаты (/q) сохраняются как стикеры — можно добавить в стикерпак",
+]
+
 
 @router.message(Command("советы", "tips"))
 async def cmd_tips(msg: Message):
-    """
-    Handle /советы and /tips commands.
-    
-    Analyzes recent chat activity and provides 3-5 actionable
-    recommendations for the chat owner.
-    
-    **Validates: Requirements 15.7**
-    WHEN a chat owner requests advice with "/советы" or "/tips"
-    THEN the Notification System SHALL analyze recent chat activity
-    and provide 3-5 actionable recommendations.
-    
-    Args:
-        msg: Incoming message
-    """
-    # Only work in group chats
+    """Советы для администраторов чата."""
+    # Только в группах
     if msg.chat.type == "private":
         await msg.reply(
             "💡 Эта команда работает только в групповых чатах.\n"
-            "Используйте её в чате, которым вы управляете."
+            "Используй её в чате, которым управляешь."
         )
         return
     
-    chat_id = msg.chat.id
     user_id = msg.from_user.id
     
-    # Check if user is admin/owner
+    # Проверяем права
     try:
         member = await msg.chat.get_member(user_id)
         if member.status not in ("creator", "administrator"):
-            await msg.reply(
-                "⛔ Эта команда доступна только администраторам чата."
-            )
+            await msg.reply("⛔ Эта команда доступна только администраторам чата.")
             return
     except Exception as e:
         logger.warning(f"Failed to check admin status: {e}")
-        await msg.reply(
-            "❌ Не удалось проверить права доступа. Попробуйте позже."
-        )
+        await msg.reply("❌ Не удалось проверить права доступа.")
         return
     
-    # Send "analyzing" message
-    status_msg = await msg.reply("🔍 Анализирую чат...")
+    import random
+    selected_tips = random.sample(TIPS, min(5, len(TIPS)))
     
-    try:
-        # Generate tips
-        tips = await notification_service.generate_tips(chat_id)
-        
-        # Format tips for display
-        formatted_tips = notification_service.format_tips(tips)
-        
-        # Edit status message with results
-        await status_msg.edit_text(formatted_tips)
-        
-        logger.info(
-            f"Generated {len(tips)} tips for chat {chat_id} "
-            f"requested by user {user_id}"
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to generate tips for chat {chat_id}: {e}")
-        await status_msg.edit_text(
-            "❌ Не удалось проанализировать чат. Попробуйте позже."
-        )
+    text = "📋 <b>Советы по управлению чатом:</b>\n\n"
+    text += "\n\n".join(selected_tips)
+    text += "\n\n<i>Используй /admin в ЛС для полной панели управления</i>"
+    
+    await msg.reply(text, parse_mode="HTML")

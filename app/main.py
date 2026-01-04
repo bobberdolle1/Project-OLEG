@@ -9,8 +9,7 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db, async_session
 from app.database.models import Chat
-from app.handlers import qna, games, moderation, trading, auctions, team_wars, statistics, quotes, vision, random_responses, help
-# Removed: achievements, quests, guilds, duos - unused/stub features
+from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
 from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
 from app.handlers.stickers import router as stickers_router
@@ -23,7 +22,7 @@ from app.handlers.voice import router as voice_router
 from app.handlers.summarizer import router as summarizer_router
 from app.handlers.topic_listener import router as topic_listener_router
 from app.handlers.challenges import router as challenges_router
-# tips_router removed - depends on complex analysis that's not fully implemented
+from app.handlers.tips import router as tips_router
 from app.handlers.blackjack import router as blackjack_router
 from app.handlers.broadcast import router as broadcast_router
 from app.handlers.owner_panel import router as owner_panel_router
@@ -71,6 +70,14 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     logger.info("Инициализация базы данных...")
     await init_db()
     logger.info("База данных инициализирована")
+    
+    # Инициализация достижений и квестов
+    logger.info("Инициализация достижений и квестов...")
+    from app.services.achievements import init_achievements
+    from app.services.quests import init_quests
+    await init_achievements()
+    await init_quests()
+    logger.info("Достижения и квесты инициализированы")
     
     # Register command scopes for different chat types
     logger.info("Регистрация команд для разных типов чатов...")
@@ -317,16 +324,16 @@ def build_dp() -> Dispatcher:
         antiraid.router,
         voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
-        # tips_router removed - not fully implemented
+        tips_router,  # Советы для админов
         quotes.router,  # Цитатник (до qna, чтобы /q не перехватывался general_qna)
         qna.router,
-        # achievements.router removed - no data in DB
+        achievements.router,  # Достижения
         trading.router,
         auctions.router,
-        # quests.router removed - no quests defined
-        # guilds.router removed - complex unused feature
+        quests.router,  # Ежедневные квесты
+        guilds.router,  # Гильдии
         team_wars.router,
-        # duos.router removed - complex unused feature
+        duos.router,  # Дуэты
         statistics.router,
         gif_patrol_router,  # GIF Patrol - анализ GIF на запрещённый контент (до vision)
         stickers_router,  # Реакции на стикеры

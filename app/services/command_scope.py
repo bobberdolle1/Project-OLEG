@@ -8,37 +8,83 @@ logger = logging.getLogger(__name__)
 
 
 # Commands visible in group chats - games, moderation, group features
+# Telegram limit: 100 commands max
 GROUP_COMMANDS = [
-    BotCommand(command="help", description="Справка по командам"),
-    BotCommand(command="games", description="Гайд по играм для новичков"),
-    BotCommand(command="grow", description="Увеличить размер"),
-    BotCommand(command="top", description="Топ-10 игроков по размеру"),
-    BotCommand(command="top_rep", description="Топ-10 по репутации"),
-    BotCommand(command="profile", description="Твой профиль со статистикой"),
-    BotCommand(command="pvp", description="Дуэль с другим игроком"),
-    BotCommand(command="casino", description="Слоты (по умолчанию 10 монет)"),
-    BotCommand(command="achievements", description="Список всех достижений"),
-    BotCommand(command="my_achievements", description="Твои достижения"),
-    BotCommand(command="quests", description="Активные квесты"),
-    BotCommand(command="quest_progress", description="Прогресс по квестам"),
-    BotCommand(command="create_guild", description="Создать гильдию"),
-    BotCommand(command="guild_info", description="Информация о гильдии"),
-    BotCommand(command="create_duo", description="Создать дуэт"),
-    BotCommand(command="duo_stats", description="Статистика дуэта"),
-    BotCommand(command="say", description="Голосовое сообщение от Олега"),
-    BotCommand(command="tips", description="Советы по управлению чатом"),
+    # === Основное ===
+    BotCommand(command="help", description="📚 Справка по командам"),
+    BotCommand(command="profile", description="👤 Твой профиль со статистикой"),
+    BotCommand(command="balance", description="💰 Твой баланс монет"),
+    BotCommand(command="daily", description="🎁 Ежедневный бонус"),
+    
+    # === Игры ===
+    BotCommand(command="games", description="🎮 Игровой хаб с кнопками"),
+    BotCommand(command="grow", description="🌱 Увеличить размер"),
+    BotCommand(command="top", description="🏆 Топ-10 по размеру"),
+    BotCommand(command="challenge", description="⚔️ PvP дуэль"),
+    BotCommand(command="casino", description="🎰 Слоты"),
+    BotCommand(command="roulette", description="🔫 Русская рулетка"),
+    BotCommand(command="coinflip", description="🪙 Монетка"),
+    BotCommand(command="bj", description="🃏 Блэкджек"),
+    
+    # === Мини-игры ===
+    BotCommand(command="fish", description="🎣 Рыбалка"),
+    BotCommand(command="crash", description="🚀 Краш"),
+    BotCommand(command="dice", description="🎲 Кости"),
+    BotCommand(command="guess", description="🔮 Угадай число"),
+    BotCommand(command="wheel", description="🎡 Колесо фортуны"),
+    BotCommand(command="loot", description="📦 Открыть лутбокс"),
+    BotCommand(command="cockfight", description="🐔 Петушиные бои"),
+    
+    # === Магазин ===
+    BotCommand(command="shop", description="🏪 Магазин"),
+    BotCommand(command="inventory", description="🎒 Инвентарь"),
+    BotCommand(command="transfer", description="💸 Перевести монеты"),
+    
+    # === Социальное ===
+    BotCommand(command="quests", description="📜 Ежедневные квесты"),
+    BotCommand(command="achievements", description="🏆 Все достижения"),
+    BotCommand(command="myach", description="🎖 Мои достижения"),
+    BotCommand(command="marry", description="💍 Предложить брак"),
+    BotCommand(command="divorce", description="💔 Развестись"),
+    
+    # === Гильдии ===
+    BotCommand(command="create_guild", description="🏰 Создать гильдию"),
+    BotCommand(command="join_guild", description="🚪 Вступить в гильдию"),
+    BotCommand(command="guild_info", description="📋 Инфо о гильдии"),
+    
+    # === Дуэты ===
+    BotCommand(command="create_duo", description="👥 Создать дуэт"),
+    BotCommand(command="duo_stats", description="📊 Статистика дуэта"),
+    BotCommand(command="top_duos", description="🏅 Топ дуэтов"),
+    
+    # === Цитаты ===
+    BotCommand(command="q", description="💬 Сохранить цитату (реплай)"),
+    
+    # === Утилиты ===
+    BotCommand(command="say", description="🔊 Озвучить текст"),
+    BotCommand(command="tldr", description="📝 Пересказ контента"),
+    BotCommand(command="whois", description="🔍 Инфо о пользователе"),
+    BotCommand(command="stats", description="📈 Статистика чата"),
+    BotCommand(command="cancel", description="❌ Отменить текущую игру"),
+    
+    # === Модерация (для админов) ===
+    BotCommand(command="warn", description="⚠️ Предупреждение (реплай)"),
+    BotCommand(command="mute", description="🔇 Замутить (реплай)"),
+    BotCommand(command="ban", description="🚫 Забанить (реплай)"),
+    BotCommand(command="tips", description="💡 Советы для админов"),
 ]
 
 
 # Commands visible in private chats - admin panel, personal commands
 # Note: /owner is intentionally hidden (anonymous command for bot owner only)
 PRIVATE_COMMANDS = [
-    BotCommand(command="help", description="Справка по командам"),
-    BotCommand(command="start", description="Приветствие"),
-    BotCommand(command="admin", description="Админ-панель для управления чатами"),
-    BotCommand(command="reset", description="Сбросить контекст диалога"),
-    BotCommand(command="myhistory", description="История твоих вопросов"),
-    BotCommand(command="say", description="Голосовое сообщение от Олега"),
+    BotCommand(command="help", description="📚 Справка по командам"),
+    BotCommand(command="start", description="👋 Начать общение"),
+    BotCommand(command="admin", description="⚙️ Админ-панель для чатов"),
+    BotCommand(command="reset", description="🔄 Сбросить контекст диалога"),
+    BotCommand(command="myhistory", description="📜 История вопросов"),
+    BotCommand(command="say", description="🔊 Озвучить текст"),
+    BotCommand(command="tldr", description="📝 Пересказ по ссылке"),
 ]
 
 

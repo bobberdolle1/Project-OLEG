@@ -1603,14 +1603,23 @@ async def cb_owner_persona(callback: CallbackQuery):
         await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
     
-    from app.services.ollama_client import get_global_persona, PERSONA_NAMES
+    from app.services.ollama_client import (
+        get_global_persona, get_random_mode, PERSONA_NAMES, RANDOM_INTERVALS
+    )
     
     current_persona = get_global_persona()
     current_name = PERSONA_NAMES.get(current_persona, current_persona)
+    random_enabled, random_interval = get_random_mode()
+    
+    if random_enabled:
+        interval_name = RANDOM_INTERVALS.get(random_interval, random_interval)
+        mode_text = f"🎲 <b>Рандом</b> ({interval_name})\n<b>Сейчас:</b> {current_name}"
+    else:
+        mode_text = f"<b>Текущая:</b> {current_name}"
     
     text = (
-        "🎭 <b>Персона бота</b>\n\n"
-        f"<b>Текущая:</b> {current_name}\n\n"
+        f"🎭 <b>Персона бота</b>\n\n"
+        f"{mode_text}\n\n"
         "<b>Доступные персоны:</b>\n"
         "• 😎 <b>Олег</b> — дерзкий, уверенный, подкалывает\n"
         "• 🎳 <b>The Dude</b> — расслабленный, философский\n"
@@ -1625,9 +1634,13 @@ async def cb_owner_persona(callback: CallbackQuery):
     
     kb = InlineKeyboardBuilder()
     
+    # Кнопка рандомного режима
+    random_status = "✓ " if random_enabled else ""
+    kb.button(text=f"{random_status}🎲 Рандом", callback_data="owner_persona_random")
+    
     # Кнопки выбора персоны
     for persona_code, persona_name in PERSONA_NAMES.items():
-        selected = "✓ " if persona_code == current_persona else ""
+        selected = "✓ " if persona_code == current_persona and not random_enabled else ""
         kb.button(
             text=f"{selected}{persona_name}",
             callback_data=f"owner_set_persona:{persona_code}"
@@ -1640,6 +1653,171 @@ async def cb_owner_persona(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner_persona_random")
+async def cb_owner_persona_random(callback: CallbackQuery):
+    """Меню настройки рандомного режима персоны."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.ollama_client import get_random_mode, get_random_excluded, RANDOM_INTERVALS, PERSONA_NAMES
+    
+    random_enabled, current_interval, excluded = get_random_mode()
+    
+    # Список исключённых
+    excluded_names = [PERSONA_NAMES.get(p, p) for p in excluded] if excluded else ["нет"]
+    excluded_text = ", ".join(excluded_names)
+    
+    # Сколько персон участвует
+    active_count = len(PERSONA_NAMES) - len(excluded)
+    
+    text = (
+        "🎲 <b>Рандомный режим персоны</b>\n\n"
+        f"<b>Статус:</b> {'✅ Включён' if random_enabled else '❌ Выключен'}\n"
+        f"<b>Интервал:</b> {RANDOM_INTERVALS.get(current_interval, current_interval)}\n"
+        f"<b>Участвует:</b> {active_count} из {len(PERSONA_NAMES)} персон\n"
+        f"<b>Исключены:</b> {excluded_text}\n\n"
+        "<b>Интервалы смены:</b>\n"
+        "• 🎲 <b>Каждое сообщение</b> — новая персона на каждый ответ\n"
+        "• ⏰ <b>Раз в час</b> — смена каждый час\n"
+        "• 🌓 <b>Раз в 12 часов</b> — утром и вечером\n"
+        "• 📅 <b>Раз в день</b> — новая персона каждый день"
+    )
+    
+    kb = InlineKeyboardBuilder()
+    
+    # Кнопка вкл/выкл
+    if random_enabled:
+        kb.button(text="❌ Выключить рандом", callback_data="owner_random_toggle:off")
+    else:
+        kb.button(text="✅ Включить рандом", callback_data="owner_random_toggle:on")
+    
+    # Кнопка исключений
+    kb.button(text="🚫 Исключения", callback_data="owner_random_exclude")
+    
+    # Кнопки интервалов
+    for interval_code, interval_name in RANDOM_INTERVALS.items():
+        selected = "✓ " if interval_code == current_interval else ""
+        kb.button(
+            text=f"{selected}{interval_name}",
+            callback_data=f"owner_random_interval:{interval_code}"
+        )
+    
+    kb.button(text="🔙 К персонам", callback_data="owner_persona")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_random_exclude")
+async def cb_owner_random_exclude(callback: CallbackQuery):
+    """Меню исключения персон из рандома."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.ollama_client import get_random_excluded, PERSONA_NAMES
+    
+    excluded = get_random_excluded()
+    
+    text = (
+        "🚫 <b>Исключения из рандома</b>\n\n"
+        "Выбери персоны, которые <b>НЕ</b> будут участвовать в рандоме.\n\n"
+        "✓ = участвует в рандоме\n"
+        "✗ = исключена из рандома"
+    )
+    
+    kb = InlineKeyboardBuilder()
+    
+    for persona_code, persona_name in PERSONA_NAMES.items():
+        is_excluded = persona_code in excluded
+        status = "✗ " if is_excluded else "✓ "
+        kb.button(
+            text=f"{status}{persona_name}",
+            callback_data=f"owner_toggle_exclude:{persona_code}"
+        )
+    
+    kb.button(text="🔙 Назад", callback_data="owner_persona_random")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_toggle_exclude:"))
+async def cb_owner_toggle_exclude(callback: CallbackQuery):
+    """Переключить исключение персоны из рандома."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    persona_code = callback.data.split(":")[1]
+    
+    from app.services.ollama_client import toggle_random_excluded, PERSONA_NAMES, get_random_excluded
+    
+    # Проверяем, не последняя ли это персона
+    excluded = get_random_excluded()
+    if persona_code not in excluded and len(excluded) >= len(PERSONA_NAMES) - 1:
+        await callback.answer("⚠️ Нельзя исключить все персоны!", show_alert=True)
+        return
+    
+    is_now_excluded = toggle_random_excluded(persona_code)
+    persona_name = PERSONA_NAMES.get(persona_code, persona_code)
+    
+    status = "исключена" if is_now_excluded else "включена"
+    await callback.answer(f"{persona_name} {status}", show_alert=False)
+    logger.info(f"Persona {persona_code} {'excluded from' if is_now_excluded else 'included in'} random by owner {callback.from_user.id}")
+    
+    await cb_owner_random_exclude(callback)
+
+
+@router.callback_query(F.data.startswith("owner_random_toggle:"))
+async def cb_owner_random_toggle(callback: CallbackQuery):
+    """Включить/выключить рандомный режим."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    action = callback.data.split(":")[1]
+    enabled = action == "on"
+    
+    from app.services.ollama_client import set_random_mode, get_random_mode
+    
+    _, current_interval, _ = get_random_mode()
+    set_random_mode(enabled, current_interval)
+    
+    status = "включён" if enabled else "выключен"
+    await callback.answer(f"🎲 Рандом {status}", show_alert=True)
+    logger.info(f"Random mode {'enabled' if enabled else 'disabled'} by owner {callback.from_user.id}")
+    
+    await cb_owner_persona_random(callback)
+
+
+@router.callback_query(F.data.startswith("owner_random_interval:"))
+async def cb_owner_random_interval(callback: CallbackQuery):
+    """Установить интервал рандомной смены."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    interval = callback.data.split(":")[1]
+    
+    from app.services.ollama_client import set_random_mode, get_random_mode, RANDOM_INTERVALS
+    
+    random_enabled, _ = get_random_mode()
+    
+    if set_random_mode(random_enabled, interval):
+        interval_name = RANDOM_INTERVALS.get(interval, interval)
+        await callback.answer(f"⏰ Интервал: {interval_name}", show_alert=True)
+        logger.info(f"Random interval set to {interval} by owner {callback.from_user.id}")
+    else:
+        await callback.answer("❌ Неизвестный интервал", show_alert=True)
+        return
+    
+    await cb_owner_persona_random(callback)
+
+
 @router.callback_query(F.data.startswith("owner_set_persona:"))
 async def cb_owner_set_persona(callback: CallbackQuery):
     """Установить персону бота."""
@@ -1649,7 +1827,10 @@ async def cb_owner_set_persona(callback: CallbackQuery):
     
     persona_code = callback.data.split(":")[1]
     
-    from app.services.ollama_client import set_global_persona, PERSONA_NAMES
+    from app.services.ollama_client import set_global_persona, set_random_mode, PERSONA_NAMES
+    
+    # Выключаем рандом при выборе конкретной персоны
+    set_random_mode(False)
     
     if set_global_persona(persona_code):
         persona_name = PERSONA_NAMES.get(persona_code, persona_code)
@@ -1670,6 +1851,7 @@ async def cb_owner_set_persona(callback: CallbackQuery):
 class UserManagementStates(StatesGroup):
     """FSM состояния для управления пользователями."""
     waiting_user_search = State()
+    waiting_coins_amount = State()  # Ожидание суммы монет
 
 
 @router.callback_query(F.data == "owner_users")
@@ -1809,11 +1991,23 @@ async def show_user_profile(msg_or_callback, user: User, edit: bool = False):
     
     name = f"@{user.username}" if user.username else user.first_name or "Без имени"
     
+    # Получаем общий баланс по всем чатам
+    total_balance = 0
+    async_session = get_session()
+    async with async_session() as session:
+        from app.database.models import UserBalance
+        balances = await session.execute(
+            select(UserBalance).where(UserBalance.user_id == user.tg_user_id)
+        )
+        for bal in balances.scalars():
+            total_balance += bal.balance
+    
     text = f"👤 <b>Профиль пользователя</b>\n\n"
     text += f"<b>Имя:</b> {user.first_name or 'N/A'}\n"
     text += f"<b>Username:</b> @{user.username or 'N/A'}\n"
     text += f"<b>ID:</b> <code>{user.tg_user_id}</code>\n"
     text += f"<b>Репутация:</b> {user.reputation_score}\n"
+    text += f"<b>💰 Баланс:</b> {total_balance:,} монет\n"
     text += f"<b>Сообщений:</b> {msg_count or 0:,}\n"
     
     if game_stat:
@@ -1825,11 +2019,12 @@ async def show_user_profile(msg_or_callback, user: User, edit: bool = False):
     text += f"\n<b>Создан:</b> {user.created_at.strftime('%d.%m.%Y %H:%M') if user.created_at else 'N/A'}"
     
     kb = InlineKeyboardBuilder()
+    kb.button(text="💰 Выдать монеты", callback_data=f"owner_user_coins:{user.tg_user_id}")
     kb.button(text="🔄 Сбросить репутацию", callback_data=f"owner_user_reset_rep:{user.tg_user_id}")
     kb.button(text="🎮 Сбросить игру", callback_data=f"owner_user_reset_game:{user.tg_user_id}")
     kb.button(text="🗑 Удалить юзера", callback_data=f"owner_user_delete:{user.tg_user_id}")
     kb.button(text="🔙 Назад", callback_data="owner_users")
-    kb.adjust(2, 1, 1)
+    kb.adjust(1, 2, 1, 1)
     
     if edit and hasattr(msg_or_callback, 'message'):
         await msg_or_callback.message.edit_text(text, reply_markup=kb.as_markup())
@@ -1977,6 +2172,135 @@ async def cb_owner_delete_user_confirm(callback: CallbackQuery):
         f"✅ Пользователь <code>{tg_user_id}</code> удалён.",
         reply_markup=kb.as_markup()
     )
+
+
+@router.callback_query(F.data.startswith("owner_user_coins:"))
+async def cb_owner_user_coins(callback: CallbackQuery, state: FSMContext):
+    """Меню выдачи монет пользователю."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    tg_user_id = int(callback.data.split(":")[1])
+    
+    # Сохраняем ID пользователя в состояние
+    await state.update_data(coins_target_user=tg_user_id)
+    await state.set_state(UserManagementStates.waiting_coins_amount)
+    
+    kb = InlineKeyboardBuilder()
+    # Быстрые кнопки
+    for amount in [100, 500, 1000, 5000, 10000]:
+        kb.button(text=f"+{amount:,}", callback_data=f"owner_coins_quick:{tg_user_id}:{amount}")
+    kb.button(text="❌ Отмена", callback_data=f"owner_user:{tg_user_id}")
+    kb.adjust(3, 2, 1)
+    
+    await callback.message.edit_text(
+        f"💰 <b>Выдача монет</b>\n\n"
+        f"Пользователь: <code>{tg_user_id}</code>\n\n"
+        "Выбери сумму или введи число (можно отрицательное для снятия):",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_coins_quick:"))
+async def cb_owner_coins_quick(callback: CallbackQuery, state: FSMContext):
+    """Быстрая выдача монет по кнопке."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    parts = callback.data.split(":")
+    tg_user_id = int(parts[1])
+    amount = int(parts[2])
+    
+    await state.clear()
+    await _give_coins_to_user(callback, tg_user_id, amount)
+
+
+@router.message(UserManagementStates.waiting_coins_amount)
+async def handle_coins_amount(msg: Message, state: FSMContext):
+    """Обработка введённой суммы монет."""
+    if not is_owner(msg.from_user.id):
+        return
+    
+    data = await state.get_data()
+    tg_user_id = data.get("coins_target_user")
+    
+    if not tg_user_id:
+        await state.clear()
+        await msg.reply("❌ Ошибка: пользователь не найден")
+        return
+    
+    try:
+        amount = int(msg.text.strip().replace(",", "").replace(" ", ""))
+    except ValueError:
+        await msg.reply("❌ Введи число (например: 1000 или -500)")
+        return
+    
+    await state.clear()
+    await _give_coins_to_user(msg, tg_user_id, amount, is_message=True)
+
+
+async def _give_coins_to_user(msg_or_callback, tg_user_id: int, amount: int, is_message: bool = False):
+    """Выдать/снять монеты пользователю."""
+    from app.database.models import UserBalance
+    
+    async_session = get_session()
+    async with async_session() as session:
+        # Получаем пользователя
+        user = await session.scalar(select(User).where(User.tg_user_id == tg_user_id))
+        if not user:
+            text = "❌ Пользователь не найден"
+            if is_message:
+                await msg_or_callback.reply(text)
+            else:
+                await msg_or_callback.answer(text, show_alert=True)
+            return
+        
+        # Получаем или создаём баланс (используем chat_id=0 для глобального баланса)
+        balance = await session.scalar(
+            select(UserBalance).where(
+                UserBalance.user_id == tg_user_id,
+                UserBalance.chat_id == 0
+            )
+        )
+        
+        if not balance:
+            balance = UserBalance(user_id=tg_user_id, chat_id=0, balance=0)
+            session.add(balance)
+        
+        old_balance = balance.balance
+        balance.balance += amount
+        
+        # Не даём уйти в минус
+        if balance.balance < 0:
+            balance.balance = 0
+        
+        await session.commit()
+        new_balance = balance.balance
+    
+    action = "выдано" if amount > 0 else "снято"
+    
+    name = f"@{user.username}" if user.username else user.first_name or f"id:{tg_user_id}"
+    text = (
+        f"✅ <b>Монеты {action}!</b>\n\n"
+        f"👤 {name}\n"
+        f"💰 {old_balance:,} → {new_balance:,} ({amount:+,})"
+    )
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👤 К профилю", callback_data=f"owner_user:{tg_user_id}")
+    kb.button(text="🔙 К управлению", callback_data="owner_users")
+    kb.adjust(2)
+    
+    if is_message:
+        await msg_or_callback.reply(text, reply_markup=kb.as_markup())
+    else:
+        await msg_or_callback.message.edit_text(text, reply_markup=kb.as_markup())
+        await msg_or_callback.answer()
+    
+    logger.info(f"Owner gave {amount} coins to user {tg_user_id} (new balance: {new_balance})")
 
 
 @router.callback_query(F.data == "owner_users_recent")

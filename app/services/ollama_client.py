@@ -859,13 +859,128 @@ PERSONA_NAMES = {
     "zgeek": "🇿 Z-Гик (военкор)",
 }
 
+# Интервалы рандомной смены персоны
+RANDOM_INTERVALS = {
+    "every_message": "🎲 Каждое сообщение",
+    "hourly": "⏰ Раз в час",
+    "half_day": "🌓 Раз в 12 часов",
+    "daily": "📅 Раз в день",
+}
+
 # Глобальная персона (runtime, меняется через /owner)
 _global_persona: str = "oleg"
+_random_mode: bool = False
+_random_interval: str = "hourly"  # every_message, hourly, half_day, daily
+_last_random_change: float = 0.0
+_cached_random_persona: str = "oleg"
+_random_excluded: set[str] = set()  # Исключённые из рандома персоны
+
+
+def _get_random_persona() -> str:
+    """Выбрать случайную персону (исключая текущую и исключённые)."""
+    import random
+    available = [
+        p for p in PERSONA_PROMPTS.keys() 
+        if p != _cached_random_persona and p not in _random_excluded
+    ]
+    return random.choice(available) if available else _cached_random_persona
+
+
+def _should_change_random_persona() -> bool:
+    """Проверить, нужно ли менять рандомную персону по интервалу."""
+    import time
+    global _last_random_change
+    
+    if _random_interval == "every_message":
+        return True
+    
+    now = time.time()
+    intervals_seconds = {
+        "hourly": 3600,
+        "half_day": 43200,
+        "daily": 86400,
+    }
+    
+    interval = intervals_seconds.get(_random_interval, 3600)
+    if now - _last_random_change >= interval:
+        _last_random_change = now
+        return True
+    return False
 
 
 def get_global_persona() -> str:
-    """Получить текущую глобальную персону."""
+    """Получить текущую глобальную персону (с учётом рандомного режима)."""
+    global _cached_random_persona
+    
+    if _random_mode:
+        if _should_change_random_persona():
+            _cached_random_persona = _get_random_persona()
+            logger.info(f"[PERSONA] Random persona changed to: {_cached_random_persona}")
+        return _cached_random_persona
+    
     return _global_persona
+
+
+def get_random_mode() -> tuple[bool, str, set[str]]:
+    """Получить состояние рандомного режима."""
+    return _random_mode, _random_interval, _random_excluded.copy()
+
+
+def get_random_excluded() -> set[str]:
+    """Получить список исключённых из рандома персон."""
+    return _random_excluded.copy()
+
+
+def toggle_random_excluded(persona: str) -> bool:
+    """
+    Переключить исключение персоны из рандома.
+    
+    Returns:
+        True если персона теперь исключена, False если включена обратно
+    """
+    global _random_excluded
+    if persona not in PERSONA_PROMPTS:
+        return False
+    
+    if persona in _random_excluded:
+        _random_excluded.discard(persona)
+        logger.info(f"[PERSONA] {persona} included in random pool")
+        return False
+    else:
+        # Нельзя исключить все персоны — должна остаться хотя бы одна
+        if len(_random_excluded) >= len(PERSONA_PROMPTS) - 1:
+            logger.warning(f"[PERSONA] Cannot exclude {persona} — at least one persona must remain")
+            return persona in _random_excluded
+        _random_excluded.add(persona)
+        logger.info(f"[PERSONA] {persona} excluded from random pool")
+        return True
+
+
+def set_random_mode(enabled: bool, interval: str = "hourly") -> bool:
+    """
+    Установить рандомный режим персоны.
+    
+    Args:
+        enabled: Включить/выключить рандом
+        interval: Интервал смены (every_message, hourly, half_day, daily)
+    """
+    global _random_mode, _random_interval, _last_random_change, _cached_random_persona
+    import time
+    
+    if interval not in RANDOM_INTERVALS:
+        return False
+    
+    _random_mode = enabled
+    _random_interval = interval
+    
+    if enabled:
+        _last_random_change = time.time()
+        _cached_random_persona = _get_random_persona()
+        logger.info(f"[PERSONA] Random mode enabled, interval: {interval}, first persona: {_cached_random_persona}")
+    else:
+        logger.info(f"[PERSONA] Random mode disabled, back to: {_global_persona}")
+    
+    return True
 
 
 def set_global_persona(persona: str) -> bool:
@@ -1305,7 +1420,7 @@ def _detect_non_cyrillic_text(text: str) -> bool:
     if not text:
         return False
     
-    # Считаем буквы
+    # Считаем буквы (игнорируем цифры и спецсимволы)
     cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
     latin = sum(1 for c in text if 'a' <= c.lower() <= 'z')
     other_scripts = sum(1 for c in text if ord(c) > 0x4E00)  # CJK и другие
@@ -1314,8 +1429,9 @@ def _detect_non_cyrillic_text(text: str) -> bool:
     if total_letters < 10:
         return False
     
-    # Если больше 50% не-кириллица — подозрительно
-    return (latin + other_scripts) / total_letters > 0.5
+    # Если больше 70% не-кириллица — подозрительно (было 50%, слишком агрессивно)
+    # Технические тексты часто содержат латинские аббревиатуры (AOD, FPS, GPU и т.д.)
+    return (latin + other_scripts) / total_letters > 0.7
 
 
 def _check_suspicious_patterns(text: str) -> bool:
@@ -1404,6 +1520,22 @@ SAFE_SHORT_PHRASES = {
     "привет", "пока", "спс", "спасибо", "пж", "плз",
 }
 
+# Технические термины которые не должны триггерить injection защиту
+TECH_TERMS_WHITELIST = {
+    # Дисплеи
+    "гц", "hz", "герц", "герцовка", "aod", "amoled", "oled", "ips", "va", "tn",
+    "нит", "nits", "яркость", "brightness", "refresh rate", "частота обновления",
+    # Железо
+    "fps", "gpu", "cpu", "ram", "ssd", "hdd", "nvme", "pcie", "ddr", "gddr",
+    "rtx", "gtx", "rx", "radeon", "geforce", "intel", "amd", "nvidia",
+    "ghz", "mhz", "tb", "gb", "mb", "kb", "вт", "w", "watt",
+    # Устройства
+    "steam deck", "rog ally", "legion go", "mi band", "xiaomi", "samsung",
+    "iphone", "android", "ios", "windows", "linux", "macos",
+    # Разное
+    "benchmark", "бенчмарк", "тест", "обзор", "review", "spec", "характеристики",
+}
+
 
 def _contains_prompt_injection(text: str) -> bool:
     """
@@ -1427,11 +1559,17 @@ def _contains_prompt_injection(text: str) -> bool:
         logger.debug(f"[INJECTION] Safe phrase passed: '{stripped_text}'")
         return False
     
+    text_lower = text.lower()
+    
+    # Если текст содержит много технических терминов — скорее всего это обычный разговор о железе
+    tech_term_count = sum(1 for term in TECH_TERMS_WHITELIST if term in text_lower)
+    if tech_term_count >= 2:
+        logger.debug(f"[INJECTION] Tech discussion passed (found {tech_term_count} tech terms)")
+        return False
+    
     # Сначала проверяем подозрительные паттерны (base64, капс, спецсимволы)
     if _check_suspicious_patterns(text):
         return True
-    
-    text_lower = text.lower()
 
     # Высокорисковые паттерны — явные попытки манипуляции (срабатывают сразу)
     high_risk_patterns = [

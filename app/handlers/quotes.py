@@ -167,6 +167,7 @@ async def create_quote_image(
     avatar_data: Optional[bytes] = None,
     custom_title: Optional[str] = None,
     full_name: Optional[str] = None,
+    media_data: Optional[bytes] = None,
 ) -> BytesIO:
     """
     Создает изображение цитаты с текстом и именем пользователя.
@@ -178,11 +179,11 @@ async def create_quote_image(
         avatar_data: Байты аватарки пользователя
         custom_title: Кастомный титул в группе
         full_name: Полное имя пользователя
+        media_data: Байты медиа (фото)
     
     Returns:
         BytesIO объект с изображением в формате WebP
     """
-    # RC8: Use default QuoteStyle which now defaults to LIGHT theme
     style = QuoteStyle()
     quote_image = await quote_generator_service.render_quote(
         text=text,
@@ -192,6 +193,7 @@ async def create_quote_image(
         avatar_data=avatar_data,
         custom_title=custom_title,
         full_name=full_name,
+        media_data=media_data,
     )
     
     return BytesIO(quote_image.image_data)
@@ -221,7 +223,9 @@ async def create_quote_chain_image(messages: List[MessageData]) -> BytesIO:
     return BytesIO(quote_image.image_data)
 
 
-async def create_quote_with_comment(text: str, username: str, comment: str = None) -> BytesIO:
+async def create_quote_with_comment(text: str, username: str, comment: str = None, 
+                                     avatar_data: Optional[bytes] = None,
+                                     media_data: Optional[bytes] = None) -> BytesIO:
     """
     Создает изображение цитаты с текстом, именем пользователя и комментарием Олега.
     
@@ -232,16 +236,19 @@ async def create_quote_with_comment(text: str, username: str, comment: str = Non
         text: Текст цитаты
         username: Имя пользователя
         comment: Комментарий Олега (если None, будет сгенерирован)
+        avatar_data: Байты аватарки пользователя
+        media_data: Байты медиа (фото)
     
     Returns:
         BytesIO объект с изображением в формате WebP
     """
-    # RC8: Use default QuoteStyle which now defaults to LIGHT theme
     style = QuoteStyle()
     quote_image = await quote_generator_service.render_roast_quote(
         text=text,
         username=username,
-        style=style
+        style=style,
+        avatar_data=avatar_data,
+        media_data=media_data,
     )
     
     return BytesIO(quote_image.image_data)
@@ -358,9 +365,25 @@ async def _generate_single_message_quote(msg: Message):
     
     # Извлекаем текст из сообщения
     text = extract_message_text(original_msg)
+    
+    # Извлекаем медиа (фото) из сообщения
+    media_data = None
+    if original_msg.photo:
+        try:
+            # Берём среднее качество для баланса размер/качество
+            photo = original_msg.photo[-2] if len(original_msg.photo) > 1 else original_msg.photo[-1]
+            file = await msg.bot.get_file(photo.file_id)
+            media_io = await msg.bot.download_file(file.file_path)
+            media_data = media_io.read()
+            logger.info(f"[QUOTE] Loaded photo {photo.width}x{photo.height}")
+        except Exception as e:
+            logger.warning(f"[QUOTE] Failed to load photo: {e}")
+    
     logger.info(f"[QUOTE] Extracted text: {text[:50] if text else 'None'}...")
-    if not text:
-        await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
+    
+    # Нужен либо текст, либо медиа
+    if not text and not media_data:
+        await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста или фото).")
         return
     
     logger.info(f"[QUOTE] Username: {username}, Full name: {full_name}")
@@ -395,6 +418,7 @@ async def _generate_single_message_quote(msg: Message):
             avatar_data=avatar_data,
             custom_title=custom_title,
             full_name=full_name,
+            media_data=media_data,
         )
         
         # Clean up status message before sending response
@@ -414,7 +438,7 @@ async def _generate_single_message_quote(msg: Message):
         image_io.seek(0)
         quote_id = await save_quote_to_db(
             user_id=save_user_id,
-            text=text,
+            text=text or "[фото]",
             username=username,
             image_io=image_io,
             telegram_chat_id=msg.chat.id,
@@ -591,15 +615,32 @@ async def _generate_roast_quote(msg: Message):
     
     # Извлекаем текст из сообщения
     text = extract_message_text(original_msg)
-    if not text:
-        await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста).")
+    
+    # Извлекаем медиа (фото) из сообщения
+    media_data = None
+    if original_msg.photo:
+        try:
+            photo = original_msg.photo[-2] if len(original_msg.photo) > 1 else original_msg.photo[-1]
+            file = await msg.bot.get_file(photo.file_id)
+            media_io = await msg.bot.download_file(file.file_path)
+            media_data = media_io.read()
+        except Exception as e:
+            logger.warning(f"[QUOTE] Failed to load photo for roast: {e}")
+    
+    # Нужен либо текст, либо медиа
+    if not text and not media_data:
+        await msg.reply("❌ Не могу создать цитату из этого сообщения (нет текста или фото).")
         return
     
     # Определяем автора (учитываем пересланные сообщения)
-    user_id, username, full_name, _ = get_quote_author(original_msg)
+    user_id, username, full_name, user_for_avatar = get_quote_author(original_msg)
+    
+    # Загружаем аватарку
+    avatar_data = None
+    if user_for_avatar and user_id:
+        avatar_data = await get_user_avatar(msg.bot, user_id)
     
     # Start Alive UI status for roast quote (uses thinking category for LLM)
-    # **Validates: Requirements 12.1, 12.2, 12.3**
     status = None
     thread_id = getattr(msg, 'message_thread_id', None)
     try:
@@ -607,12 +648,10 @@ async def _generate_roast_quote(msg: Message):
             msg.chat.id, "thinking", msg.bot, message_thread_id=thread_id
         )
         
-        # Создаем изображение цитаты с комментарием (Requirement 7.4, 7.5)
-        # The roast comment is generated inside the service
-        image_io = await create_quote_with_comment(text, username)
+        # Создаем изображение цитаты с комментарием
+        image_io = await create_quote_with_comment(text, full_name or username, avatar_data=avatar_data, media_data=media_data)
         
         # Clean up status message before sending response
-        # **Property 32: Status cleanup**
         if status:
             await alive_ui_service.finish_status(status, msg.bot)
             status = None
@@ -628,18 +667,18 @@ async def _generate_roast_quote(msg: Message):
         image_io.seek(0)
         quote_id = await save_quote_to_db(
             user_id=save_user_id,
-            text=text,
+            text=text or "[фото]",
             username=username,
             image_io=image_io,
-            comment="[roast mode]",  # Comment is embedded in image
+            comment="[roast mode]",
             telegram_chat_id=msg.chat.id,
-            telegram_message_id=0  # Обновим после отправки
+            telegram_message_id=0
         )
         
         # Создаём клавиатуру с кнопками
         keyboard = build_quote_keyboard(quote_id)
         
-        # Отправляем как стикер (caption не поддерживается для стикеров)
+        # Отправляем как стикер
         sent_msg = await msg.answer_sticker(
             sticker=sticker_file,
             reply_markup=keyboard
@@ -1054,8 +1093,8 @@ async def cb_quote_sticker(callback: CallbackQuery):
                     return
                     
     except Exception as e:
-        logger.error(f"Error in cb_quote_sticker: {e}")
-        await callback.answer("❌ Произошла ошибка", show_alert=True)
+        logger.error(f"Error in cb_quote_sticker: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {str(e)[:50]}", show_alert=True)
 
 
 @router.message(Command("qs"))

@@ -679,6 +679,10 @@ async def _process_qna_message(msg: Message):
                 )
             
             try:
+                # Конвертируем Markdown в HTML
+                from app.utils import markdown_to_html
+                formatted_reply = markdown_to_html(reply)
+                
                 if is_forum:
                     # Используем reply_parameters — работает для всех топиков включая старые
                     logger.info(f"[QNA] Форум: отправка через reply_parameters (topic={topic_id})")
@@ -687,7 +691,8 @@ async def _process_qna_message(msg: Message):
                     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
                     payload = {
                         "chat_id": msg.chat.id,
-                        "text": reply,
+                        "text": formatted_reply,
+                        "parse_mode": "HTML",
                         "reply_parameters": {
                             "message_id": msg.message_id,
                             "chat_id": msg.chat.id
@@ -703,12 +708,34 @@ async def _process_qna_message(msg: Message):
                         else:
                             error_desc = result.get("description", "Unknown error")
                             logger.error(f"[QNA ERROR] API error: {error_desc}")
-                            raise TelegramBadRequest(
-                                method="sendMessage",
-                                message=error_desc
-                            )
+                            # Если ошибка парсинга — пробуем без форматирования
+                            if "can't parse" in error_desc.lower():
+                                payload["text"] = reply
+                                del payload["parse_mode"]
+                                resp = await client.post(api_url, json=payload)
+                                if resp.json().get("ok"):
+                                    logger.info(f"[QNA OK] Ответ отправлен без форматирования")
+                                    sent_message = None
+                                else:
+                                    raise TelegramBadRequest(
+                                        method="sendMessage",
+                                        message=error_desc
+                                    )
+                            else:
+                                raise TelegramBadRequest(
+                                    method="sendMessage",
+                                    message=error_desc
+                                )
                 else:
-                    sent_message = await msg.reply(reply, disable_web_page_preview=True)
+                    try:
+                        sent_message = await msg.reply(formatted_reply, parse_mode="HTML", disable_web_page_preview=True)
+                    except TelegramBadRequest as parse_err:
+                        if "can't parse" in str(parse_err).lower():
+                            # Ошибка парсинга — отправляем без форматирования
+                            logger.warning(f"[QNA] Parse error, sending without formatting")
+                            sent_message = await msg.reply(reply, disable_web_page_preview=True)
+                        else:
+                            raise
                 logger.info(f"[QNA OK] Ответ отправлен в chat={msg.chat.id}, topic={topic_id}")
             except TelegramBadRequest as e:
                 error_msg = str(e).lower()
@@ -725,7 +752,8 @@ async def _process_qna_message(msg: Message):
                         thread_id_to_use = topic_id if topic_id else None
                         sent_message = await msg.bot.send_message(
                             chat_id=msg.chat.id,
-                            text=reply,
+                            text=formatted_reply,
+                            parse_mode="HTML",
                             message_thread_id=thread_id_to_use,
                             disable_web_page_preview=True
                         )
@@ -738,7 +766,7 @@ async def _process_qna_message(msg: Message):
                                 logger.info(f"[QNA FALLBACK2] Пробуем без thread_id")
                                 sent_message = await msg.bot.send_message(
                                     chat_id=msg.chat.id,
-                                    text=reply,
+                                    text=reply,  # Без форматирования на последней попытке
                                     disable_web_page_preview=True
                                 )
                                 logger.info(f"[QNA FALLBACK2 OK] Отправлено без thread_id")

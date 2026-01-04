@@ -13,10 +13,10 @@ from datetime import datetime, timedelta
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import UserReputation, ReputationHistory
+from app.database.models import UserReputation, ReputationHistory, User
 from app.database.session import get_session
 from app.utils import utc_now
 
@@ -212,6 +212,9 @@ class ReputationService:
             )
             session.add(history_entry)
             
+            # Sync global User.reputation_score (average across all chats)
+            await self._sync_global_reputation(user_id, session)
+            
             await session.commit()
             
             # Update cache
@@ -311,6 +314,42 @@ class ReputationService:
         finally:
             if close_session:
                 await session.close()
+    
+    # =========================================================================
+    # Read-Only Status Methods
+    # =========================================================================
+    # Global Reputation Sync
+    # =========================================================================
+    
+    async def _sync_global_reputation(
+        self,
+        user_id: int,
+        session: AsyncSession
+    ) -> None:
+        """
+        Sync User.reputation_score with average from UserReputation.
+        
+        This keeps the global reputation_score in User model updated
+        based on the average reputation across all chats.
+        """
+        try:
+            # Calculate average reputation across all chats
+            result = await session.execute(
+                select(func.avg(UserReputation.score))
+                .where(UserReputation.user_id == user_id)
+            )
+            avg_score = result.scalar()
+            
+            if avg_score is not None:
+                # Update User.reputation_score
+                user = await session.scalar(
+                    select(User).where(User.tg_user_id == user_id)
+                )
+                if user:
+                    user.reputation_score = int(avg_score)
+                    logger.debug(f"Synced global reputation for user {user_id}: {int(avg_score)}")
+        except Exception as e:
+            logger.warning(f"Failed to sync global reputation for user {user_id}: {e}")
     
     # =========================================================================
     # Read-Only Status Methods

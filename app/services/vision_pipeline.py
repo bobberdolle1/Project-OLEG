@@ -411,7 +411,7 @@ Describe factually without opinions.""",
     
     async def _generate_oleg_comment(self, description: str, user_query: Optional[str] = None, img_type: ImageType = ImageType.GENERAL) -> Optional[str]:
         """
-        Генерирует комментарий в стиле Олега.
+        Генерирует комментарий в стиле текущей персоны.
         
         Args:
             description: Описание изображения от Vision модели
@@ -419,12 +419,12 @@ Describe factually without opinions.""",
             img_type: Тип изображения для контекста
             
         Returns:
-            Комментарий Олега или None при ошибке
+            Комментарий в стиле персоны или None при ошибке
         """
         try:
             # Проверяем нужен ли веб-поиск для фактчекинга
             from app.services.web_search_trigger import should_trigger_web_search
-            from app.services.ollama_client import _execute_web_search
+            from app.services.ollama_client import _execute_web_search, get_global_persona, PERSONA_PROMPTS, _get_current_date_context
             
             # Объединяем описание и вопрос для проверки триггеров
             combined_text = f"{description} {user_query or ''}"
@@ -474,12 +474,29 @@ Describe factually without opinions.""",
             from app.services.ollama_client import get_active_model
             active_model = await get_active_model("base")
             
+            # Используем ГЛОБАЛЬНУЮ персону для vision комментариев
+            persona = get_global_persona()
+            prompt_template = PERSONA_PROMPTS.get(persona, PERSONA_PROMPTS["oleg"])
+            system_prompt = prompt_template.format(current_date=_get_current_date_context())
+            
+            # Добавляем инструкции для vision
+            system_prompt += """
+
+СЕЙЧАС ТЫ КОММЕНТИРУЕШЬ ИЗОБРАЖЕНИЕ:
+• Описание изображения уже есть — не повторяй его
+• Сразу комментируй в своём стиле
+• Если техническая проблема — дай решение
+• Если мем — кратко отреагируй
+• 2-5 предложений максимум"""
+            
+            logger.info(f"Vision Step 2: Using persona '{persona}' for comment")
+            
             payload = {
                 "model": active_model,
                 "messages": [
                     {
                         "role": "system",
-                        "content": self.OLEG_VISION_SYSTEM_PROMPT
+                        "content": system_prompt
                     },
                     {
                         "role": "user",
@@ -494,7 +511,7 @@ Describe factually without opinions.""",
                 }
             }
             
-            logger.info(f"Vision Step 2: Generating Oleg comment with {active_model}")
+            logger.info(f"Vision Step 2: Generating comment with {active_model}")
             
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.post(

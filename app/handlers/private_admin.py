@@ -432,12 +432,6 @@ async def cb_bot_settings(callback: CallbackQuery, bot: Bot):
             value = int(parts[4])
             config.auto_reply_chance = value
             await callback.answer(f"✅ Автоответ: {value}%")
-        elif action == "persona":
-            # Смена персоны бота
-            persona_value = parts[4]  # oleg или dude
-            config.persona = persona_value
-            persona_names = {"oleg": "😎 Олег", "dude": "🎳 The Dude"}
-            await callback.answer(f"✅ Персона: {persona_names.get(persona_value, persona_value)}")
         elif action == "quotes":
             config.quotes_enabled = not config.quotes_enabled
             await callback.answer(f"{'✅ Цитаты включены' if config.quotes_enabled else '❌ Цитаты выключены'}")

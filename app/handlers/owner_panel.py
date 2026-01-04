@@ -1577,6 +1577,7 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     
     kb.button(text="⚙️ Функции бота", callback_data="owner_features")
+    kb.button(text="🎭 Персона", callback_data="owner_persona")
     kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
     kb.button(text="📊 Статус системы", callback_data="owner_status")
     kb.button(text="📈 Общая статистика", callback_data="owner_stats")
@@ -1587,8 +1588,79 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     kb.button(text="🚨 Экстренные действия", callback_data="owner_emergency")
     
-    kb.adjust(2, 2, 2, 2, 2)
+    kb.adjust(2, 2, 2, 2, 2, 1)
     return kb
+
+
+# ============================================================================
+# Управление персоной (глобальная личность бота)
+# ============================================================================
+
+@router.callback_query(F.data == "owner_persona")
+async def cb_owner_persona(callback: CallbackQuery):
+    """Меню управления персоной бота."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.ollama_client import get_global_persona, PERSONA_NAMES
+    
+    current_persona = get_global_persona()
+    current_name = PERSONA_NAMES.get(current_persona, current_persona)
+    
+    text = (
+        "🎭 <b>Персона бота</b>\n\n"
+        f"<b>Текущая:</b> {current_name}\n\n"
+        "<b>Доступные персоны:</b>\n"
+        "• 😎 <b>Олег</b> — дерзкий, уверенный, подкалывает\n"
+        "• 🎳 <b>The Dude</b> — расслабленный, философский\n"
+        "• ☭ <b>Сталин</b> — авторитарный, советская риторика\n"
+        "• 🌸 <b>Аниме-тян</b> — кавайная, милая, с эмодзи\n"
+        "• 🇺🇸 <b>Трамп</b> — MAKE HARDWARE GREAT AGAIN\n"
+        "• 🇷🇺 <b>Путин</b> — гарант стабильности FPS\n"
+        "• 🐘 <b>Поздняков</b> — МЖГ, степашки, база\n"
+        "• 🇿 <b>Z-Гик</b> — военкор технического фронта\n\n"
+        "Персона применяется <b>глобально</b> ко всем чатам."
+    )
+    
+    kb = InlineKeyboardBuilder()
+    
+    # Кнопки выбора персоны
+    for persona_code, persona_name in PERSONA_NAMES.items():
+        selected = "✓ " if persona_code == current_persona else ""
+        kb.button(
+            text=f"{selected}{persona_name}",
+            callback_data=f"owner_set_persona:{persona_code}"
+        )
+    
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_set_persona:"))
+async def cb_owner_set_persona(callback: CallbackQuery):
+    """Установить персону бота."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    persona_code = callback.data.split(":")[1]
+    
+    from app.services.ollama_client import set_global_persona, PERSONA_NAMES
+    
+    if set_global_persona(persona_code):
+        persona_name = PERSONA_NAMES.get(persona_code, persona_code)
+        await callback.answer(f"✅ Персона изменена: {persona_name}", show_alert=True)
+        logger.info(f"Persona changed to {persona_code} by owner {callback.from_user.id}")
+    else:
+        await callback.answer("❌ Неизвестная персона", show_alert=True)
+        return
+    
+    # Обновляем меню
+    await cb_owner_persona(callback)
 
 
 # ============================================================================

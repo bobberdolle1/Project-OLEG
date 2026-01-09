@@ -363,25 +363,52 @@ async def cmd_marry(msg: Message):
             target_id = reply_user.id
             target_name = reply_user.username or reply_user.first_name
     
-    # Parse @username from command
-    if not target_id:
-        parts = (msg.text or "").split()
-        for part in parts[1:]:
-            if part.startswith("@"):
-                target_name = part[1:]
-                # We can't get user ID from username without database lookup
-                # For now, require reply to message
+    # Check for text_mention entities (when user is mentioned via @)
+    if not target_id and msg.entities:
+        for entity in msg.entities:
+            if entity.type == "text_mention" and entity.user:
+                if not entity.user.is_bot and entity.user.id != proposer_id:
+                    target_id = entity.user.id
+                    target_name = entity.user.username or entity.user.first_name
+                    logger.info(f"[MARRY] Found text_mention: {target_id}")
+                    break
+            elif entity.type == "mention":
+                # Extract username from text
+                username = msg.text[entity.offset + 1:entity.offset + entity.length]  # skip @
+                target_name = username
+                logger.info(f"[MARRY] Found mention: @{username}, need to lookup user_id")
+                # Try to find user in database by username
+                from app.database.models import UserProfile
+                async_session = get_session()
+                async with async_session() as session:
+                    result = await session.execute(
+                        select(UserProfile).where(UserProfile.username == username)
+                    )
+                    user_profile = result.scalars().first()
+                    if user_profile:
+                        target_id = user_profile.user_id
+                        logger.info(f"[MARRY] Found user_id from DB: {target_id}")
                 break
     
     logger.info(f"[MARRY] target_id={target_id}, target_name={target_name}")
     
     if not target_id:
-        await msg.reply(
-            "💍 <b>Как сделать предложение:</b>\n\n"
-            "Ответь на сообщение человека командой /marry\n\n"
-            "<i>Пример: ответь на сообщение и напиши /marry</i>",
-            parse_mode="HTML"
-        )
+        if target_name:
+            # Username was mentioned but user not found in DB
+            await msg.reply(
+                f"❌ Не могу найти @{target_name} в базе.\n\n"
+                "Этот человек должен хотя бы раз написать в чат, чтобы я его запомнил.\n"
+                "Или ответь на его сообщение командой /marry",
+                parse_mode="HTML"
+            )
+        else:
+            await msg.reply(
+                "💍 <b>Как сделать предложение:</b>\n\n"
+                "• Ответь на сообщение: /marry\n"
+                "• Или упомяни: /marry @username\n\n"
+                "<i>Человек должен хотя бы раз написать в чат</i>",
+                parse_mode="HTML"
+            )
         return
     
     # Check if proposer is already married

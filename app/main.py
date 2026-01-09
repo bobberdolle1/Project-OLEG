@@ -1,5 +1,26 @@
 import asyncio
 import logging
+import sys
+
+# uvloop — быстрый event loop для Linux/macOS (даёт ~20-30% прирост I/O)
+if sys.platform != "win32":
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
+
+# orjson — быстрая JSON сериализация (в 3-10x быстрее стандартного json)
+try:
+    import orjson
+    
+    def _orjson_dumps(data) -> str:
+        return orjson.dumps(data).decode("utf-8")
+    
+    ORJSON_AVAILABLE = True
+except ImportError:
+    ORJSON_AVAILABLE = False
+
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -326,6 +347,7 @@ def build_dp() -> Dispatcher:
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
         tips_router,  # Советы для админов
         quotes.router,  # Цитатник (до qna, чтобы /q не перехватывался general_qna)
+        marriages_router,  # Роутер для системы браков (до qna!)
         qna.router,
         achievements.router,  # Достижения
         trading.router,
@@ -341,7 +363,6 @@ def build_dp() -> Dispatcher:
         random_responses.router,  # Роутер для рандомных ответов
         reactions_router,  # Роутер для обработки реакций на цитаты
         oleg_reactions_router,  # Роутер для реакций на сообщения Олега (Requirements 8.x)
-        marriages_router,  # Роутер для системы браков (Requirements 9.x)
         content_downloader_router,  # Роутер для скачивания контента
         chat_join_router,  # Роутер для обработки событий добавления в чат
         topic_listener_router,  # Роутер для глобального слушателя топиков (RAG) - должен быть последним
@@ -357,12 +378,35 @@ async def main():
     logger.info(f"Модель: {settings.ollama_model}")
     logger.info(f"Redis: {'включен' if settings.redis_enabled else 'выключен'}")
     logger.info(f"Уровень логов: {settings.log_level}")
+    
+    # Логируем оптимизации
+    if sys.platform != "win32":
+        try:
+            import uvloop
+            logger.info("uvloop: включен")
+        except ImportError:
+            logger.info("uvloop: не установлен")
+    else:
+        logger.info("uvloop: недоступен на Windows")
 
     if not settings.bot_token:
         logger.error("TELEGRAM_BOT_TOKEN не установлен!")
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Создаём бота с orjson для быстрой сериализации
+    if ORJSON_AVAILABLE:
+        from aiohttp import ClientSession
+        session = ClientSession(json_serialize=_orjson_dumps)
+        bot = Bot(
+            token=settings.bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            session=session,
+        )
+        logger.info("orjson: включен для JSON сериализации")
+    else:
+        bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        logger.info("orjson: не установлен, используется стандартный json")
+    
     dp = build_dp()
 
     await on_startup(bot, dp)

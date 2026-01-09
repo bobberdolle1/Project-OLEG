@@ -35,6 +35,7 @@ APScheduler = "*"
 pytz = "*"
 python-dateutil = "*"
 uvloop = { version = "*", markers = "sys_platform != 'win32'" }
+orjson = "*"
 Pillow = "*"
 yt-dlp = "*"
 chromadb = "*"

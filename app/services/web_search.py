@@ -226,28 +226,28 @@ class WebSearchService:
                     headers=headers,
                     timeout=8.0
                 )
-                    
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    results = []
-                    for item in data.get("results", [])[:max_results]:
-                        results.append(SearchResult(
-                            title=item.get("title", ""),
-                            snippet=item.get("content", ""),
-                            url=item.get("url", ""),
-                            source="searxng",
-                            freshness=item.get("publishedDate"),
-                        ))
-                    
-                    if results:
-                        self._working_searxng = instance_url
-                        logger.info(f"[SEARXNG] {instance_url}: {len(results)} results for: {query[:30]}...")
-                        return SearchResponse(
-                            results=results,
-                            query=query,
-                            provider=f"searxng:{instance_url}"
-                        )
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                results = []
+                for item in data.get("results", [])[:max_results]:
+                    results.append(SearchResult(
+                        title=item.get("title", ""),
+                        snippet=item.get("content", ""),
+                        url=item.get("url", ""),
+                        source="searxng",
+                        freshness=item.get("publishedDate"),
+                    ))
+                
+                if results:
+                    self._working_searxng = instance_url
+                    logger.info(f"[SEARXNG] {instance_url}: {len(results)} results for: {query[:30]}...")
+                    return SearchResponse(
+                        results=results,
+                        query=query,
+                        provider=f"searxng:{instance_url}"
+                    )
                         
             except Exception as e:
                 logger.warning(f"[SEARXNG] {instance_url} failed: {e}")
@@ -286,19 +286,19 @@ class WebSearchService:
             )
             response.raise_for_status()
             data = response.json()
-                
-                results = []
-                for item in data.get("web", {}).get("results", []):
-                    results.append(SearchResult(
-                        title=item.get("title", ""),
-                        snippet=item.get("description", ""),
-                        url=item.get("url", ""),
-                        source="brave",
-                        freshness=item.get("age"),
-                    ))
-                
-                logger.info(f"[BRAVE] Found {len(results)} results for: {query[:30]}...")
-                return SearchResponse(results=results, query=query, provider="brave")
+            
+            results = []
+            for item in data.get("web", {}).get("results", []):
+                results.append(SearchResult(
+                    title=item.get("title", ""),
+                    snippet=item.get("description", ""),
+                    url=item.get("url", ""),
+                    source="brave",
+                    freshness=item.get("age"),
+                ))
+            
+            logger.info(f"[BRAVE] Found {len(results)} results for: {query[:30]}...")
+            return SearchResponse(results=results, query=query, provider="brave")
                 
         except Exception as e:
             logger.warning(f"[BRAVE] Search error: {e}")

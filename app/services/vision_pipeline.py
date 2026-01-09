@@ -351,55 +351,55 @@ Describe factually without opinions.""",
                 json=payload,
                 timeout=self._timeout
             )
-                response.raise_for_status()
-                
-                data = response.json()
-                
-                # Логируем полный ответ для диагностики
-                logger.debug(f"Vision Step 1: Full API response keys: {list(data.keys())}")
-                
-                message = data.get("message", {})
-                raw_content = message.get("content", "").strip()
-                
-                # Проверяем альтернативные поля ответа
-                if not raw_content:
-                    # Некоторые модели возвращают в response напрямую
-                    raw_content = data.get("response", "").strip()
-                
-                if not raw_content:
-                    # Проверяем done_reason — может быть ошибка
-                    done_reason = data.get("done_reason", "")
-                    if done_reason:
-                        logger.warning(f"Vision Step 1: done_reason={done_reason}")
-                
-                # Логируем сырой ответ для диагностики
-                if raw_content:
-                    logger.debug(f"Vision Step 1: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
-                else:
-                    logger.warning(f"Vision Step 1: Model returned empty content. Full response: {str(data)[:500]}")
-                    return None
-                
-                # Фильтруем thinking-теги если есть
-                content = think_filter.filter(raw_content)
-                
-                if content and content != think_filter.fallback_message:
-                    logger.info(f"Vision Step 1: Got description ({len(content)} chars)")
-                    # Сохраняем в кэш
-                    _description_cache[image_hash] = content
-                    return content
-                
-                # Если после фильтрации пусто — возможно весь ответ был в think-тегах
-                # Попробуем извлечь контент из think-тегов как fallback
-                import re
-                think_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
-                if think_match:
-                    think_content = think_match.group(1).strip()
-                    if think_content:
-                        logger.warning(f"Vision Step 1: Using think content as fallback ({len(think_content)} chars)")
-                        return think_content
-                
-                logger.warning(f"Vision Step 1: Empty after filter. Raw was: {raw_content[:100]}...")
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Логируем полный ответ для диагностики
+            logger.debug(f"Vision Step 1: Full API response keys: {list(data.keys())}")
+            
+            message = data.get("message", {})
+            raw_content = message.get("content", "").strip()
+            
+            # Проверяем альтернативные поля ответа
+            if not raw_content:
+                # Некоторые модели возвращают в response напрямую
+                raw_content = data.get("response", "").strip()
+            
+            if not raw_content:
+                # Проверяем done_reason — может быть ошибка
+                done_reason = data.get("done_reason", "")
+                if done_reason:
+                    logger.warning(f"Vision Step 1: done_reason={done_reason}")
+            
+            # Логируем сырой ответ для диагностики
+            if raw_content:
+                logger.debug(f"Vision Step 1: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
+            else:
+                logger.warning(f"Vision Step 1: Model returned empty content. Full response: {str(data)[:500]}")
                 return None
+            
+            # Фильтруем thinking-теги если есть
+            content = think_filter.filter(raw_content)
+            
+            if content and content != think_filter.fallback_message:
+                logger.info(f"Vision Step 1: Got description ({len(content)} chars)")
+                # Сохраняем в кэш
+                _description_cache[image_hash] = content
+                return content
+            
+            # Если после фильтрации пусто — возможно весь ответ был в think-тегах
+            # Попробуем извлечь контент из think-тегов как fallback
+            import re
+            think_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+            if think_match:
+                think_content = think_match.group(1).strip()
+                if think_content:
+                    logger.warning(f"Vision Step 1: Using think content as fallback ({len(think_content)} chars)")
+                    return think_content
+            
+            logger.warning(f"Vision Step 1: Empty after filter. Raw was: {raw_content[:100]}...")
+            return None
                 
         except httpx.ConnectError:
             logger.error("Vision Step 1: Cannot connect to Ollama server")
@@ -521,39 +521,39 @@ Describe factually without opinions.""",
                 json=payload,
                 timeout=self._timeout
             )
-                response.raise_for_status()
-                
-                data = response.json()
-                message = data.get("message", {})
-                raw_content = message.get("content", "").strip()
-                
-                # Логируем сырой ответ для диагностики
-                if raw_content:
-                    logger.debug(f"Vision Step 2: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
-                else:
-                    logger.warning(f"Vision Step 2: Model returned empty content")
-                    return None
-                
-                # Фильтруем thinking-теги
-                content = think_filter.filter(raw_content)
-                
-                if content and content != think_filter.fallback_message:
-                    logger.info(f"Vision Step 2: Generated comment ({len(content)} chars)")
-                    return content
-                
-                # Если после фильтрации пусто — попробуем извлечь из think-тегов
-                import re
-                think_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
-                if think_match:
-                    think_content = think_match.group(1).strip()
-                    # Ищем финальный ответ после think
-                    after_think = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
-                    if after_think:
-                        logger.info(f"Vision Step 2: Using content after think tags ({len(after_think)} chars)")
-                        return after_think
-                
-                logger.warning(f"Vision Step 2: Empty after filter. Raw was: {raw_content[:100]}...")
+            response.raise_for_status()
+            
+            data = response.json()
+            message = data.get("message", {})
+            raw_content = message.get("content", "").strip()
+            
+            # Логируем сырой ответ для диагностики
+            if raw_content:
+                logger.debug(f"Vision Step 2: Raw response ({len(raw_content)} chars): {raw_content[:200]}...")
+            else:
+                logger.warning(f"Vision Step 2: Model returned empty content")
                 return None
+            
+            # Фильтруем thinking-теги
+            content = think_filter.filter(raw_content)
+            
+            if content and content != think_filter.fallback_message:
+                logger.info(f"Vision Step 2: Generated comment ({len(content)} chars)")
+                return content
+            
+            # Если после фильтрации пусто — попробуем извлечь из think-тегов
+            import re
+            think_match = re.search(r'<think>(.*?)</think>', raw_content, re.DOTALL | re.IGNORECASE)
+            if think_match:
+                think_content = think_match.group(1).strip()
+                # Ищем финальный ответ после think
+                after_think = re.sub(r'<think>.*?</think>', '', raw_content, flags=re.DOTALL | re.IGNORECASE).strip()
+                if after_think:
+                    logger.info(f"Vision Step 2: Using content after think tags ({len(after_think)} chars)")
+                    return after_think
+            
+            logger.warning(f"Vision Step 2: Empty after filter. Raw was: {raw_content[:100]}...")
+            return None
                 
         except httpx.ConnectError:
             logger.error("Vision Step 2: Cannot connect to Ollama server")

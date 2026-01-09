@@ -393,19 +393,24 @@ async def main():
         logger.error("TELEGRAM_BOT_TOKEN не установлен!")
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
-    # Создаём бота с orjson для быстрой сериализации
+    # Создаём бота с orjson для быстрой сериализации (через monkey-patch)
     if ORJSON_AVAILABLE:
-        from aiohttp import ClientSession
-        session = ClientSession(json_serialize=_orjson_dumps)
-        bot = Bot(
-            token=settings.bot_token,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-            session=session,
-        )
-        logger.info("orjson: включен для JSON сериализации")
-    else:
-        bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        logger.info("orjson: не установлен, используется стандартный json")
+        import json
+        # Патчим стандартный json модуль для использования orjson
+        _original_dumps = json.dumps
+        def _patched_dumps(*args, **kwargs):
+            # Убираем несовместимые kwargs
+            kwargs.pop('ensure_ascii', None)
+            kwargs.pop('separators', None)
+            kwargs.pop('indent', None)
+            try:
+                return orjson.dumps(args[0]).decode('utf-8') if args else '{}'
+            except (TypeError, orjson.JSONEncodeError):
+                return _original_dumps(*args, **kwargs)
+        json.dumps = _patched_dumps
+        logger.info("orjson: включен (monkey-patch json.dumps)")
+    
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     
     dp = build_dp()
 

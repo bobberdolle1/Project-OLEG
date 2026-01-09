@@ -30,4 +30,5 @@ pyttsx3
 
 # STT
 faster-whisper
-numpy
+numpy==1.26.4
+

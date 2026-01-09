@@ -14,7 +14,7 @@ from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, UserBalance, GameStat
+from app.database.models import User, GameStat
 from app.utils import utc_now
 from app.services.mini_games import (
     fishing_game, crash_engine, dice_game, guess_engine,
@@ -25,6 +25,7 @@ from app.services.state_manager import state_manager
 from app.services.economy import economy_service
 from app.services.inventory import inventory_service, ITEM_CATALOG, ItemType
 from app.services.fishing_stats import fishing_stats_service
+from app.services import wallet_service
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -41,46 +42,20 @@ COCK_PREFIX = "cock:"
 
 
 async def get_user_balance(user_id: int, chat_id: int) -> int:
-    """Get user balance, create if not exists."""
-    async_session = get_session()
-    async with async_session() as session:
-        res = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = res.scalars().first()
-        if not balance:
-            balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=100)
-            session.add(balance)
-            await session.commit()
-        return balance.balance
+    """Get user balance from unified Wallet."""
+    return await wallet_service.get_balance(user_id)
 
 
 async def update_user_balance(user_id: int, chat_id: int, change: int) -> int:
     """Update user balance and return new value."""
-    async_session = get_session()
-    async with async_session() as session:
-        res = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = res.scalars().first()
-        if not balance:
-            balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=100)
-            session.add(balance)
-        
-        balance.balance += change
-        if change > 0:
-            balance.total_won += change
-        else:
-            balance.total_lost += abs(change)
-        
-        await session.commit()
-        return balance.balance
+    if change > 0:
+        result = await wallet_service.add_balance(user_id, change, "mini_game win")
+    elif change < 0:
+        result = await wallet_service.deduct_balance(user_id, abs(change), "mini_game loss")
+    else:
+        return await wallet_service.get_balance(user_id)
+    
+    return result.balance
 
 
 # ============================================================================

@@ -12,11 +12,12 @@ from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, GameChallenge, UserBalance
+from app.database.models import User, GameChallenge
 from app.services.game_engine import game_engine, ChallengeStatus, GameType
 from app.services.state_manager import state_manager
 from app.services.duel_engine import DuelEngine, DuelState, DuelStatus, Zone, OLEG_USER_ID
 from app.handlers.games import ensure_user
+from app.services import wallet_service
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -51,59 +52,19 @@ ZONE_EMOJI = {
 
 
 async def ensure_user_balance(user_id: int, chat_id: int) -> int:
-    """Ensure user has a balance record, create if not exists."""
-    async_session = get_session()
-    async with async_session() as session:
-        result = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = result.scalars().first()
-        
-        if not balance:
-            balance = UserBalance(
-                user_id=user_id,
-                chat_id=chat_id,
-                balance=100,
-                total_won=0,
-                total_lost=0
-            )
-            session.add(balance)
-            await session.commit()
-            return 100
-        
-        return balance.balance
+    """Ensure user has a balance record using unified wallet."""
+    return await wallet_service.get_balance(user_id)
 
 
 async def sync_balance_to_db(user_id: int, chat_id: int, new_balance: int, won: int = 0, lost: int = 0):
-    """Sync in-memory balance to database."""
-    async_session = get_session()
-    async with async_session() as session:
-        result = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = result.scalars().first()
-        
-        if balance:
-            balance.balance = new_balance
-            balance.total_won += won
-            balance.total_lost += lost
-        else:
-            balance = UserBalance(
-                user_id=user_id,
-                chat_id=chat_id,
-                balance=new_balance,
-                total_won=won,
-                total_lost=lost
-            )
-            session.add(balance)
-        
-        await session.commit()
+    """Sync balance changes to unified wallet."""
+    current = await wallet_service.get_balance(user_id)
+    diff = new_balance - current
+    
+    if diff > 0:
+        await wallet_service.add_balance(user_id, diff, "duel win")
+    elif diff < 0:
+        await wallet_service.deduct_balance(user_id, abs(diff), "duel loss")
 
 
 async def save_challenge_to_db(challenge):
@@ -535,10 +496,6 @@ async def start_pvp_challenge(
             await msg.reply(f"❌ У соперника недостаточно монет для ставки {bet_amount}.")
             return
     
-    # Sync balances from DB to game engine
-    game_engine.set_balance(challenger_id, chat_id, challenger_balance)
-    game_engine.set_balance(target_id, chat_id, target_balance_val)
-    
     # Get timeout from chat settings
     from app.services.bot_config import get_pvp_accept_timeout
     timeout_seconds = await get_pvp_accept_timeout(chat_id)
@@ -611,19 +568,17 @@ async def callback_accept_challenge(callback: CallbackQuery):
     # Update database
     await update_challenge_status_in_db(challenge_id, ChallengeStatus.ACCEPTED)
     
-    # Deduct bets from both players
+    # Deduct bets from both players using wallet_service
     if challenge.bet_amount > 0:
-        await sync_balance_to_db(
-            challenge.challenger_id, 
-            challenge.chat_id, 
-            game_engine.get_balance(challenge.challenger_id, challenge.chat_id).balance,
-            lost=challenge.bet_amount
+        await wallet_service.deduct_balance(
+            challenge.challenger_id,
+            challenge.bet_amount,
+            "pvp challenge bet"
         )
-        await sync_balance_to_db(
-            challenge.target_id, 
-            challenge.chat_id, 
-            game_engine.get_balance(challenge.target_id, challenge.chat_id).balance,
-            lost=challenge.bet_amount
+        await wallet_service.deduct_balance(
+            challenge.target_id,
+            challenge.bet_amount,
+            "pvp challenge bet"
         )
     
     # Get challenger name
@@ -1000,12 +955,10 @@ async def finish_pvp_duel(callback: CallbackQuery, duel_id: str, last_round: str
     final_text += f"\n\n📜 <b>Финальный раунд:</b>\n{last_round}"
     final_text += f"\n\n🏆 <b>{winner_name} ПОБЕДИЛ!</b>"
     
-    # Handle bet payouts
+    # Handle bet payouts using wallet_service
     if duel["bet"] > 0:
         winnings = duel["bet"] * 2
-        winner_balance = await ensure_user_balance(winner_id, chat_id)
-        new_balance = winner_balance + winnings
-        await sync_balance_to_db(winner_id, chat_id, new_balance, won=winnings)
+        await wallet_service.add_balance(winner_id, winnings, "pvp duel win")
         final_text += f"\n💰 Выигрыш: {winnings} монет!"
     
     # Update ELO
@@ -1272,20 +1225,14 @@ async def handle_duel_end(
     if duel_state.bet > 0:
         winnings = duel_state.bet * 2
         if winner_id == duel_state.player1_id:
-            # Player won
-            balance = await ensure_user_balance(duel_state.player1_id, chat_id)
-            new_balance = balance + winnings
-            await sync_balance_to_db(
-                duel_state.player1_id, chat_id, new_balance, won=winnings
-            )
+            # Player won - add winnings using wallet_service
+            await wallet_service.add_balance(duel_state.player1_id, winnings, "duel win")
             final_text += f"\n💰 Выигрыш: {winnings} очков!"
         else:
             # Player lost (to Oleg or opponent)
             if not duel_state.is_pve:
                 # PvP: winner gets the pot
-                balance = await ensure_user_balance(winner_id, chat_id)
-                new_balance = balance + winnings
-                await sync_balance_to_db(winner_id, chat_id, new_balance, won=winnings)
+                await wallet_service.add_balance(winner_id, winnings, "duel win")
             final_text += f"\n💸 Проигрыш: {duel_state.bet} очков"
     
     # Update ELO ratings for PvP duels (Requirement 10.1)

@@ -1,7 +1,7 @@
 """Economy Service - Central economy management for all games.
 
 Manages user balances, transactions, items, and shop functionality.
-Version 7.5
+Version 7.5 - Now uses unified wallet_service for balance operations.
 """
 
 import logging
@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_session
-from app.database.models import User, Wallet, UserBalance
+from app.database.models import User, Wallet
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -171,7 +171,11 @@ class InventoryItem:
 
 
 class EconomyService:
-    """Central economy management service."""
+    """Central economy management service.
+    
+    Now uses unified Wallet for all balance operations.
+    The chat_id parameter is kept for backward compatibility but ignored.
+    """
     
     DEFAULT_BALANCE = 100
     DAILY_BONUS = 50
@@ -179,134 +183,46 @@ class EconomyService:
     MAX_STREAK_BONUS = 2.0  # Максимум x2
     
     async def get_balance(self, user_id: int, chat_id: int = 0) -> int:
-        """Get user's balance."""
-        async_session = get_session()
-        async with async_session() as session:
-            # Try UserBalance first (per-chat)
-            if chat_id:
-                res = await session.execute(
-                    select(UserBalance).where(
-                        UserBalance.user_id == user_id,
-                        UserBalance.chat_id == chat_id
-                    )
-                )
-                balance = res.scalars().first()
-                if balance:
-                    return balance.balance
-            
-            # Fallback to Wallet (global)
-            res = await session.execute(
-                select(Wallet).join(User).where(User.tg_user_id == user_id)
-            )
-            wallet = res.scalars().first()
-            return wallet.balance if wallet else self.DEFAULT_BALANCE
+        """Get user's balance from unified Wallet."""
+        # Import here to avoid circular imports
+        from app.services import wallet_service
+        return await wallet_service.get_balance(user_id)
     
     async def add_balance(
         self, user_id: int, amount: int, chat_id: int = 0, reason: str = ""
     ) -> TransactionResult:
-        """Add coins to user's balance."""
+        """Add coins to user's balance using unified Wallet."""
         if amount <= 0:
             return TransactionResult(False, "Сумма должна быть положительной", error_code="INVALID_AMOUNT")
         
-        async_session = get_session()
-        async with async_session() as session:
-            # Get or create balance
-            if chat_id:
-                res = await session.execute(
-                    select(UserBalance).where(
-                        UserBalance.user_id == user_id,
-                        UserBalance.chat_id == chat_id
-                    )
-                )
-                balance = res.scalars().first()
-                if not balance:
-                    balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=self.DEFAULT_BALANCE)
-                    session.add(balance)
-                
-                balance.balance += amount
-                balance.total_won += amount
-                await session.commit()
-                
-                logger.info(f"Added {amount} to user {user_id} in chat {chat_id}: {reason}")
-                return TransactionResult(True, f"+{amount} монет", balance.balance)
-            else:
-                # Global wallet
-                res = await session.execute(
-                    select(Wallet).join(User).where(User.tg_user_id == user_id)
-                )
-                wallet = res.scalars().first()
-                if wallet:
-                    wallet.balance += amount
-                    await session.commit()
-                    return TransactionResult(True, f"+{amount} монет", wallet.balance)
-                
-                return TransactionResult(False, "Кошелёк не найден", error_code="NO_WALLET")
+        from app.services import wallet_service
+        result = await wallet_service.add_balance(user_id, amount, reason)
+        return TransactionResult(result.success, result.message, result.balance, result.error_code)
     
     async def deduct_balance(
         self, user_id: int, amount: int, chat_id: int = 0, reason: str = ""
     ) -> TransactionResult:
-        """Deduct coins from user's balance."""
+        """Deduct coins from user's balance using unified Wallet."""
         if amount <= 0:
             return TransactionResult(False, "Сумма должна быть положительной", error_code="INVALID_AMOUNT")
         
-        current = await self.get_balance(user_id, chat_id)
-        if current < amount:
-            return TransactionResult(
-                False, f"Недостаточно монет. У тебя {current}, нужно {amount}",
-                current, "INSUFFICIENT_FUNDS"
-            )
-        
-        async_session = get_session()
-        async with async_session() as session:
-            if chat_id:
-                res = await session.execute(
-                    select(UserBalance).where(
-                        UserBalance.user_id == user_id,
-                        UserBalance.chat_id == chat_id
-                    )
-                )
-                balance = res.scalars().first()
-                if balance:
-                    balance.balance -= amount
-                    balance.total_lost += amount
-                    await session.commit()
-                    logger.info(f"Deducted {amount} from user {user_id} in chat {chat_id}: {reason}")
-                    return TransactionResult(True, f"-{amount} монет", balance.balance)
-            else:
-                res = await session.execute(
-                    select(Wallet).join(User).where(User.tg_user_id == user_id)
-                )
-                wallet = res.scalars().first()
-                if wallet:
-                    wallet.balance -= amount
-                    await session.commit()
-                    return TransactionResult(True, f"-{amount} монет", wallet.balance)
-        
-        return TransactionResult(False, "Ошибка транзакции", error_code="TRANSACTION_ERROR")
+        from app.services import wallet_service
+        result = await wallet_service.deduct_balance(user_id, amount, reason)
+        return TransactionResult(result.success, result.message, result.balance, result.error_code)
     
     async def transfer(
         self, from_user_id: int, to_user_id: int, amount: int, chat_id: int = 0
     ) -> TransactionResult:
-        """Transfer coins between users."""
+        """Transfer coins between users using unified Wallet."""
         if from_user_id == to_user_id:
             return TransactionResult(False, "Нельзя перевести самому себе", error_code="SELF_TRANSFER")
         
         if amount <= 0:
             return TransactionResult(False, "Сумма должна быть положительной", error_code="INVALID_AMOUNT")
         
-        # Deduct from sender
-        deduct_result = await self.deduct_balance(from_user_id, amount, chat_id, f"transfer to {to_user_id}")
-        if not deduct_result.success:
-            return deduct_result
-        
-        # Add to receiver
-        add_result = await self.add_balance(to_user_id, amount, chat_id, f"transfer from {from_user_id}")
-        if not add_result.success:
-            # Rollback
-            await self.add_balance(from_user_id, amount, chat_id, "transfer rollback")
-            return TransactionResult(False, "Ошибка перевода", error_code="TRANSFER_ERROR")
-        
-        return TransactionResult(True, f"Переведено {amount} монет", deduct_result.new_balance)
+        from app.services import wallet_service
+        result = await wallet_service.transfer(from_user_id, to_user_id, amount)
+        return TransactionResult(result.success, result.message, result.balance, result.error_code)
     
     def get_shop_items(self) -> List[ShopItem]:
         """Get all available shop items."""

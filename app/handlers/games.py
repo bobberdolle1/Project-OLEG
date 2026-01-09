@@ -15,17 +15,212 @@ from app.database.models import User, GameStat, Wallet, Marriage
 from app.services.achievements import check_and_award_achievements
 from app.services.quests import check_and_update_quests
 from app.services.profile import get_full_user_profile
-from app.services.game_engine import game_engine
+from app.services.game_engine import game_engine, RouletteResult, CoinFlipResult
 from app.services.leagues import league_service, League
 from app.services.profile_generator import profile_generator, ProfileData
 from app.services.tournaments import tournament_service, TournamentDiscipline
 from app.services.state_manager import state_manager
 from app.services.sparkline import sparkline_generator
+from app.services import wallet_service
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+# ============================================================================
+# Async wrappers for game_engine using wallet_service
+# ============================================================================
+
+async def play_roulette_async(user_id: int, bet_amount: int = 0) -> RouletteResult:
+    """
+    Play Russian Roulette with unified wallet balance.
+    
+    Args:
+        user_id: Telegram user ID
+        bet_amount: Amount to bet (0 for standard mode)
+        
+    Returns:
+        RouletteResult with outcome
+    """
+    # Get current balance
+    balance = await wallet_service.get_balance(user_id)
+    
+    # Validate bet
+    if bet_amount < 0:
+        return RouletteResult(
+            success=False,
+            message="Ставка должна быть положительной, гений.",
+            shot=False,
+            points_change=0,
+            new_balance=balance,
+            bet_amount=bet_amount,
+            error_code="INVALID_BET"
+        )
+    
+    if bet_amount > 0 and balance < bet_amount:
+        return RouletteResult(
+            success=False,
+            message=f"Недостаточно монет. У тебя {balance}, нужно {bet_amount}",
+            shot=False,
+            points_change=0,
+            new_balance=balance,
+            bet_amount=bet_amount,
+            error_code="INSUFFICIENT_BALANCE"
+        )
+    
+    # Spin the chamber - 1/6 chance of shot
+    chamber = random.randint(0, 5)
+    shot = (chamber == 0)
+    
+    # Roulette settings
+    SHOT_PENALTY = 50
+    SURVIVAL_REWARD = 10
+    
+    # Messages
+    SHOT_MESSAGES = [
+        "💥 БАХ! Пуля нашла твою голову. -{points} очков. Не повезло, бро.",
+        "💀 Щёлк... БАМ! Ты труп. -{points} очков. Классика жанра.",
+        "🔫 Барабан крутится... ВЫСТРЕЛ! -{points} очков. Олег скорбит.",
+    ]
+    SURVIVAL_MESSAGES = [
+        "😮‍💨 Щёлк... пусто! Ты выжил, везунчик. +{points} очков.",
+        "🍀 Барабан крутится... тишина. Живой! +{points} очков.",
+        "😎 Холодный пот, но ты цел. +{points} очков. Красавчик.",
+    ]
+    
+    if bet_amount > 0:
+        # Betting mode
+        if shot:
+            points_change = -bet_amount
+            message = random.choice(SHOT_MESSAGES).format(points=bet_amount)
+            await wallet_service.deduct_balance(user_id, bet_amount, "roulette loss")
+        else:
+            points_change = bet_amount
+            message = random.choice(SURVIVAL_MESSAGES).format(points=bet_amount)
+            await wallet_service.add_balance(user_id, bet_amount, "roulette win")
+    else:
+        # Standard mode with fixed points
+        if shot:
+            points_change = -SHOT_PENALTY
+            message = random.choice(SHOT_MESSAGES).format(points=SHOT_PENALTY)
+            # Don't go below 0
+            deduct_amount = min(SHOT_PENALTY, balance)
+            if deduct_amount > 0:
+                await wallet_service.deduct_balance(user_id, deduct_amount, "roulette shot")
+        else:
+            points_change = SURVIVAL_REWARD
+            message = random.choice(SURVIVAL_MESSAGES).format(points=SURVIVAL_REWARD)
+            await wallet_service.add_balance(user_id, SURVIVAL_REWARD, "roulette survival")
+    
+    new_balance = await wallet_service.get_balance(user_id)
+    
+    return RouletteResult(
+        success=True,
+        message=message,
+        shot=shot,
+        points_change=points_change,
+        new_balance=new_balance,
+        bet_amount=bet_amount
+    )
+
+
+async def flip_coin_async(user_id: int, bet_amount: int, choice: str) -> CoinFlipResult:
+    """
+    Play Coin Flip with unified wallet balance.
+    
+    Args:
+        user_id: Telegram user ID
+        bet_amount: Amount to bet
+        choice: "heads" or "tails"
+        
+    Returns:
+        CoinFlipResult with outcome
+    """
+    # Get current balance
+    balance = await wallet_service.get_balance(user_id)
+    
+    # Validate choice
+    choice = choice.lower().strip()
+    if choice not in ("heads", "tails"):
+        return CoinFlipResult(
+            success=False,
+            message="Выбери heads или tails, гений.",
+            choice=choice,
+            result="",
+            won=False,
+            bet_amount=bet_amount,
+            balance_change=0,
+            new_balance=balance,
+            error_code="INVALID_CHOICE"
+        )
+    
+    # Validate bet
+    if bet_amount <= 0:
+        return CoinFlipResult(
+            success=False,
+            message="Ставка должна быть положительной, гений.",
+            choice=choice,
+            result="",
+            won=False,
+            bet_amount=bet_amount,
+            balance_change=0,
+            new_balance=balance,
+            error_code="INVALID_BET"
+        )
+    
+    if balance < bet_amount:
+        return CoinFlipResult(
+            success=False,
+            message=f"Недостаточно монет. У тебя {balance}, нужно {bet_amount}",
+            choice=choice,
+            result="",
+            won=False,
+            bet_amount=bet_amount,
+            balance_change=0,
+            new_balance=balance,
+            error_code="INSUFFICIENT_BALANCE"
+        )
+    
+    # Flip the coin - 50/50
+    coin_result = "heads" if random.random() < 0.5 else "tails"
+    won = (choice == coin_result)
+    
+    # Messages
+    WIN_MESSAGES = [
+        "🪙 {result}! Угадал, красавчик. +{amount} очков.",
+        "💰 Монетка говорит {result}. Ты в плюсе на {amount}!",
+        "🎯 Бинго! {result}. Забирай свои {amount} очков.",
+    ]
+    LOSE_MESSAGES = [
+        "🪙 {result}! Мимо. -{amount} очков.",
+        "💸 Монетка говорит {result}. Ты проиграл {amount}.",
+        "😬 Не угадал. {result}. -{amount} очков.",
+    ]
+    
+    if won:
+        balance_change = bet_amount
+        message = random.choice(WIN_MESSAGES).format(result=coin_result.capitalize(), amount=bet_amount)
+        await wallet_service.add_balance(user_id, bet_amount, "coinflip win")
+    else:
+        balance_change = -bet_amount
+        message = random.choice(LOSE_MESSAGES).format(result=coin_result.capitalize(), amount=bet_amount)
+        await wallet_service.deduct_balance(user_id, bet_amount, "coinflip loss")
+    
+    new_balance = await wallet_service.get_balance(user_id)
+    
+    return CoinFlipResult(
+        success=True,
+        message=message,
+        choice=choice,
+        result=coin_result,
+        won=won,
+        bet_amount=bet_amount,
+        balance_change=balance_change,
+        new_balance=new_balance
+    )
+
 
 # Справка по играм
 GAMES_HELP = """
@@ -575,27 +770,32 @@ def update_grow_history(gs: GameStat, gain: int) -> None:
         gain: The amount of growth in this session
     """
     from datetime import date
+    import copy
     
     today = date.today().isoformat()
     
-    # Initialize history if None
+    # Initialize history if None - create deep copy to ensure mutability
+    # SQLAlchemy JSON columns need explicit reassignment to detect changes
     if gs.grow_history is None:
-        gs.grow_history = []
-    
-    # Create a mutable copy of the history
-    history = list(gs.grow_history) if gs.grow_history else []
+        history = []
+    else:
+        # Deep copy to ensure we're working with mutable data
+        history = copy.deepcopy(list(gs.grow_history))
     
     # Check if we already have an entry for today
-    today_entry = None
-    for entry in history:
+    today_index = None
+    for i, entry in enumerate(history):
         if entry.get("date") == today:
-            today_entry = entry
+            today_index = i
             break
     
-    if today_entry:
-        # Update existing entry for today
-        today_entry["change"] = today_entry.get("change", 0) + gain
-        today_entry["size"] = gs.size_cm
+    if today_index is not None:
+        # Update existing entry for today (create new dict to ensure change detection)
+        history[today_index] = {
+            "date": today,
+            "size": gs.size_cm,
+            "change": history[today_index].get("change", 0) + gain
+        }
     else:
         # Add new entry for today
         history.append({
@@ -608,6 +808,7 @@ def update_grow_history(gs: GameStat, gain: int) -> None:
     history = sorted(history, key=lambda x: x.get("date", ""), reverse=True)[:7]
     history = sorted(history, key=lambda x: x.get("date", ""))  # Sort chronologically
     
+    # Explicit reassignment to trigger SQLAlchemy change detection
     gs.grow_history = history
 
 
@@ -1299,8 +1500,8 @@ async def cmd_roulette(msg: Message):
     
     await asyncio.sleep(2)
     
-    # Play roulette using the game engine (Requirements 5.4, 5.5)
-    result = game_engine.play_roulette(user_id, chat_id, bet_amount)
+    # Play roulette using async wrapper with wallet_service
+    result = await play_roulette_async(user_id, bet_amount)
     
     # Handle errors (insufficient balance, etc.)
     if not result.success:
@@ -1434,8 +1635,8 @@ async def cmd_coinflip(msg: Message):
             parse_mode="HTML"
         )
     
-    # Play coin flip using the game engine
-    result = game_engine.flip_coin(user_id, chat_id, bet_amount, choice)
+    # Play coin flip using async wrapper with wallet_service
+    result = await flip_coin_async(user_id, bet_amount, choice)
     
     # Log the result
     logger.info(

@@ -340,7 +340,10 @@ async def cmd_marry(msg: Message):
     - Reply to a message: /marry
     - Mention user: /marry @username
     """
+    logger.info(f"[MARRY] Command received from {msg.from_user.id if msg.from_user else 'unknown'} in chat {msg.chat.id}")
+    
     if not msg.from_user:
+        logger.warning("[MARRY] No from_user, returning")
         return
     
     proposer_id = msg.from_user.id
@@ -354,6 +357,7 @@ async def cmd_marry(msg: Message):
     # Check if replying to a message
     if msg.reply_to_message and msg.reply_to_message.from_user:
         reply_user = msg.reply_to_message.from_user
+        logger.info(f"[MARRY] Reply to user: {reply_user.id}, is_bot={reply_user.is_bot}")
         # Skip if replying to bot or self
         if not reply_user.is_bot and reply_user.id != proposer_id:
             target_id = reply_user.id
@@ -368,6 +372,8 @@ async def cmd_marry(msg: Message):
                 # We can't get user ID from username without database lookup
                 # For now, require reply to message
                 break
+    
+    logger.info(f"[MARRY] target_id={target_id}, target_name={target_name}")
     
     if not target_id:
         await msg.reply(

@@ -109,31 +109,41 @@ class FishingStatsService:
             if not stats:
                 stats = FishingStats(
                     user_id=user_id,
-                    chat_id=chat_id
+                    chat_id=chat_id,
+                    total_casts=0,
+                    total_earnings=0,
+                    trash_caught=0,
+                    common_caught=0,
+                    uncommon_caught=0,
+                    rare_caught=0,
+                    epic_caught=0,
+                    legendary_caught=0,
+                    biggest_catch_value=0,
                 )
                 session.add(stats)
             
-            # Update cast count
-            stats.total_casts += 1
-            stats.total_earnings += value
+            # Update cast count (handle None values from old records)
+            stats.total_casts = (stats.total_casts or 0) + 1
+            stats.total_earnings = (stats.total_earnings or 0) + value
             
             # Update rarity count
             rarity_lower = rarity.lower()
             if rarity_lower == "trash":
-                stats.trash_caught += 1
+                stats.trash_caught = (stats.trash_caught or 0) + 1
             elif rarity_lower == "common":
-                stats.common_caught += 1
+                stats.common_caught = (stats.common_caught or 0) + 1
             elif rarity_lower == "uncommon":
-                stats.uncommon_caught += 1
+                stats.uncommon_caught = (stats.uncommon_caught or 0) + 1
             elif rarity_lower == "rare":
-                stats.rare_caught += 1
+                stats.rare_caught = (stats.rare_caught or 0) + 1
             elif rarity_lower == "epic":
-                stats.epic_caught += 1
+                stats.epic_caught = (stats.epic_caught or 0) + 1
             elif rarity_lower == "legendary":
-                stats.legendary_caught += 1
+                stats.legendary_caught = (stats.legendary_caught or 0) + 1
             
             # Update biggest catch
-            if value > stats.biggest_catch_value:
+            current_biggest = stats.biggest_catch_value or 0
+            if value > current_biggest:
                 stats.biggest_catch_value = value
                 stats.biggest_catch_name = fish_name
             

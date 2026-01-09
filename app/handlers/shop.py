@@ -10,8 +10,9 @@ from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import UserBalance, UserInventory
+from app.database.models import UserInventory
 from app.services.economy import economy_service, SHOP_ITEMS, ItemType, Rarity
+from app.services import wallet_service
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -30,46 +31,19 @@ CATEGORIES = {
 
 
 async def get_user_balance(user_id: int, chat_id: int) -> int:
-    """Get user balance."""
-    async_session = get_session()
-    async with async_session() as session:
-        res = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = res.scalars().first()
-        if not balance:
-            balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=100)
-            session.add(balance)
-            await session.commit()
-        return balance.balance
+    """Get user balance from unified Wallet."""
+    return await wallet_service.get_balance(user_id)
 
 
 async def update_user_balance(user_id: int, chat_id: int, change: int) -> int:
-    """Update user balance."""
-    async_session = get_session()
-    async with async_session() as session:
-        res = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = res.scalars().first()
-        if not balance:
-            balance = UserBalance(user_id=user_id, chat_id=chat_id, balance=100)
-            session.add(balance)
-        
-        balance.balance += change
-        if change > 0:
-            balance.total_won += change
-        else:
-            balance.total_lost += abs(change)
-        
-        await session.commit()
-        return balance.balance
+    """Update user balance using unified Wallet."""
+    if change > 0:
+        result = await wallet_service.add_balance(user_id, change, "shop")
+    elif change < 0:
+        result = await wallet_service.deduct_balance(user_id, abs(change), "shop purchase")
+    else:
+        return await wallet_service.get_balance(user_id)
+    return result.balance
 
 
 def get_main_shop_keyboard(user_id: int) -> InlineKeyboardMarkup:

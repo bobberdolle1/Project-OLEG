@@ -15,6 +15,7 @@ Features:
 
 import io
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional, List
 
@@ -23,6 +24,31 @@ from PIL import Image, ImageDraw, ImageFont
 from app.services.leagues import League
 
 logger = logging.getLogger(__name__)
+
+
+def strip_emojis(text: str) -> str:
+    """
+    Remove emojis from text for PIL rendering.
+    PIL fonts typically don't support emoji characters.
+    """
+    # Pattern to match most emoji characters
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags
+        "\U00002702-\U000027B0"  # dingbats
+        "\U000024C2-\U0001F251"  # enclosed characters
+        "\U0001F900-\U0001F9FF"  # supplemental symbols
+        "\U0001FA00-\U0001FA6F"  # chess symbols
+        "\U0001FA70-\U0001FAFF"  # symbols extended
+        "\U00002600-\U000026FF"  # misc symbols
+        "\U00002700-\U000027BF"  # dingbats
+        "]+",
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub("", text).strip()
 
 
 @dataclass
@@ -172,12 +198,14 @@ class ProfileGenerator:
         avatar_x, avatar_y = 30, 30
         self._draw_avatar(image, draw, data.avatar_bytes, avatar_x, avatar_y, theme)
         
-        # Username
+        # Username (strip emojis for PIL compatibility)
         text_x = avatar_x + self.AVATAR_SIZE + 25
-        draw.text((text_x, 35), data.username, fill=theme["text"], font=self._font_title)
+        username_clean = strip_emojis(data.username) or data.username
+        draw.text((text_x, 35), username_clean, fill=theme["text"], font=self._font_title)
         
-        # Rank title
-        draw.text((text_x, 75), data.rank_title, fill=theme["accent"], font=self._font_medium)
+        # Rank title (strip emojis for PIL compatibility)
+        rank_clean = strip_emojis(data.rank_title) or data.rank_title
+        draw.text((text_x, 75), rank_clean, fill=theme["accent"], font=self._font_medium)
         
         # League badge
         league_name = data.league.display_name
@@ -261,24 +289,24 @@ class ProfileGenerator:
         draw.line([(20, start_y - 10), (self.CARD_WIDTH - 20, start_y - 10)], 
                  fill=theme["accent"], width=1)
         
-        # Section title
-        draw.text((left_x, start_y), "📊 СТАТИСТИКА", fill=theme["accent"], font=self._font_large)
+        # Section title (no emoji for PIL compatibility)
+        draw.text((left_x, start_y), "СТАТИСТИКА", fill=theme["accent"], font=self._font_large)
         start_y += 40
         
-        # Left column
+        # Left column (text labels instead of emojis for PIL compatibility)
         stats_left = [
-            f"📏 Размер: {data.size_cm} см",
-            f"💰 Баланс: {data.balance:,}",
-            f"⚔️ Побед: {data.wins}",
-            f"🌱 Grow: {data.grow_count}",
+            f"Размер: {data.size_cm} см",
+            f"Баланс: {data.balance:,}",
+            f"Побед: {data.wins}",
+            f"Grow: {data.grow_count}",
         ]
         
         # Right column
         stats_right = [
-            f"🏅 Репутация: {data.reputation}",
-            f"🎰 Джекпотов: {data.casino_jackpots}",
-            f"💀 Поражений: {data.losses}",
-            f"📈 Винрейт: {self._calc_winrate(data.wins, data.losses)}",
+            f"Репутация: {data.reputation}",
+            f"Джекпотов: {data.casino_jackpots}",
+            f"Поражений: {data.losses}",
+            f"Винрейт: {self._calc_winrate(data.wins, data.losses)}",
         ]
         
         for i, text in enumerate(stats_left):
@@ -294,11 +322,11 @@ class ProfileGenerator:
         
         social_items = []
         if data.spouse_name:
-            social_items.append(f"💍 {data.spouse_name}")
+            social_items.append(f"Брак: {strip_emojis(data.spouse_name)}")
         if data.guild_name:
-            social_items.append(f"🏰 {data.guild_name}")
+            social_items.append(f"Гильдия: {strip_emojis(data.guild_name)}")
         if data.duo_partner:
-            social_items.append(f"👥 {data.duo_partner}")
+            social_items.append(f"Дуо: {strip_emojis(data.duo_partner)}")
         
         if social_items:
             draw.line([(20, start_y - 10), (self.CARD_WIDTH - 20, start_y - 10)],
@@ -316,8 +344,8 @@ class ProfileGenerator:
         y = 380
         x = 30
         
-        # Achievements
-        ach_text = f"🏆 Достижения: {data.achievements_count}/{data.achievements_total}"
+        # Achievements (no emoji for PIL compatibility)
+        ach_text = f"Достижения: {data.achievements_count}/{data.achievements_total}"
         draw.text((x, y), ach_text, fill=theme["text"], font=self._font_small)
         
         # Mini progress bar for achievements
@@ -334,7 +362,7 @@ class ProfileGenerator:
         
         # Quests
         quest_x = 370
-        quest_text = f"📜 Квесты: {data.quests_done}/{data.quests_total}"
+        quest_text = f"Квесты: {data.quests_done}/{data.quests_total}"
         draw.text((quest_x, y), quest_text, fill=theme["text"], font=self._font_small)
         
         # Mini progress bar for quests
@@ -359,8 +387,8 @@ class ProfileGenerator:
         # Background
         self._draw_rounded_rect(draw, x, y, x + w, y + h, radius=8, fill=(30, 30, 35, 180))
         
-        # Label
-        draw.text((x + 5, y + 3), "📈 Рост", fill=theme["text"], font=self._font_small)
+        # Label (no emoji for PIL compatibility)
+        draw.text((x + 5, y + 3), "Рост", fill=theme["text"], font=self._font_small)
         
         # Normalize data
         values = data.growth_history[-7:]  # Last 7 days

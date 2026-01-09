@@ -62,8 +62,10 @@ COLORS = {
     ],
 }
 
-MAX_IMAGE_WIDTH = 512
-MAX_IMAGE_HEIGHT = 512
+# Render at 2x resolution for better quality, then downscale for Telegram
+RENDER_SCALE = 2  # 2x supersampling for crisp text
+MAX_IMAGE_WIDTH = 512 * RENDER_SCALE  # 1024px render width
+MAX_IMAGE_HEIGHT = 512 * RENDER_SCALE  # 1024px render height
 MAX_CHAIN_MESSAGES = 10
 
 
@@ -90,9 +92,10 @@ class QuoteGeneratorService:
             rp = find(reg)
             if rp:
                 try:
-                    self.text_font = ImageFont.truetype(rp, 20)
-                    self.text_font_small = ImageFont.truetype(rp, 17)
-                    self.username_font = ImageFont.truetype(find(bold) or rp, 18)
+                    # Scaled fonts for 2x rendering
+                    self.text_font = ImageFont.truetype(rp, 40)  # 20 * 2
+                    self.text_font_small = ImageFont.truetype(rp, 34)  # 17 * 2
+                    self.username_font = ImageFont.truetype(find(bold) or rp, 36)  # 18 * 2
                     return
                 except:
                     pass
@@ -179,11 +182,12 @@ class QuoteGeneratorService:
     ) -> QuoteImage:
         """Render QuotAI-style quote with transparent background."""
         
-        padding = 12
-        avatar_size = 42
-        bubble_padding = 12
-        bubble_radius = 18
-        gap = 10
+        # All sizes scaled by RENDER_SCALE for high-res output
+        padding = 24  # 12 * 2
+        avatar_size = 84  # 42 * 2
+        bubble_padding = 24  # 12 * 2
+        bubble_radius = 36  # 18 * 2
+        gap = 20  # 10 * 2
         
         max_text_w = MAX_IMAGE_WIDTH - padding - avatar_size - gap - bubble_padding * 2 - padding
         lines = self._wrap_text(text, self.text_font, max_text_w) if text else []
@@ -191,9 +195,9 @@ class QuoteGeneratorService:
         display_name = full_name or username or "Anonymous"
         try:
             name_h = self.username_font.getbbox(display_name)[3]
-            line_h = self.text_font.getbbox("Ayg")[3] + 3
+            line_h = self.text_font.getbbox("Ayg")[3] + 6  # 3 * 2
         except:
-            name_h, line_h = 18, 23
+            name_h, line_h = 36, 46  # 18 * 2, 23 * 2
         
         # Calculate media height
         media_h = 0
@@ -203,16 +207,16 @@ class QuoteGeneratorService:
                 media_img = Image.open(BytesIO(media_data)).convert('RGBA')
                 # Scale to fit bubble width
                 max_media_w = max_text_w
-                ratio = min(max_media_w / media_img.width, 200 / media_img.height)
+                ratio = min(max_media_w / media_img.width, 400 / media_img.height)  # 200 * 2
                 new_w = int(media_img.width * ratio)
                 new_h = int(media_img.height * ratio)
                 media_img = media_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                media_h = new_h + 8
+                media_h = new_h + 16  # 8 * 2
             except:
                 media_img = None
         
         text_h = len(lines) * line_h if lines else 0
-        content_h = name_h + 6 + media_h + text_h
+        content_h = name_h + 12 + media_h + text_h  # 6 * 2
         bubble_h = content_h + bubble_padding * 2
         
         img_h = max(padding * 2 + bubble_h, padding * 2 + avatar_size)
@@ -238,7 +242,7 @@ class QuoteGeneratorService:
         username_color = self._get_username_color(username)
         draw.text((bubble_x + bubble_padding, bubble_y + bubble_padding), display_name, font=self.username_font, fill=username_color)
         
-        content_y = bubble_y + bubble_padding + name_h + 6
+        content_y = bubble_y + bubble_padding + name_h + 12  # 6 * 2
         
         # Media
         if media_img:
@@ -250,12 +254,18 @@ class QuoteGeneratorService:
             draw.text((bubble_x + bubble_padding, content_y), line, font=self.text_font, fill=COLORS["text"])
             content_y += line_h
         
+        # Downscale from 2x to final 512px max for Telegram stickers
+        # This gives us crisp text through supersampling
+        final_w = img_w // RENDER_SCALE
+        final_h = img_h // RENDER_SCALE
+        img = img.resize((final_w, final_h), Image.Resampling.LANCZOS)
+        
         # Save as WebP with transparency
         output = BytesIO()
         img.save(output, format='WEBP', quality=95)
         output.seek(0)
         
-        return QuoteImage(image_data=output.getvalue(), format='webp', width=img_w, height=img_h)
+        return QuoteImage(image_data=output.getvalue(), format='webp', width=final_w, height=final_h)
 
     async def render_quote_chain(self, messages: List[MessageData], style: Optional[QuoteStyle] = None) -> QuoteImage:
         if len(messages) > MAX_CHAIN_MESSAGES:
@@ -263,12 +273,13 @@ class QuoteGeneratorService:
         if not messages:
             return await self.render_quote("(empty)", "System", style=style)
         
-        padding = 10
-        avatar_size = 36
-        bubble_padding = 10
-        bubble_radius = 16
-        gap = 8
-        msg_gap = 6
+        # All sizes scaled by RENDER_SCALE for high-res output
+        padding = 20  # 10 * 2
+        avatar_size = 72  # 36 * 2
+        bubble_padding = 20  # 10 * 2
+        bubble_radius = 32  # 16 * 2
+        gap = 16  # 8 * 2
+        msg_gap = 12  # 6 * 2
         
         max_text_w = MAX_IMAGE_WIDTH - padding - avatar_size - gap - bubble_padding * 2 - padding
         
@@ -279,9 +290,9 @@ class QuoteGeneratorService:
             lines = self._wrap_text(msg.text, self.text_font_small, max_text_w) if msg.text else []
             try:
                 name_h = self.username_font.getbbox(msg.username)[3]
-                line_h = self.text_font_small.getbbox("Ayg")[3] + 2
+                line_h = self.text_font_small.getbbox("Ayg")[3] + 4  # 2 * 2
             except:
-                name_h, line_h = 16, 20
+                name_h, line_h = 32, 40  # 16 * 2, 20 * 2
             
             # Media
             media_h = 0
@@ -289,14 +300,14 @@ class QuoteGeneratorService:
             if msg.media_data:
                 try:
                     media_img = Image.open(BytesIO(msg.media_data)).convert('RGBA')
-                    ratio = min(max_text_w / media_img.width, 150 / media_img.height)
+                    ratio = min(max_text_w / media_img.width, 300 / media_img.height)  # 150 * 2
                     media_img = media_img.resize((int(media_img.width * ratio), int(media_img.height * ratio)), Image.Resampling.LANCZOS)
-                    media_h = media_img.height + 6
+                    media_h = media_img.height + 12  # 6 * 2
                 except:
                     media_img = None
             
             text_h = len(lines) * line_h if lines else 0
-            bubble_h = bubble_padding * 2 + name_h + 4 + media_h + text_h
+            bubble_h = bubble_padding * 2 + name_h + 8 + media_h + text_h  # 4 * 2
             
             msg_data.append({
                 'msg': msg, 'lines': lines, 'bubble_h': bubble_h,
@@ -324,7 +335,7 @@ class QuoteGeneratorService:
             # Username
             draw.text((bubble_x + bubble_padding, y + bubble_padding), msg.username, font=self.username_font, fill=self._get_username_color(msg.username))
             
-            content_y = y + bubble_padding + data['name_h'] + 4
+            content_y = y + bubble_padding + data['name_h'] + 8  # 4 * 2
             
             # Media
             if data['media_img']:
@@ -338,11 +349,16 @@ class QuoteGeneratorService:
             
             y += max(data['bubble_h'], avatar_size) + msg_gap
         
+        # Downscale from 2x to final size for Telegram stickers
+        final_w = img.width // RENDER_SCALE
+        final_h = img.height // RENDER_SCALE
+        img = img.resize((final_w, final_h), Image.Resampling.LANCZOS)
+        
         output = BytesIO()
         img.save(output, format='WEBP', quality=95)
         output.seek(0)
         
-        return QuoteImage(image_data=output.getvalue(), format='webp', width=MAX_IMAGE_WIDTH, height=min(MAX_IMAGE_HEIGHT, total_h))
+        return QuoteImage(image_data=output.getvalue(), format='webp', width=final_w, height=final_h)
 
     async def render_roast_quote(self, text: str, username: str, avatar_url: Optional[str] = None, 
                                   style: Optional[QuoteStyle] = None, avatar_data: Optional[bytes] = None,

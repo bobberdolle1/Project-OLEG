@@ -1609,7 +1609,7 @@ async def cb_owner_persona(callback: CallbackQuery):
     
     current_persona = get_global_persona()
     current_name = PERSONA_NAMES.get(current_persona, current_persona)
-    random_enabled, random_interval = get_random_mode()
+    random_enabled, random_interval, _ = get_random_mode()
     
     if random_enabled:
         interval_name = RANDOM_INTERVALS.get(random_interval, random_interval)
@@ -1805,7 +1805,7 @@ async def cb_owner_random_interval(callback: CallbackQuery):
     
     from app.services.ollama_client import set_random_mode, get_random_mode, RANDOM_INTERVALS
     
-    random_enabled, _ = get_random_mode()
+    random_enabled, _, _ = get_random_mode()
     
     if set_random_mode(random_enabled, interval):
         interval_name = RANDOM_INTERVALS.get(interval, interval)
@@ -2244,7 +2244,7 @@ async def handle_coins_amount(msg: Message, state: FSMContext):
 
 async def _give_coins_to_user(msg_or_callback, tg_user_id: int, amount: int, is_message: bool = False):
     """Выдать/снять монеты пользователю."""
-    from app.database.models import UserBalance
+    from app.database.models import Wallet
     
     async_session = get_session()
     async with async_session() as session:
@@ -2258,27 +2258,24 @@ async def _give_coins_to_user(msg_or_callback, tg_user_id: int, amount: int, is_
                 await msg_or_callback.answer(text, show_alert=True)
             return
         
-        # Получаем или создаём баланс (используем chat_id=0 для глобального баланса)
-        balance = await session.scalar(
-            select(UserBalance).where(
-                UserBalance.user_id == tg_user_id,
-                UserBalance.chat_id == 0
-            )
+        # Получаем или создаём Wallet (глобальный баланс, используется играми)
+        wallet = await session.scalar(
+            select(Wallet).where(Wallet.user_id == user.id)
         )
         
-        if not balance:
-            balance = UserBalance(user_id=tg_user_id, chat_id=0, balance=0)
-            session.add(balance)
+        if not wallet:
+            wallet = Wallet(user_id=user.id, balance=100)  # Стартовый баланс
+            session.add(wallet)
         
-        old_balance = balance.balance
-        balance.balance += amount
+        old_balance = wallet.balance
+        wallet.balance += amount
         
         # Не даём уйти в минус
-        if balance.balance < 0:
-            balance.balance = 0
+        if wallet.balance < 0:
+            wallet.balance = 0
         
         await session.commit()
-        new_balance = balance.balance
+        new_balance = wallet.balance
     
     action = "выдано" if amount > 0 else "снято"
     

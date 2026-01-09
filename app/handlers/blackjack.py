@@ -13,9 +13,10 @@ from aiogram.filters import Command
 from sqlalchemy import select
 
 from app.database.session import get_session
-from app.database.models import User, GameStat, UserBalance
+from app.database.models import User, GameStat
 from app.services.blackjack import BlackjackEngine, BlackjackGame, GameStatus, Hand, Card
 from app.services.state_manager import state_manager
+from app.services import wallet_service
 
 logger = logging.getLogger(__name__)
 
@@ -157,72 +158,31 @@ async def ensure_user_and_balance(tg_user, chat_id: int) -> tuple:
     Returns:
         Tuple of (User, balance_amount)
     """
-    async_session = get_session()
-    async with async_session() as session:
-        # Find or create user
-        res = await session.execute(
-            select(User).where(User.tg_user_id == tg_user.id)
-        )
-        user = res.scalars().first()
-        if not user:
-            user = User(
-                tg_user_id=tg_user.id,
-                username=tg_user.username,
-                first_name=tg_user.first_name,
-                last_name=tg_user.last_name,
-            )
-            session.add(user)
-            await session.flush()
-        
-        # Find or create balance
-        res_bal = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == tg_user.id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = res_bal.scalars().first()
-        if not balance:
-            balance = UserBalance(
-                user_id=tg_user.id,
-                chat_id=chat_id,
-                balance=100  # Starting balance
-            )
-            session.add(balance)
-        
-        await session.commit()
-        return user, balance.balance
+    # Ensure user exists
+    user = await wallet_service.get_or_create_user(tg_user.id, tg_user.username)
+    # Get balance from unified wallet
+    balance = await wallet_service.get_balance(tg_user.id)
+    return user, balance
 
 
 async def update_balance(user_id: int, chat_id: int, change: int) -> int:
-    """Update user's balance.
+    """Update user's balance using unified wallet.
     
     Args:
         user_id: Telegram user ID
-        chat_id: Chat ID
+        chat_id: Chat ID (ignored, using global wallet)
         change: Amount to add (negative for deduction)
         
     Returns:
         New balance
     """
-    async_session = get_session()
-    async with async_session() as session:
-        res = await session.execute(
-            select(UserBalance).where(
-                UserBalance.user_id == user_id,
-                UserBalance.chat_id == chat_id
-            )
-        )
-        balance = res.scalars().first()
-        if balance:
-            balance.balance += change
-            if change > 0:
-                balance.total_won += change
-            else:
-                balance.total_lost += abs(change)
-            await session.commit()
-            return balance.balance
-        return 0
+    if change > 0:
+        result = await wallet_service.add_balance(user_id, change, "blackjack win")
+    elif change < 0:
+        result = await wallet_service.deduct_balance(user_id, abs(change), "blackjack loss")
+    else:
+        return await wallet_service.get_balance(user_id)
+    return result.balance
 
 
 def serialize_game(game: BlackjackGame) -> dict:

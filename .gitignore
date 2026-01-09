@@ -5,7 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+.tar
 # Distribution / packaging
 .Python
 build/
@@ -108,3 +108,7 @@ Thumbs.db
 # Project specific
 .mypy_cache/
 .pytest_cache/
+
+# Deploy scripts (contain credentials)
+deploy.ps1
+oleg-update.tar

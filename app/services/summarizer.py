@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.services.http_clients import get_web_client
+
 logger = logging.getLogger(__name__)
 
 # Summarizer Configuration
@@ -210,38 +212,39 @@ class SummarizerService:
                 logger.warning(f"Invalid URL format: {url}")
                 return None
             
-            async with httpx.AsyncClient(timeout=URL_FETCH_TIMEOUT) as client:
-                response = await client.get(
-                    url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                    },
-                    follow_redirects=True
-                )
-                response.raise_for_status()
-                
-                html = response.text
-                
-                # Simple HTML to text extraction
-                # Remove script and style elements
-                html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                
-                # Remove HTML tags
-                text = re.sub(r'<[^>]+>', ' ', html)
-                
-                # Clean up whitespace
-                text = re.sub(r'\s+', ' ', text).strip()
-                
-                # Decode HTML entities
-                text = text.replace('&nbsp;', ' ')
-                text = text.replace('&amp;', '&')
-                text = text.replace('&lt;', '<')
-                text = text.replace('&gt;', '>')
-                text = text.replace('&quot;', '"')
-                text = text.replace('&#39;', "'")
-                
-                return text if text else None
+            client = get_web_client()
+            response = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                },
+                follow_redirects=True,
+                timeout=URL_FETCH_TIMEOUT
+            )
+            response.raise_for_status()
+            
+            html = response.text
+            
+            # Simple HTML to text extraction
+            # Remove script and style elements
+            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            
+            # Remove HTML tags
+            text = re.sub(r'<[^>]+>', ' ', html)
+            
+            # Clean up whitespace
+            text = re.sub(r'\s+', ' ', text).strip()
+            
+            # Decode HTML entities
+            text = text.replace('&nbsp;', ' ')
+            text = text.replace('&amp;', '&')
+            text = text.replace('&lt;', '<')
+            text = text.replace('&gt;', '>')
+            text = text.replace('&quot;', '"')
+            text = text.replace('&#39;', "'")
+            
+            return text if text else None
                 
         except httpx.TimeoutException:
             logger.warning(f"Timeout fetching URL: {url}")

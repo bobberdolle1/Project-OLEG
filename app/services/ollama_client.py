@@ -14,6 +14,7 @@ from app.database.models import MessageLog
 from app.services.vector_db import vector_db
 from app.services.think_filter import think_filter
 from app.services.link_preview import link_preview_service
+from app.services.http_clients import get_ollama_client
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -25,28 +26,6 @@ _OLLAMA_CHECK_INTERVAL = 30  # Проверять доступность каж�
 
 # Кэш ошибок чтобы не спамить одинаковыми сообщениями (TTL 5 минут)
 _error_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
-
-# Глобальный httpx клиент для Ollama (переиспользуется, экономит ~50ms на запрос)
-_http_client: httpx.AsyncClient | None = None
-
-
-def get_http_client() -> httpx.AsyncClient:
-    """Get or create global httpx client for Ollama requests."""
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            timeout=settings.ollama_timeout,
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-        )
-    return _http_client
-
-
-async def close_http_client():
-    """Close global httpx client (call on shutdown)."""
-    global _http_client
-    if _http_client and not _http_client.is_closed:
-        await _http_client.aclose()
-        _http_client = None
 
 
 # Разнообразные fallback ответы по типам ошибок
@@ -1963,9 +1942,12 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                     continue
                 # Filter by distance threshold
                 distance = f.get('distance')
-                if distance is not None and distance > distance_threshold:
-                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {f['text'][:50]}...")
-                    continue
+                if distance is not None:
+                    if distance > distance_threshold:
+                        logger.info(f"[KB SKIP] dist={distance:.3f} > {distance_threshold}: {f['text'][:50]}...")
+                        continue
+                    else:
+                        logger.info(f"[KB OK] dist={distance:.3f}: {f['text'][:50]}...")
                 seen_texts.add(f['text'])
                 kb_facts.append(f['text'])
         
@@ -1984,9 +1966,12 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                     continue
                 # Filter by distance threshold
                 distance = f.get('distance')
-                if distance is not None and distance > distance_threshold:
-                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {f['text'][:50]}...")
-                    continue
+                if distance is not None:
+                    if distance > distance_threshold:
+                        logger.info(f"[KB SKIP] dist={distance:.3f} > {distance_threshold}: {f['text'][:50]}...")
+                        continue
+                    else:
+                        logger.info(f"[KB OK] dist={distance:.3f}: {f['text'][:50]}...")
                 seen_texts.add(f['text'])
                 kb_facts.append(f['text'])
         
@@ -2845,9 +2830,12 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
                     continue
                 # Filter by distance threshold
                 distance = fact.get('distance')
-                if distance is not None and distance > distance_threshold:
-                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {fact['text'][:50]}...")
-                    continue
+                if distance is not None:
+                    if distance > distance_threshold:
+                        logger.info(f"[KB SKIP] dist={distance:.3f} > {distance_threshold}: {fact['text'][:50]}...")
+                        continue
+                    else:
+                        logger.info(f"[KB OK] dist={distance:.3f}: {fact['text'][:50]}...")
                 seen_texts.add(fact['text'])
                 all_kb_facts.append(fact)
         
@@ -2866,9 +2854,12 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
                     continue
                 # Filter by distance threshold
                 distance = fact.get('distance')
-                if distance is not None and distance > distance_threshold:
-                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {fact['text'][:50]}...")
-                    continue
+                if distance is not None:
+                    if distance > distance_threshold:
+                        logger.info(f"[KB SKIP] dist={distance:.3f} > {distance_threshold}: {fact['text'][:50]}...")
+                        continue
+                    else:
+                        logger.info(f"[KB OK] dist={distance:.3f}: {fact['text'][:50]}...")
                 seen_texts.add(fact['text'])
                 all_kb_facts.append(fact)
         

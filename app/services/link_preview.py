@@ -14,6 +14,8 @@ from urllib.parse import urlparse, parse_qs
 
 import httpx
 
+from app.services.http_clients import get_web_client
+
 logger = logging.getLogger(__name__)
 
 # Таймаут для запросов
@@ -130,12 +132,13 @@ class LinkPreviewService:
         oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
         
         try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-                response = await client.get(
-                    oembed_url,
-                    headers={"User-Agent": USER_AGENT},
-                    follow_redirects=True
-                )
+            client = get_web_client()
+            response = await client.get(
+                oembed_url,
+                headers={"User-Agent": USER_AGENT},
+                follow_redirects=True,
+                timeout=REQUEST_TIMEOUT
+            )
                 
                 if response.status_code == 401:
                     return LinkPreview(
@@ -184,12 +187,13 @@ class LinkPreviewService:
             LinkPreview с информацией о странице
         """
         try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-                response = await client.get(
-                    url,
-                    headers={"User-Agent": USER_AGENT},
-                    follow_redirects=True
-                )
+            client = get_web_client()
+            response = await client.get(
+                url,
+                headers={"User-Agent": USER_AGENT},
+                follow_redirects=True,
+                timeout=REQUEST_TIMEOUT
+            )
                 
                 if response.status_code != 200:
                     return LinkPreview(url=url, error=f"HTTP {response.status_code}")

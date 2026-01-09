@@ -24,6 +24,7 @@ import cachetools
 
 from app.config import settings
 from app.services.think_filter import think_filter
+from app.services.http_clients import get_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -344,11 +345,12 @@ Describe factually without opinions.""",
             
             logger.info(f"Vision Step 1: Requesting description from {vision_model}")
             
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    f"{self._base_url}/api/chat",
-                    json=payload
-                )
+            client = get_ollama_client()
+            response = await client.post(
+                f"{self._base_url}/api/chat",
+                json=payload,
+                timeout=self._timeout
+            )
                 response.raise_for_status()
                 
                 data = response.json()
@@ -513,11 +515,12 @@ Describe factually without opinions.""",
             
             logger.info(f"Vision Step 2: Generating comment with {active_model}")
             
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    f"{self._base_url}/api/chat",
-                    json=payload
-                )
+            client = get_ollama_client()
+            response = await client.post(
+                f"{self._base_url}/api/chat",
+                json=payload,
+                timeout=self._timeout
+            )
                 response.raise_for_status()
                 
                 data = response.json()

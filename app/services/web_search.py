@@ -19,6 +19,7 @@ from typing import Optional
 import httpx
 
 from app.config import settings
+from app.services.http_clients import get_web_client
 
 logger = logging.getLogger(__name__)
 
@@ -202,28 +203,29 @@ class WebSearchService:
         
         for instance_url in instances_to_try[:4]:  # Пробуем максимум 4
             try:
-                async with httpx.AsyncClient(timeout=8) as client:
-                    request_params = {
-                        "q": query,
-                        "format": "json",
-                        "engines": "google,bing,duckduckgo",
-                        "language": "ru-RU",
-                    }
-                    
-                    # Заголовки для обхода bot detection
-                    # X-Forwarded-For и X-Real-IP нужны для SearXNG
-                    headers = {
-                        "Accept": "application/json",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "X-Forwarded-For": "127.0.0.1",
-                        "X-Real-IP": "127.0.0.1",
-                    }
-                    
-                    response = await client.get(
-                        f"{instance_url.rstrip('/')}/search",
-                        params=request_params,
-                        headers=headers
-                    )
+                client = get_web_client()
+                request_params = {
+                    "q": query,
+                    "format": "json",
+                    "engines": "google,bing,duckduckgo",
+                    "language": "ru-RU",
+                }
+                
+                # Заголовки для обхода bot detection
+                # X-Forwarded-For и X-Real-IP нужны для SearXNG
+                headers = {
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "X-Forwarded-For": "127.0.0.1",
+                    "X-Real-IP": "127.0.0.1",
+                }
+                
+                response = await client.get(
+                    f"{instance_url.rstrip('/')}/search",
+                    params=request_params,
+                    headers=headers,
+                    timeout=8.0
+                )
                     
                     response.raise_for_status()
                     data = response.json()
@@ -266,23 +268,24 @@ class WebSearchService:
             if not self.brave_api_key:
                 return SearchResponse(results=[], query=query, provider="brave", error="No API key")
             
-            async with httpx.AsyncClient(timeout=10) as client:
-                # httpx автоматически кодирует параметры в UTF-8
-                response = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={
-                        "q": query,  # httpx сам закодирует кириллицу
-                        "count": max_results,
-                        "freshness": freshness,
-                        "text_decorations": "false",
-                    },
-                    headers={
-                        "X-Subscription-Token": self.brave_api_key,
-                        "Accept": "application/json",
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
+            client = get_web_client()
+            # httpx автоматически кодирует параметры в UTF-8
+            response = await client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={
+                    "q": query,  # httpx сам закодирует кириллицу
+                    "count": max_results,
+                    "freshness": freshness,
+                    "text_decorations": "false",
+                },
+                headers={
+                    "X-Subscription-Token": self.brave_api_key,
+                    "Accept": "application/json",
+                },
+                timeout=10.0
+            )
+            response.raise_for_status()
+            data = response.json()
                 
                 results = []
                 for item in data.get("web", {}).get("results", []):
@@ -314,6 +317,7 @@ class WebSearchService:
             try:
                 user_agent = random.choice(self.DDG_USER_AGENTS)
                 
+                # DDG требует отдельный клиент без follow_redirects
                 async with httpx.AsyncClient(
                     timeout=15,
                     follow_redirects=False  # Не следовать редиректам — это признак блокировки

@@ -478,10 +478,10 @@ async def main():
             logger.info("Redis соединение закрыто")
 
         # Close global httpx client for Ollama
-        logger.info("Закрытие httpx клиента...")
-        from app.services.ollama_client import close_http_client
-        await close_http_client()
-        logger.info("httpx клиент закрыт")
+        logger.info("Закрытие httpx клиентов...")
+        from app.services.http_clients import close_all_clients
+        await close_all_clients()
+        logger.info("httpx клиенты закрыты")
 
         await bot.session.close()
         logger.info("Сессия бота закрыта")

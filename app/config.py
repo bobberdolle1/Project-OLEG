@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="nomic-embed-text", description="Embedding model name (nomic лучше для русского)")
     similarity_threshold: float = Field(default=0.65, ge=0.0, le=1.0, description="Similarity threshold for RAG")
     kb_max_results: int = Field(default=5, ge=1, le=20, description="Max KB facts to return per search")
-    kb_distance_threshold: float = Field(default=1.2, ge=0.1, le=2.0, description="Max distance for KB facts (lower = stricter, ChromaDB L2 distance)")
+    kb_distance_threshold: float = Field(default=0.8, ge=0.1, le=2.0, description="Max distance for KB facts (lower = stricter, ChromaDB L2 distance)")
 
     # Database
     database_url: str = Field(

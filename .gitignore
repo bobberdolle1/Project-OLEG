@@ -112,3 +112,4 @@ Thumbs.db
 # Deploy scripts (contain credentials)
 deploy.ps1
 oleg-update.tar
+.tar 

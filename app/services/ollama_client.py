@@ -1924,6 +1924,8 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
     try:
         default_collection = settings.chromadb_collection_name
         seen_texts = set()
+        distance_threshold = settings.kb_distance_threshold
+        max_results = settings.kb_max_results
         
         # Поиск по терминам (если есть)
         if tech_terms:
@@ -1931,13 +1933,19 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
             term_results = vector_db.search_facts(
                 collection_name=default_collection,
                 query=search_query,
-                n_results=3,
+                n_results=max_results,
                 where={"source": "default_knowledge"}
             )
             for f in term_results:
-                if 'text' in f and f['text'] not in seen_texts:
-                    seen_texts.add(f['text'])
-                    kb_facts.append(f['text'])
+                if 'text' not in f or f['text'] in seen_texts:
+                    continue
+                # Filter by distance threshold
+                distance = f.get('distance')
+                if distance is not None and distance > distance_threshold:
+                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {f['text'][:50]}...")
+                    continue
+                seen_texts.add(f['text'])
+                kb_facts.append(f['text'])
         
         # Семантический поиск по полному тексту
         semantic_query = full_text_for_terms.strip()
@@ -1946,19 +1954,27 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
             semantic_results = vector_db.search_facts(
                 collection_name=default_collection,
                 query=semantic_query,
-                n_results=3,
+                n_results=max_results,
                 where={"source": "default_knowledge"}
             )
             for f in semantic_results:
-                if 'text' in f and f['text'] not in seen_texts:
-                    seen_texts.add(f['text'])
-                    kb_facts.append(f['text'])
+                if 'text' not in f or f['text'] in seen_texts:
+                    continue
+                # Filter by distance threshold
+                distance = f.get('distance')
+                if distance is not None and distance > distance_threshold:
+                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {f['text'][:50]}...")
+                    continue
+                seen_texts.add(f['text'])
+                kb_facts.append(f['text'])
         
-        kb_facts = kb_facts[:5]  # Ограничиваем 5 фактами
+        kb_facts = kb_facts[:max_results]  # Final limit
         if kb_facts:
-            logger.info(f"[KB SEARCH] Найдено {len(kb_facts)} фактов из базы знаний")
+            logger.info(f"[KB SEARCH] Найдено {len(kb_facts)} релевантных фактов из базы знаний")
             for fact in kb_facts[:3]:
                 logger.info(f"[KB FACT] {fact[:80]}...")
+        else:
+            logger.info(f"[KB SEARCH] Нет релевантных фактов (threshold={distance_threshold})")
     except Exception as e:
         logger.warning(f"[KB SEARCH] Ошибка: {e}")
     
@@ -2790,6 +2806,8 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
         default_collection = settings.chromadb_collection_name
         all_kb_facts = []
         seen_texts = set()
+        distance_threshold = settings.kb_distance_threshold
+        max_results = settings.kb_max_results
         
         # 2a. Поиск по терминам (если есть)
         if tech_terms:
@@ -2797,13 +2815,19 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
             term_facts = vector_db.search_facts(
                 collection_name=default_collection,
                 query=kb_search_query,
-                n_results=3,
+                n_results=max_results,
                 where={"source": "default_knowledge"}
             )
             for fact in term_facts:
-                if 'text' in fact and fact['text'] not in seen_texts:
-                    seen_texts.add(fact['text'])
-                    all_kb_facts.append(fact)
+                if 'text' not in fact or fact['text'] in seen_texts:
+                    continue
+                # Filter by distance threshold
+                distance = fact.get('distance')
+                if distance is not None and distance > distance_threshold:
+                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {fact['text'][:50]}...")
+                    continue
+                seen_texts.add(fact['text'])
+                all_kb_facts.append(fact)
         
         # 2b. Семантический поиск по полному тексту (если отличается от терминов)
         semantic_query = full_text_for_terms.strip()
@@ -2812,20 +2836,28 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
             semantic_facts = vector_db.search_facts(
                 collection_name=default_collection,
                 query=semantic_query,
-                n_results=3,
+                n_results=max_results,
                 where={"source": "default_knowledge"}
             )
             for fact in semantic_facts:
-                if 'text' in fact and fact['text'] not in seen_texts:
-                    seen_texts.add(fact['text'])
-                    all_kb_facts.append(fact)
+                if 'text' not in fact or fact['text'] in seen_texts:
+                    continue
+                # Filter by distance threshold
+                distance = fact.get('distance')
+                if distance is not None and distance > distance_threshold:
+                    logger.debug(f"[KB SKIP] distance={distance:.3f} > {distance_threshold}: {fact['text'][:50]}...")
+                    continue
+                seen_texts.add(fact['text'])
+                all_kb_facts.append(fact)
         
-        logger.info(f"[KB SEARCH] Найдено {len(all_kb_facts)} фактов")
-        
-        for fact in all_kb_facts[:5]:  # Ограничиваем 5 фактами
-            if fact['text'] not in context_facts:
-                context_facts.append(fact['text'])
-                logger.info(f"[KB FACT] {fact['text'][:80]}...")
+        if all_kb_facts:
+            logger.info(f"[KB SEARCH] Найдено {len(all_kb_facts)} релевантных фактов")
+            for fact in all_kb_facts[:max_results]:
+                if fact['text'] not in context_facts:
+                    context_facts.append(fact['text'])
+                    logger.info(f"[KB FACT] {fact['text'][:80]}...")
+        else:
+            logger.info(f"[KB SEARCH] Нет релевантных фактов (threshold={distance_threshold})")
         
     except Exception as e:
         logger.warning(f"[KB SEARCH] Ошибка поиска в базе знаний: {e}")

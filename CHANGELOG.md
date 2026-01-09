@@ -7,6 +7,36 @@
 
 ---
 
+## [8.5.1] - 2026-01-09
+
+### ⚡ Оптимизация производительности
+
+#### I/O Performance
+- **uvloop** — быстрый event loop для Linux/macOS (~20-30% прирост async I/O)
+- **orjson** — быстрая JSON сериализация для aiogram (~3-10x быстрее стандартного json)
+- **Shared httpx clients** — переиспользуемые HTTP клиенты вместо создания нового на каждый запрос (~50ms экономии)
+
+#### Database
+- **SQLAlchemy connection pooling** — настройки пула для PostgreSQL (pool_size=10, max_overflow=20)
+
+#### Redis
+- **orjson для Redis** — быстрая сериализация JSON в кэше
+
+### 📁 Изменённые файлы
+- `pyproject.toml` — добавлен orjson
+- `requirements.prod.txt` — добавлен orjson
+- `app/main.py` — uvloop init, orjson для aiogram session
+- `app/database/session.py` — connection pool settings
+- `app/services/redis_client.py` — orjson serialization
+- `app/services/http_clients.py` — новый модуль с shared clients
+- `app/services/ollama_client.py` — использует shared client
+- `app/services/web_search.py` — использует shared client
+- `app/services/link_preview.py` — использует shared client
+- `app/services/vision_pipeline.py` — использует shared client
+- `app/services/summarizer.py` — использует shared client
+
+---
+
 ## [8.5.0] - 2026-01-09
 
 ### 🔧 Исправления и улучшения

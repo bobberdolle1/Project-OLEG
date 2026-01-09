@@ -2,8 +2,19 @@
 
 import logging
 from typing import Optional, Any
-import json
 from datetime import timedelta
+
+# Prefer orjson for faster JSON serialization
+try:
+    import orjson
+    def _json_dumps(data: Any) -> str:
+        return orjson.dumps(data).decode("utf-8")
+    def _json_loads(data: str) -> Any:
+        return orjson.loads(data)
+except ImportError:
+    import json
+    _json_dumps = json.dumps
+    _json_loads = json.loads
 
 try:
     import redis.asyncio as redis
@@ -159,8 +170,8 @@ class RedisClient:
         value = await self.get(key)
         if value:
             try:
-                return json.loads(value)
-            except json.JSONDecodeError:
+                return _json_loads(value)
+            except (ValueError, TypeError):
                 logger.error(f"Failed to decode JSON for key {key}")
         return None
     
@@ -172,7 +183,7 @@ class RedisClient:
     ) -> bool:
         """Set JSON value."""
         try:
-            json_str = json.dumps(value)
+            json_str = _json_dumps(value)
             return await self.set(key, json_str, ex=ex)
         except (TypeError, ValueError) as e:
             logger.error(f"Failed to encode JSON: {e}")

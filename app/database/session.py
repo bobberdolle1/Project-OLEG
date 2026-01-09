@@ -21,7 +21,23 @@ def _ensure_data_dir():
 async def init_db():
     global _engine, _async_session
     _ensure_data_dir()
-    _engine = create_async_engine(settings.database_url, echo=False, future=True)
+    
+    # Connection pool settings (важно для PostgreSQL, для SQLite игнорируется)
+    pool_settings = {}
+    if not settings.database_url.startswith("sqlite"):
+        pool_settings = {
+            "pool_size": 10,           # Базовый размер пула
+            "max_overflow": 20,        # Дополнительные соединения при нагрузке
+            "pool_pre_ping": True,     # Проверка живости соединения
+            "pool_recycle": 3600,      # Пересоздавать соединения каждый час
+        }
+    
+    _engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        future=True,
+        **pool_settings
+    )
     _async_session = async_sessionmaker(_engine, expire_on_commit=False)
 
     # import models and create tables

@@ -26,6 +26,28 @@ _OLLAMA_CHECK_INTERVAL = 30  # Проверять доступность каж�
 # Кэш ошибок чтобы не спамить одинаковыми сообщениями (TTL 5 минут)
 _error_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
 
+# Глобальный httpx клиент для Ollama (переиспользуется, экономит ~50ms на запрос)
+_http_client: httpx.AsyncClient | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Get or create global httpx client for Ollama requests."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=settings.ollama_timeout,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _http_client
+
+
+async def close_http_client():
+    """Close global httpx client (call on shutdown)."""
+    global _http_client
+    if _http_client and not _http_client.is_closed:
+        await _http_client.aclose()
+        _http_client = None
+
 
 # Разнообразные fallback ответы по типам ошибок
 FALLBACK_RESPONSES = {

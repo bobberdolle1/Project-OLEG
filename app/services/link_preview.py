@@ -139,36 +139,36 @@ class LinkPreviewService:
                 follow_redirects=True,
                 timeout=REQUEST_TIMEOUT
             )
-                
-                if response.status_code == 401:
-                    return LinkPreview(
-                        url=url,
-                        site_name="YouTube",
-                        error="Видео приватное или удалено"
-                    )
-                
-                if response.status_code == 404:
-                    return LinkPreview(
-                        url=url,
-                        site_name="YouTube",
-                        error="Видео не найдено"
-                    )
-                
-                if response.status_code != 200:
-                    return LinkPreview(
-                        url=url,
-                        site_name="YouTube",
-                        error=f"HTTP {response.status_code}"
-                    )
-                
-                data = response.json()
-                
+            
+            if response.status_code == 401:
                 return LinkPreview(
                     url=url,
-                    title=data.get("title"),
-                    author=data.get("author_name"),
-                    site_name="YouTube"
+                    site_name="YouTube",
+                    error="Видео приватное или удалено"
                 )
+            
+            if response.status_code == 404:
+                return LinkPreview(
+                    url=url,
+                    site_name="YouTube",
+                    error="Видео не найдено"
+                )
+            
+            if response.status_code != 200:
+                return LinkPreview(
+                    url=url,
+                    site_name="YouTube",
+                    error=f"HTTP {response.status_code}"
+                )
+            
+            data = response.json()
+            
+            return LinkPreview(
+                url=url,
+                title=data.get("title"),
+                author=data.get("author_name"),
+                site_name="YouTube"
+            )
                 
         except httpx.TimeoutException:
             return LinkPreview(url=url, site_name="YouTube", error="Таймаут запроса")
@@ -194,30 +194,30 @@ class LinkPreviewService:
                 follow_redirects=True,
                 timeout=REQUEST_TIMEOUT
             )
-                
-                if response.status_code != 200:
-                    return LinkPreview(url=url, error=f"HTTP {response.status_code}")
-                
-                html = response.text
-                
-                # Парсим meta tags
-                title = self._extract_meta(html, "og:title") or self._extract_title(html)
-                description = self._extract_meta(html, "og:description") or self._extract_meta(html, "description")
-                site_name = self._extract_meta(html, "og:site_name")
-                author = self._extract_meta(html, "author")
-                
-                # Определяем site_name из домена если не найден
-                if not site_name:
-                    parsed = urlparse(url)
-                    site_name = parsed.netloc.replace("www.", "")
-                
-                return LinkPreview(
-                    url=url,
-                    title=title,
-                    description=description,
-                    site_name=site_name,
-                    author=author
-                )
+            
+            if response.status_code != 200:
+                return LinkPreview(url=url, error=f"HTTP {response.status_code}")
+            
+            html = response.text
+            
+            # Парсим meta tags
+            title = self._extract_meta(html, "og:title") or self._extract_title(html)
+            description = self._extract_meta(html, "og:description") or self._extract_meta(html, "description")
+            site_name = self._extract_meta(html, "og:site_name")
+            author = self._extract_meta(html, "author")
+            
+            # Определяем site_name из домена если не найден
+            if not site_name:
+                parsed = urlparse(url)
+                site_name = parsed.netloc.replace("www.", "")
+            
+            return LinkPreview(
+                url=url,
+                title=title,
+                description=description,
+                site_name=site_name,
+                author=author
+            )
                 
         except httpx.TimeoutException:
             return LinkPreview(url=url, error="Таймаут запроса")

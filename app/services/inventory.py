@@ -57,6 +57,7 @@ class ItemType(str, Enum):
     PP_CREAM_MEDIUM = "pp_cream_medium"
     PP_CREAM_LARGE = "pp_cream_large"
     PP_CREAM_TITAN = "pp_cream_titan"
+    PP_CREAM_OMEGA = "pp_cream_omega"  # Мега-мазь с бустом к /grow
     
     # PP Protection
     PP_CAGE = "pp_cage"
@@ -299,6 +300,15 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         description="+10-20 см к размеру пиписьки!",
         price=2000,
         effect={"pp_boost_min": 10, "pp_boost_max": 20},
+        stackable=True,
+    ),
+    ItemType.PP_CREAM_OMEGA: ItemInfo(
+        item_type=ItemType.PP_CREAM_OMEGA,
+        name="Сыворотка 'Омега'",
+        emoji="💉",
+        description="+25-50 см + буст x2 к следующему /grow!",
+        price=5000,
+        effect={"pp_boost_min": 25, "pp_boost_max": 50, "grow_boost": 2.0, "grow_boost_duration": 1},
         stackable=True,
     ),
     

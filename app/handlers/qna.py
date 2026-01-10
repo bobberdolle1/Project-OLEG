@@ -915,6 +915,8 @@ def format_whois_profile(profile, username: str) -> list[str]:
         personal.append(f"Имя: {profile.name}")
     if profile.age:
         personal.append(f"{profile.age} лет")
+    if profile.birthday:
+        personal.append(f"🎂 {profile.birthday}")
     if profile.city:
         personal.append(f"📍 {profile.city}")
     if profile.job:
@@ -1108,8 +1110,20 @@ async def cmd_whois(msg: Message):
             spouse_name = spouse_user.username or spouse_user.first_name if spouse_user else f"ID:{spouse_id}"
         lines.append(f"   💍 В браке с @{spouse_name}")
     
-    # Подсказка
-    if not profile or (not profile.gpu and not profile.games and not profile.expertise and not profile.name):
+    # Подсказка - показываем только если профиль реально пустой
+    def has_profile_data(p) -> bool:
+        if not p:
+            return False
+        # Проверяем все значимые поля профиля
+        return any([
+            p.name, p.gpu, p.cpu, p.ram, p.os, p.distro,
+            p.games, p.expertise, p.hobbies, p.languages,
+            p.city, p.job, p.steam_deck, p.laptop, p.console,
+            p.brand_preference, p.age, p.birthday, p.pets,
+            p.current_problems
+        ])
+    
+    if not has_profile_data(profile):
         lines.append("\n<i>🔍 Олег ещё собирает информацию. Чем больше общаешься — тем полнее досье.</i>")
     
     # Кнопка очистки для своего профиля
@@ -1335,6 +1349,106 @@ async def cmd_editprofile(msg: Message):
     except Exception as e:
         logger.error(f"Error editing profile: {e}")
         await msg.reply("❌ Не удалось обновить профиль. Попробуй позже.")
+
+
+@router.message(Command("birthday"))
+async def cmd_birthday(msg: Message):
+    """
+    Устанавливает день рождения для поздравлений.
+    
+    Использование:
+    /birthday DD.MM — установить дату (например: /birthday 15.03)
+    /birthday — показать текущую дату
+    /birthday удалить — удалить дату
+    """
+    from app.services.user_memory import user_memory, UserProfile
+    
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    username = msg.from_user.username or msg.from_user.first_name
+    
+    args = msg.text.split(maxsplit=1)
+    
+    # Получаем текущий профиль
+    profile = await user_memory.get_profile(chat_id, user_id)
+    
+    if len(args) < 2:
+        # Показываем текущую дату
+        if profile and profile.birthday:
+            chat_info = ""
+            if profile.birthday_chat_id:
+                chat_info = f"\n📍 Чат для поздравлений: {profile.birthday_chat_id}"
+            await msg.reply(
+                f"🎂 Твой день рождения: <b>{profile.birthday}</b>{chat_info}\n\n"
+                "Олег поздравит тебя в 10:00 по Москве.\n"
+                "Удалить: <code>/birthday удалить</code>",
+                parse_mode="HTML"
+            )
+        else:
+            await msg.reply(
+                "🎂 <b>Установка дня рождения</b>\n\n"
+                "Использование: <code>/birthday DD.MM</code>\n"
+                "Пример: <code>/birthday 15.03</code>\n\n"
+                "Олег поздравит тебя в этом чате в 10:00 по Москве.",
+                parse_mode="HTML"
+            )
+        return
+    
+    arg = args[1].strip().lower()
+    
+    # Удаление
+    if arg in ("удалить", "delete", "remove", "clear"):
+        if profile:
+            profile.birthday = None
+            profile.birthday_chat_id = None
+            await user_memory.save_profile(chat_id, user_id, profile)
+        await msg.reply("🗑 День рождения удалён. Олег больше не будет поздравлять.")
+        return
+    
+    # Парсим дату DD.MM
+    import re
+    match = re.match(r'^(\d{1,2})[./](\d{1,2})$', arg)
+    if not match:
+        await msg.reply(
+            "❌ Неверный формат. Используй: <code>/birthday DD.MM</code>\n"
+            "Пример: <code>/birthday 15.03</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    day, month = int(match.group(1)), int(match.group(2))
+    
+    # Валидация
+    if not (1 <= month <= 12):
+        await msg.reply("❌ Месяц должен быть от 1 до 12")
+        return
+    
+    days_in_month = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if not (1 <= day <= days_in_month[month - 1]):
+        await msg.reply(f"❌ В {month}-м месяце нет {day}-го дня")
+        return
+    
+    # Форматируем с ведущими нулями
+    birthday_str = f"{day:02d}.{month:02d}"
+    
+    # Сохраняем
+    success = await user_memory.set_birthday(
+        chat_id=chat_id,
+        user_id=user_id,
+        username=username,
+        birthday=birthday_str,
+        birthday_chat_id=chat_id  # Поздравлять в этом чате
+    )
+    
+    if success:
+        await msg.reply(
+            f"🎂 День рождения установлен: <b>{birthday_str}</b>\n\n"
+            f"Олег поздравит тебя в этом чате в 10:00 по Москве.",
+            parse_mode="HTML"
+        )
+        logger.info(f"Birthday set for user {user_id}: {birthday_str}")
+    else:
+        await msg.reply("❌ Не удалось сохранить. Попробуй позже.")
 
 
 @router.message(Command("limit"))

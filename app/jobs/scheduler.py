@@ -716,6 +716,80 @@ async def job_sync_sdoc_admins(bot: Bot):
         logger.error(f"Ошибка синхронизации админов SDOC: {e}")
 
 
+async def job_birthday_greetings(bot: Bot):
+    """
+    Поздравляет пользователей с днём рождения.
+    Запускается в 10:00 по Москве.
+    """
+    from app.services.user_memory import user_memory
+    from app.services.ollama_client import generate_response
+    
+    try:
+        tz = pytz.timezone(settings.timezone)
+        today = datetime.now(tz)
+        today_str = today.strftime("%d.%m")
+        
+        birthdays = await user_memory.get_birthdays_today(today_str)
+        
+        if not birthdays:
+            logger.debug("Сегодня нет именинников")
+            return
+        
+        # Группируем по чатам для отправки
+        sent_users = set()  # Чтобы не поздравлять дважды
+        
+        for bday in birthdays:
+            user_id = bday.get('user_id')
+            if not user_id or user_id in sent_users:
+                continue
+            
+            username = bday.get('username')
+            name = bday.get('name') or username or f"ID:{user_id}"
+            chat_id = bday.get('birthday_chat_id') or bday.get('chat_id')
+            
+            if not chat_id:
+                continue
+            
+            try:
+                # Генерируем персональное поздравление через LLM
+                prompt = f"Напиши короткое (2-3 предложения) поздравление с днём рождения для {name}. Будь в своём стиле — циничный, но добрый. Без эмодзи в начале."
+                
+                greeting = await generate_response(
+                    user_text=prompt,
+                    chat_id=chat_id,
+                    username="system",
+                    user_id=0,
+                    system_override="Ты Олег — циничный IT-гигачад. Поздравь человека с ДР коротко и с юмором."
+                )
+                
+                # Fallback если LLM недоступен
+                if not greeting or len(greeting) < 10:
+                    greeting = f"Ну чё, {name}, с днюхой тебя! Желаю чтобы код компилился с первого раза, а пинг был низким. 🎂"
+                
+                mention = f"@{username}" if username else name
+                message = f"🎂 <b>С днём рождения, {mention}!</b>\n\n{greeting}"
+                
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode="HTML"
+                )
+                
+                sent_users.add(user_id)
+                logger.info(f"Поздравил {name} (user_id={user_id}) в чате {chat_id}")
+                
+                await asyncio.sleep(1)  # Rate limiting
+                
+            except Exception as e:
+                logger.error(f"Ошибка поздравления user_id={user_id}: {e}")
+                continue
+        
+        logger.info(f"Поздравлено {len(sent_users)} именинников")
+        
+    except Exception as e:
+        logger.error(f"Ошибка в job_birthday_greetings: {e}")
+
+
 async def setup_scheduler(bot: Bot):
     global _scheduler
     if _scheduler:
@@ -740,6 +814,14 @@ async def setup_scheduler(bot: Bot):
             args=[bot],
             id="sync_sdoc_admins"
         )
+    
+    # Birthday greetings: поздравления с ДР в 10:00 по Москве
+    _scheduler.add_job(
+        job_birthday_greetings,
+        CronTrigger(hour=10, minute=0, timezone='Europe/Moscow'),
+        args=[bot],
+        id="birthday_greetings"
+    )
     
     # Fortress Update: Tournament scheduler jobs (Requirements 10.1, 10.2, 10.3)
     # Daily tournament: starts at 00:00 UTC every day

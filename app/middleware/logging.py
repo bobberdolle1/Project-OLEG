@@ -11,6 +11,7 @@ from app.database.session import get_session
 from app.database.models import MessageLog, User
 from sqlalchemy import select, update
 from app.utils import utc_now
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,14 @@ LINK_RE = re.compile(r"https?:\/\/\S+", re.IGNORECASE)
 class MessageLoggerMiddleware(BaseMiddleware):
     async def __call__(self, handler, event: Message, data: dict[str, Any]):
         start_time = time.time()
+        
+        # Record update for health check
+        if settings.metrics_enabled:
+            try:
+                from app.services.metrics_server import record_update_received
+                record_update_received()
+            except Exception:
+                pass  # Don't fail on health tracking errors
         
         if isinstance(event, types.Message) and event.chat:
             # Логируем входящее сообщение

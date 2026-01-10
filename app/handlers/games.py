@@ -873,6 +873,19 @@ async def cmd_grow(msg: Message):
                 f"не спеши, чемпион."
             )
         gain = random.randint(GROW_MIN, GROW_MAX)
+        
+        # Check for Omega cream boost (Requirements: grow_boost effect)
+        try:
+            from app.handlers.inventory import get_booster_effect, consume_booster_effect
+            grow_boost = await consume_booster_effect(user_id, chat_id, "grow_boost")
+            if grow_boost:
+                multiplier = grow_boost if isinstance(grow_boost, (int, float)) else 2.0
+                old_gain = gain
+                gain = int(gain * multiplier)
+                logger.info(f"User {user_id} used grow boost: {old_gain} -> {gain} (x{multiplier})")
+        except Exception as e:
+            logger.debug(f"No grow boost check: {e}")
+        
         cooldown_hours = random.randint(
             GROW_COOLDOWN_MIN_HOURS, GROW_COOLDOWN_MAX_HOURS
         )
@@ -887,7 +900,7 @@ async def cmd_grow(msg: Message):
 
         new_achievements = await check_and_award_achievements(session, msg.bot, user, gs, "grow")
         for achievement in new_achievements:
-            await msg.answer(f"🎉 Новое достижение: {achievement.name}!")
+            await msg.answer(f"🎉 Новое достижение: {achievement}!")
         
         updated_quests = await check_and_update_quests(session, user, "grow")
         for quest in updated_quests:
@@ -1429,7 +1442,7 @@ async def cmd_casino(msg: Message):
         if mult == 5: # Only check for achievements if a jackpot occurred
             new_achievements = await check_and_award_achievements(session, msg.bot, user, gs, "casino_jackpot")
             for achievement in new_achievements:
-                await msg.answer(f"🎉 Новое достижение: {achievement.name}!")
+                await msg.answer(f"🎉 Новое достижение: {achievement}!")
             
             updated_quests = await check_and_update_quests(session, user, "casino_jackpot")
             for quest in updated_quests:

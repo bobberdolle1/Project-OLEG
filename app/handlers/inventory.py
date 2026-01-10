@@ -56,7 +56,8 @@ INVENTORY_CATEGORIES = {
     ]),
     "pp_items": ("🍆 PP предметы", [
         ItemType.PP_CREAM_SMALL, ItemType.PP_CREAM_MEDIUM, 
-        ItemType.PP_CREAM_LARGE, ItemType.PP_CREAM_TITAN, ItemType.PP_CAGE
+        ItemType.PP_CREAM_LARGE, ItemType.PP_CREAM_TITAN, 
+        ItemType.PP_CREAM_OMEGA, ItemType.PP_CAGE
     ]),
     "boosters": ("⚡ Бустеры", [
         ItemType.ENERGY_DRINK, ItemType.LUCKY_CHARM, ItemType.SHIELD, 
@@ -502,7 +503,7 @@ async def open_lootbox(user_id: int, chat_id: int, item_type: str) -> LootboxOpe
     Requirements: 6.1, 6.2, 6.3
     """
     from app.services.mini_games import lootbox_engine
-    from app.services.economy import update_user_balance
+    from app.services import wallet_service
     
     # Validate item type is a lootbox
     if not is_lootbox(item_type):
@@ -551,7 +552,7 @@ async def open_lootbox(user_id: int, chat_id: int, item_type: str) -> LootboxOpe
     # Add coins from lootbox
     coins_received = result.total_coins
     if coins_received > 0:
-        await update_user_balance(user_id, chat_id, coins_received)
+        await wallet_service.add(user_id, coins_received, reason="lootbox reward")
     
     # Add items to inventory
     items_received = []
@@ -822,19 +823,27 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
             message=f"❌ Ошибка при использовании: {remove_result.message}"
         )
     
+    # Check for grow_boost effect (Omega cream special)
+    grow_boost = item_info.effect.get("grow_boost")
+    boost_message = ""
+    if grow_boost:
+        await _set_booster_effect(user_id, chat_id, "grow_boost", grow_boost, ttl=86400)  # 24h
+        boost_message = f"\n\n⚡ <b>БОНУС:</b> x{grow_boost} к следующему /grow!"
+    
     # Success! Return result with details - Requirement 2.2
     return EffectResult(
         success=True,
         message=f"🧴 Ты использовал {item_info.emoji} {item_info.name}!\n\n"
                 f"📈 Твой PP вырос на +{increase} см!\n"
-                f"📏 Новый размер: {new_size} см",
+                f"📏 Новый размер: {new_size} см{boost_message}",
         details={
             "increase": increase,
             "old_size": old_size,
             "new_size": new_size,
             "item_type": item_type,
             "pp_boost_min": pp_boost_min,
-            "pp_boost_max": pp_boost_max
+            "pp_boost_max": pp_boost_max,
+            "grow_boost": grow_boost
         }
     )
 

@@ -31,11 +31,14 @@ services:
       - chromadb
       - redis
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9090/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s  # Увеличено для загрузки модели Whisper
+      start_period: 120s  # 2 min grace period for Whisper model loading
+    labels:
+      # For autoheal to restart unhealthy containers
+      - "autoheal=true"
     logging:
       driver: "json-file"
       options:
@@ -213,6 +216,26 @@ services:
   #     - oleg-network
   #   depends_on:
   #     - prometheus
+
+  # Autoheal - автоматический рестарт unhealthy контейнеров
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: oleg-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=120
+      - AUTOHEAL_DEFAULT_STOP_TIMEOUT=10
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - oleg-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   # oleg-data и oleg-logs теперь bind mounts (./data и ./logs)

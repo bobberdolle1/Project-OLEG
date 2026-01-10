@@ -219,7 +219,10 @@ async def callback_fishing(callback: CallbackQuery):
             await callback.answer()
         except Exception as e:
             logger.error(f"Fishing cast error for user {user_id}: {e}")
-            await callback.answer("🎣 Упс, удочка сломалась. Попробуй позже!", show_alert=True)
+            try:
+                await callback.answer("🎣 Упс, удочка сломалась. Попробуй позже!", show_alert=True)
+            except Exception:
+                pass  # Ignore if callback is too old
     
     elif action == "stats":
         stats = await fishing_stats_service.get_stats(user_id, chat_id)
@@ -1205,100 +1208,10 @@ async def cmd_transfer(message: Message):
 
 
 # ============================================================================
-# INVENTORY COMMAND
+# INVENTORY COMMAND (moved to app/handlers/inventory.py)
 # ============================================================================
 
-@router.message(Command("inventory"))
-async def cmd_inventory(message: Message):
-    """Show user inventory."""
-    import json
-    from datetime import datetime, timezone
-    
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    
-    items = await inventory_service.get_inventory(user_id, chat_id)
-    balance = await get_user_balance(user_id, chat_id)
-    
-    if not items:
-        text = (
-            "🎒 <b>ИНВЕНТАРЬ</b>\n\n"
-            "Пусто! Покупай предметы в /shop\n\n"
-            f"💰 Баланс: {balance} монет"
-        )
-    else:
-        text = "🎒 <b>ИНВЕНТАРЬ</b>\n\n"
-        
-        # Group items by category
-        rods = []
-        consumables = []
-        lootboxes = []
-        roosters = []
-        pp_items = []
-        other = []
-        
-        for item in items:
-            item_info = ITEM_CATALOG.get(item.item_type)
-            if item_info:
-                if item.item_type.endswith("_rod") or item.item_type.startswith("fishing_rod"):
-                    equipped = " ✅" if item.equipped else ""
-                    rods.append(f"  {item_info.emoji} {item_info.name}{equipped}")
-                elif item.item_type.startswith("lootbox"):
-                    lootboxes.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
-                elif item.item_type.startswith("rooster"):
-                    roosters.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
-                elif item.item_type in ["lucky_charm", "energy_drink", "shield", "vip_status", "double_xp"]:
-                    consumables.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
-                elif item.item_type.startswith("pp_"):
-                    # PP items (creams and cage)
-                    if item.item_type == ItemType.PP_CAGE:
-                        # Show cage status
-                        status = ""
-                        if item.equipped and item.item_data:
-                            try:
-                                data = json.loads(item.item_data)
-                                expires_at_str = data.get("expires_at")
-                                if expires_at_str:
-                                    expires_at = datetime.fromisoformat(expires_at_str)
-                                    if expires_at.tzinfo is None:
-                                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-                                    now = datetime.now(timezone.utc)
-                                    if now < expires_at:
-                                        remaining = expires_at - now
-                                        hours = int(remaining.total_seconds() // 3600)
-                                        minutes = int((remaining.total_seconds() % 3600) // 60)
-                                        status = f" ✅ ({hours}ч {minutes}м)"
-                                    else:
-                                        status = " ⏰ (истекла)"
-                            except (json.JSONDecodeError, ValueError):
-                                status = " ✅" if item.equipped else ""
-                        pp_items.append(f"  {item_info.emoji} {item_info.name}{status}")
-                    else:
-                        pp_items.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
-                else:
-                    other.append(f"  {item_info.emoji} {item_info.name} x{item.quantity}")
-            else:
-                # Item not in catalog - show raw data
-                other.append(f"  📦 {item.item_name} x{item.quantity}")
-        
-        if rods:
-            text += "<b>🎣 Удочки:</b>\n" + "\n".join(rods) + "\n\n"
-        if lootboxes:
-            text += "<b>📦 Лутбоксы:</b>\n" + "\n".join(lootboxes) + "\n\n"
-        if roosters:
-            text += "<b>🐔 Петухи:</b>\n" + "\n".join(roosters) + "\n\n"
-        if consumables:
-            text += "<b>🧪 Расходники:</b>\n" + "\n".join(consumables) + "\n\n"
-        if pp_items:
-            text += "<b>🍆 PP предметы:</b>\n" + "\n".join(pp_items) + "\n\n"
-        if other:
-            text += "<b>📋 Прочее:</b>\n" + "\n".join(other) + "\n\n"
-        
-        text += f"💰 Баланс: {balance} монет\n\n"
-        text += "<i>Используй /loot для открытия лутбоксов</i>\n"
-        text += "<i>Используй /cage для управления клеткой</i>"
-    
-    await message.reply(text, parse_mode="HTML")
+# Old inventory handler removed - now handled by inventory.py with inline buttons
 
 
 # ============================================================================
@@ -1647,7 +1560,7 @@ async def cmd_pp(message: Message):
     """PP battle game - использует размер из /grow.
     
     Использование:
-    - /pp — открытый вызов на бой (любой может принять)
+    - /pp — справка по командам
     - /pp @username [ставка] — вызвать конкретного человека
     - /pp [ставка] — открытый вызов со ставкой
     - Ответ на сообщение: /pp [ставка] — вызвать автора сообщения
@@ -1662,6 +1575,25 @@ async def cmd_pp(message: Message):
     target_username = None
     target_id = 0  # 0 = открытый вызов
     bet = 20  # Дефолтная ставка
+    
+    # Если нет аргументов и нет reply — показываем справку
+    if not args and not message.reply_to_message:
+        size, wins, losses = await get_or_create_game_stat(user_id, tg_username)
+        help_text = (
+            "🍆 <b>PP БИТВЫ</b>\n\n"
+            f"📏 Твой размер: <b>{size} см</b>\n"
+            f"📊 Побед/Поражений: {wins}/{losses}\n\n"
+            "<b>Команды:</b>\n"
+            "• /pp @user [ставка] — вызвать игрока\n"
+            "• /pp [ставка] — открытый вызов\n"
+            "• /ppo — бой с Олегом (PvE)\n"
+            "• /grow — вырастить пипиську\n"
+            "• /ppstats — статистика\n"
+            "• /pptop — топ игроков\n\n"
+            "<i>Ответь на сообщение с /pp чтобы вызвать автора</i>"
+        )
+        await message.reply(help_text, parse_mode="HTML")
+        return
     
     # Проверяем reply — вызов автора сообщения
     if message.reply_to_message and message.reply_to_message.from_user:
@@ -1774,12 +1706,19 @@ async def cmd_pp_oleg(message: Message):
         await message.reply("❌ Сначала вырасти пипиську через /grow!")
         return
     
+    # Проверяем активную клетку — защищает от потерь
+    has_cage = await inventory_service.has_active_item(user_id, chat_id, ItemType.PP_CAGE)
+    
     # Олег имеет случайный размер от 50% до 150% от игрока (минимум 5)
     oleg_size = random.randint(int(size * 0.5), int(size * 1.5))
     oleg_size = max(5, oleg_size)
     
     # Ставка = 10% от размера игрока (минимум 1)
     bet = max(1, size // 10)
+    
+    # Если есть клетка — ставка 0 (защита от потерь)
+    if has_cage:
+        bet = 0
     
     # Выполняем битву
     result_text = await execute_pp_battle(
@@ -1789,7 +1728,11 @@ async def cmd_pp_oleg(message: Message):
         bet
     )
     
-    await message.reply(result_text)
+    # Добавляем инфо о клетке если активна
+    if has_cage:
+        result_text += "\n\n🔒 <i>Клетка защитила от потери размера!</i>"
+    
+    await message.reply(result_text, parse_mode="HTML")
 
 
 @router.message(Command("ppstats"))

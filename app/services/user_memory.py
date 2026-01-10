@@ -62,6 +62,8 @@ class UserProfile:
     pets: List[str] = field(default_factory=list)  # Питомцы
     languages: List[str] = field(default_factory=list)  # Языки программирования или обычные
     age: Optional[int] = None  # Возраст если сказал
+    birthday: Optional[str] = None  # День рождения в формате DD.MM (без года)
+    birthday_chat_id: Optional[int] = None  # Чат для поздравлений (если указан)
     
     # Проблемы и история
     current_problems: List[str] = field(default_factory=list)
@@ -545,6 +547,109 @@ class UserMemoryService:
             if context:
                 result[user_id] = context
         return result
+    
+    async def get_birthdays_today(self, today_str: str) -> List[Dict]:
+        """
+        Получить всех пользователей с днём рождения сегодня.
+        
+        Args:
+            today_str: Дата в формате DD.MM
+            
+        Returns:
+            Список словарей с user_id, username, chat_id, birthday_chat_id
+        """
+        birthdays = []
+        
+        try:
+            # Получаем все коллекции профилей
+            collections = vector_db.client.list_collections()
+            
+            for coll in collections:
+                if "_user_profiles" not in coll.name:
+                    continue
+                
+                # Извлекаем chat_id из имени коллекции
+                try:
+                    chat_id = int(coll.name.replace("chat_", "").replace("_user_profiles", ""))
+                except ValueError:
+                    continue
+                
+                # Получаем все профили из коллекции
+                try:
+                    collection = vector_db.client.get_collection(coll.name)
+                    results = collection.get(
+                        where={"type": "profile"},
+                        include=["documents", "metadatas"]
+                    )
+                    
+                    if not results or not results.get('documents'):
+                        continue
+                    
+                    for i, doc in enumerate(results['documents']):
+                        try:
+                            profile_data = json.loads(doc)
+                            birthday = profile_data.get('birthday')
+                            
+                            if birthday == today_str:
+                                birthdays.append({
+                                    'user_id': profile_data.get('user_id'),
+                                    'username': profile_data.get('username'),
+                                    'name': profile_data.get('name'),
+                                    'chat_id': chat_id,
+                                    'birthday_chat_id': profile_data.get('birthday_chat_id')
+                                })
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+                            
+                except Exception as e:
+                    logger.debug(f"Error reading collection {coll.name}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error getting birthdays: {e}")
+        
+        return birthdays
+    
+    async def set_birthday(
+        self, 
+        chat_id: int, 
+        user_id: int, 
+        username: Optional[str],
+        birthday: str,
+        birthday_chat_id: Optional[int] = None
+    ) -> bool:
+        """
+        Установить день рождения пользователя.
+        
+        Args:
+            chat_id: ID чата где вызвана команда
+            user_id: ID пользователя
+            username: Username пользователя
+            birthday: Дата в формате DD.MM
+            birthday_chat_id: ID чата для поздравлений (опционально)
+            
+        Returns:
+            True если успешно
+        """
+        try:
+            profile = await self.get_profile(chat_id, user_id)
+            if not profile:
+                profile = UserProfile(user_id=user_id, username=username)
+                profile.first_seen = datetime.now().isoformat()
+            
+            profile.birthday = birthday
+            if birthday_chat_id:
+                profile.birthday_chat_id = birthday_chat_id
+            
+            if username:
+                profile.username = username
+            
+            await self.save_profile(chat_id, user_id, profile)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error setting birthday: {e}")
+            return False
 
 
 # Глобальный экземпляр

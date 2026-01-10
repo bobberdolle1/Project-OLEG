@@ -64,6 +64,7 @@ GROUP_COMMANDS = [
     BotCommand(command="say", description="🔊 Озвучить текст"),
     BotCommand(command="tldr", description="📝 Пересказ контента"),
     BotCommand(command="whois", description="🔍 Инфо о пользователе"),
+    BotCommand(command="birthday", description="🎂 Установить день рождения"),
     BotCommand(command="stats", description="📈 Статистика чата"),
     BotCommand(command="cancel", description="❌ Отменить текущую игру"),
     

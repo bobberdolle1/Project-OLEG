@@ -308,6 +308,11 @@ def build_dp() -> Dispatcher:
     """Построить диспетчер с обработчиками."""
     dp = Dispatcher(storage=MemoryStorage())
     
+    # Retry middleware — автоматический повтор при сетевых ошибках (должен быть первым)
+    from app.middleware.retry import RetryMiddleware
+    dp.message.outer_middleware(RetryMiddleware(max_retries=3, base_delay=1.0))
+    dp.callback_query.outer_middleware(RetryMiddleware(max_retries=3, base_delay=1.0))
+    
     # SDOC Filter — первый middleware, отсекает чужие группы
     if settings.sdoc_exclusive_mode:
         dp.message.outer_middleware(SDOCFilterMiddleware())
@@ -429,6 +434,11 @@ async def main():
         logger.info(f"Бот: @{bot_info.username} (id: {bot_info.id})")
         logger.info("Начинаем polling...")
         
+        # Mark polling as active for health checks
+        if settings.metrics_enabled:
+            from app.services.metrics_server import set_polling_active
+            set_polling_active(True)
+        
         await dp.start_polling(bot, skip_updates=True)
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем (Ctrl+C)")
@@ -436,6 +446,11 @@ async def main():
         logger.error(f"Критическая ошибка: {type(e).__name__}: {e}")
         raise
     finally:
+        # Mark polling as inactive
+        if settings.metrics_enabled:
+            from app.services.metrics_server import set_polling_active
+            set_polling_active(False)
+        
         logger.info("=" * 60)
         logger.info("ОСТАНОВКА БОТА")
         logger.info("=" * 60)

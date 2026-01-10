@@ -113,12 +113,11 @@ async def has_pending_proposal(from_user_id: int, to_user_id: int, chat_id: int)
     """
     async_session = get_session()
     async with async_session() as session:
-        now = utc_now()
+        # Get all pending proposals between these users
         result = await session.execute(
             select(MarriageProposal).where(
                 MarriageProposal.chat_id == chat_id,
                 MarriageProposal.status == "pending",
-                MarriageProposal.expires_at > now,
                 or_(
                     and_(
                         MarriageProposal.from_user_id == from_user_id,
@@ -131,7 +130,22 @@ async def has_pending_proposal(from_user_id: int, to_user_id: int, chat_id: int)
                 )
             )
         )
-        return result.scalars().first() is not None
+        
+        now = utc_now()
+        for proposal in result.scalars():
+            # Handle naive datetime from SQLite
+            expires_at = proposal.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+            if expires_at > now:
+                return True  # Found valid non-expired proposal
+            else:
+                # Mark expired proposal
+                proposal.status = "expired"
+                await session.commit()
+        
+        return False
 
 
 async def create_proposal(from_user_id: int, to_user_id: int, chat_id: int) -> MarriageProposal | None:
@@ -152,7 +166,7 @@ async def create_proposal(from_user_id: int, to_user_id: int, chat_id: int) -> M
     async with async_session() as session:
         now = utc_now()
         
-        # Check for existing pending proposal
+        # Check for existing pending proposal (not expired)
         existing = await session.execute(
             select(MarriageProposal).where(
                 MarriageProposal.from_user_id == from_user_id,
@@ -161,8 +175,18 @@ async def create_proposal(from_user_id: int, to_user_id: int, chat_id: int) -> M
                 MarriageProposal.status == "pending"
             )
         )
-        if existing.scalars().first():
-            return None  # Already has pending proposal
+        existing_proposal = existing.scalars().first()
+        if existing_proposal:
+            # Check if it's expired
+            expires_at = existing_proposal.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            
+            if expires_at > now:
+                return None  # Valid pending proposal exists
+            else:
+                # Mark as expired and continue to create new one
+                existing_proposal.status = "expired"
         
         proposal = MarriageProposal(
             from_user_id=from_user_id,

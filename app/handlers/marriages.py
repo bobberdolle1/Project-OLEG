@@ -6,7 +6,7 @@ Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6
 """
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -189,7 +189,10 @@ async def accept_proposal(proposal_id: int) -> Marriage | None:
             return None
         
         # Check if proposal expired
-        if proposal.expires_at < utc_now():
+        expires_at = proposal.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < utc_now():
             proposal.status = "expired"
             await session.commit()
             return None
@@ -559,7 +562,10 @@ async def callback_accept_proposal(callback: CallbackQuery):
         return
     
     # Check if proposal expired
-    if proposal.expires_at < utc_now():
+    expires_at = proposal.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < utc_now():
         await callback.answer("⏰ Предложение истекло!", show_alert=True)
         if callback.message:
             await callback.message.edit_text(

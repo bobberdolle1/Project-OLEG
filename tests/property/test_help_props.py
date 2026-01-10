@@ -15,31 +15,45 @@ from hypothesis import given, strategies as st, settings
 # ============================================================================
 
 def _load_help_texts():
-    """Load help texts from help.py by parsing the file directly."""
+    """Load help texts from help.py by parsing the file directly.
+    
+    The new help.py uses multiple section constants instead of two main texts.
+    We combine them to create equivalent group and private help texts.
+    """
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     help_file = os.path.join(project_root, 'app', 'handlers', 'help.py')
     
     with open(help_file, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # Extract HELP_TEXT_GROUP using regex
-    group_match = re.search(
-        r'HELP_TEXT_GROUP\s*=\s*"""(.*?)"""',
-        content,
-        re.DOTALL
-    )
+    # Extract all help section constants
+    sections = {}
+    section_names = ['HELP_INTRO', 'HELP_FEATURES', 'HELP_GAMES', 'HELP_MODERATION', 
+                     'HELP_QUOTES', 'HELP_SOCIAL', 'HELP_ADMIN', 'HELP_PRIVATE']
     
-    # Extract HELP_TEXT_PRIVATE using regex
-    private_match = re.search(
-        r'HELP_TEXT_PRIVATE\s*=\s*"""(.*?)"""',
-        content,
-        re.DOTALL
-    )
+    for name in section_names:
+        # Match triple-quoted strings (both """ and ''')
+        pattern = rf'{name}\s*=\s*"""(.*?)"""'
+        match = re.search(pattern, content, re.DOTALL)
+        if not match:
+            pattern = rf"{name}\s*=\s*'''(.*?)'''"
+            match = re.search(pattern, content, re.DOTALL)
+        if match:
+            sections[name] = match.group(1)
     
-    if not group_match or not private_match:
+    # Build group help text (combines intro + all sections except private)
+    group_text = sections.get('HELP_INTRO', '') + sections.get('HELP_FEATURES', '') + \
+                 sections.get('HELP_GAMES', '') + sections.get('HELP_MODERATION', '') + \
+                 sections.get('HELP_QUOTES', '') + sections.get('HELP_SOCIAL', '') + \
+                 sections.get('HELP_ADMIN', '')
+    
+    # Private help text
+    private_text = sections.get('HELP_PRIVATE', '')
+    
+    if not group_text or not private_text:
         raise ValueError("Could not extract help texts from help.py")
     
-    return group_match.group(1), private_match.group(1)
+    return group_text, private_text
 
 
 HELP_TEXT_GROUP, HELP_TEXT_PRIVATE = _load_help_texts()
@@ -117,7 +131,7 @@ class TestHelpContextDifferentiation:
         # Group help must contain game commands
         assert "/games" in help_text, "Group help must contain /games command"
         assert "/grow" in help_text, "Group help must contain /grow command"
-        assert "/pvp" in help_text, "Group help must contain /pvp command"
+        assert "/challenge" in help_text, "Group help must contain /challenge command"
         assert "/casino" in help_text, "Group help must contain /casino command"
     
     @settings(max_examples=100)
@@ -191,9 +205,10 @@ class TestHelpContextDifferentiation:
         """
         help_text = get_help_text(chat_type)
         
-        # Both contexts should have /help and /start
-        assert "/help" in help_text, "Help text must contain /help command"
+        # Both contexts should have /say command (common to both)
         assert "/say" in help_text, "Help text must contain /say command"
+        # Both contexts should have /admin command
+        assert "/admin" in help_text, "Help text must contain /admin command"
     
     def test_supergroup_uses_group_help(self):
         """

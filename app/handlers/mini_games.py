@@ -1302,27 +1302,31 @@ async def cmd_inventory(message: Message):
 
 
 # ============================================================================
-# USE CONSUMABLE ITEMS
+# USE CONSUMABLE ITEMS (DEPRECATED - redirects to /inventory)
 # ============================================================================
 
 @router.message(Command("use"))
 async def cmd_use(message: Message):
-    """Use a consumable item."""
+    """Use a consumable item - redirects to unified inventory."""
     user_id = message.from_user.id
     chat_id = message.chat.id
     
     parts = message.text.split(maxsplit=1)
+    
+    # If no item specified, redirect to inventory
     if len(parts) < 2:
-        return await message.reply(
-            "🧪 <b>Использование предметов</b>\n\n"
-            "Команда: /use [предмет]\n\n"
-            "Доступные предметы:\n"
-            "  🥤 энергетик — сброс кулдауна рыбалки\n"
-            "  🍀 талисман — +10% к следующей игре\n"
-            "  🛡️ щит — защита от проигрыша\n\n"
-            "Пример: /use энергетик",
+        # Import inventory handler functions
+        from app.handlers.inventory import build_inventory_text, build_inventory_keyboard
+        
+        text = await build_inventory_text(user_id, chat_id)
+        keyboard = await build_inventory_keyboard(user_id, chat_id)
+        
+        await message.reply(
+            "💡 <b>Совет:</b> Используй /inventory для управления предметами!\n\n" + text,
+            reply_markup=keyboard,
             parse_mode="HTML"
         )
+        return
     
     item_name = parts[1].lower().strip()
     
@@ -1338,59 +1342,54 @@ async def cmd_use(message: Message):
     
     item_type = item_map.get(item_name)
     if not item_type:
-        return await message.reply("❌ Неизвестный предмет. Используй /use для списка.")
-    
-    # Check if user has the item
-    if not await inventory_service.has_item(user_id, chat_id, item_type):
-        item_info = ITEM_CATALOG[item_type]
-        return await message.reply(
-            f"❌ У тебя нет {item_info.emoji} {item_info.name}!\n"
-            f"Купи в /shop"
-        )
-    
-    # Use the item
-    result = await inventory_service.remove_item(user_id, chat_id, item_type, 1)
-    item_info = ITEM_CATALOG[item_type]
-    
-    if item_type == ItemType.ENERGY_DRINK:
-        # Reset fishing cooldown
-        fishing_game.reset_cooldown(user_id)
+        # Redirect to inventory for unknown items
+        from app.handlers.inventory import build_inventory_text, build_inventory_keyboard
+        
+        text = await build_inventory_text(user_id, chat_id)
+        keyboard = await build_inventory_keyboard(user_id, chat_id)
+        
         await message.reply(
-            f"🥤 Использован {item_info.name}!\n\n"
-            f"⚡ Кулдаун рыбалки сброшен!\n"
-            f"Используй /fish"
+            "❌ Неизвестный предмет.\n\n"
+            "💡 Используй /inventory для управления предметами!\n\n" + text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
         )
-    elif item_type == ItemType.LUCKY_CHARM:
-        # TODO: Store luck bonus in user state
-        await message.reply(
-            f"🍀 Использован {item_info.name}!\n\n"
-            f"✨ +10% к выигрышу в следующей игре!"
-        )
-    elif item_type == ItemType.SHIELD:
-        # TODO: Store shield in user state
-        await message.reply(
-            f"🛡️ Использован {item_info.name}!\n\n"
-            f"🛡️ Защита от проигрыша активирована!"
-        )
+        return
     
-    logger.info(f"User {user_id} used item {item_type}")
+    # Use the unified inventory handler for boosters
+    from app.handlers.inventory import apply_booster, build_inventory_text, build_inventory_keyboard
+    
+    result = await apply_booster(user_id, chat_id, item_type)
+    
+    if result.success:
+        text = await build_inventory_text(user_id, chat_id)
+        keyboard = await build_inventory_keyboard(user_id, chat_id)
+        await message.reply(
+            f"{result.message}\n\n{text}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    else:
+        await message.reply(result.message, parse_mode="HTML")
+    
+    logger.info(f"User {user_id} used /use command (redirected to inventory)")
 
 
 # ============================================================================
-# PP CAGE MANAGEMENT (Requirements 10.5)
+# PP CAGE MANAGEMENT (DEPRECATED - redirects to /inventory)
 # ============================================================================
 
 @router.message(Command("cage"))
 async def cmd_cage(message: Message):
     """
-    Manage PP Cage - activate or deactivate.
+    Manage PP Cage - redirects to unified inventory.
     
     Usage:
-      /cage - show status
-      /cage on - activate cage
-      /cage off - deactivate cage
+      /cage - show inventory with cage controls
+      /cage on - activate cage via inventory
+      /cage off - deactivate cage via inventory
       
-    Requirements: 10.5
+    Requirements: 10.5 (backward compatibility)
     """
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -1398,111 +1397,66 @@ async def cmd_cage(message: Message):
     parts = message.text.split()
     action = parts[1].lower() if len(parts) > 1 else None
     
-    # Check if user has the cage
-    has_cage = await inventory_service.has_item(user_id, chat_id, ItemType.PP_CAGE)
-    is_active = await inventory_service.has_active_item(user_id, chat_id, ItemType.PP_CAGE)
+    # Import inventory handler functions
+    from app.handlers.inventory import toggle_cage, build_inventory_text, build_inventory_keyboard
     
     if action == "on":
-        if not has_cage:
-            return await message.reply(
-                "🔒 <b>Пенис-клетка</b>\n\n"
-                "❌ У тебя нет клетки!\n"
-                "Купи в /shop в разделе 'Защита PP'",
-                parse_mode="HTML"
-            )
+        # Activate cage via unified handler
+        result = await toggle_cage(user_id, chat_id, activate=True)
         
-        if is_active:
-            return await message.reply(
-                "🔒 <b>Пенис-клетка</b>\n\n"
-                "⚠️ Клетка уже активна!\n"
-                "Используй /cage off чтобы снять",
-                parse_mode="HTML"
-            )
-        
-        result = await inventory_service.activate_item(user_id, chat_id, ItemType.PP_CAGE)
-        await message.reply(
-            f"🔒 <b>Пенис-клетка</b>\n\n"
-            f"{result.message}\n\n"
-            f"⚠️ Пока клетка активна:\n"
-            f"  • PP защищён от потерь в PvP\n"
-            f"  • /grow заблокирован\n\n"
-            f"Используй /cage off чтобы снять раньше",
-            parse_mode="HTML"
-        )
-    
-    elif action == "off":
-        if not is_active:
-            return await message.reply(
-                "🔒 <b>Пенис-клетка</b>\n\n"
-                "❌ Клетка не активна!\n"
-                "Используй /cage on чтобы надеть",
-                parse_mode="HTML"
-            )
-        
-        result = await inventory_service.deactivate_item(user_id, chat_id, ItemType.PP_CAGE)
-        await message.reply(
-            f"🔓 <b>Пенис-клетка</b>\n\n"
-            f"{result.message}\n\n"
-            f"✅ Теперь можно использовать /grow\n"
-            f"⚠️ PP больше не защищён от потерь",
-            parse_mode="HTML"
-        )
-    
-    else:
-        # Show status
-        if is_active:
-            # Get remaining time
-            import json
-            from datetime import datetime, timezone
-            
-            item = await inventory_service.get_item(user_id, chat_id, ItemType.PP_CAGE)
-            remaining_text = ""
-            if item and item.item_data:
-                try:
-                    data = json.loads(item.item_data)
-                    expires_at_str = data.get("expires_at")
-                    if expires_at_str:
-                        expires_at = datetime.fromisoformat(expires_at_str)
-                        if expires_at.tzinfo is None:
-                            expires_at = expires_at.replace(tzinfo=timezone.utc)
-                        now = datetime.now(timezone.utc)
-                        if now < expires_at:
-                            remaining = expires_at - now
-                            hours = int(remaining.total_seconds() // 3600)
-                            minutes = int((remaining.total_seconds() % 3600) // 60)
-                            remaining_text = f"⏰ Осталось: {hours}ч {minutes}м\n\n"
-                except (json.JSONDecodeError, ValueError):
-                    pass
-            
+        if result.success:
+            text = await build_inventory_text(user_id, chat_id)
+            keyboard = await build_inventory_keyboard(user_id, chat_id)
             await message.reply(
-                f"🔒 <b>Пенис-клетка</b>\n\n"
-                f"✅ Статус: АКТИВНА\n"
-                f"{remaining_text}"
-                f"Эффекты:\n"
-                f"  • PP защищён от потерь в PvP\n"
-                f"  • /grow заблокирован\n\n"
-                f"Команды:\n"
-                f"  /cage off — снять клетку",
-                parse_mode="HTML"
-            )
-        elif has_cage:
-            await message.reply(
-                f"🔓 <b>Пенис-клетка</b>\n\n"
-                f"❌ Статус: НЕ АКТИВНА\n\n"
-                f"У тебя есть клетка в инвентаре.\n\n"
-                f"Команды:\n"
-                f"  /cage on — надеть клетку",
+                f"{result.message}\n\n"
+                f"💡 <b>Совет:</b> Используй /inventory для управления клеткой!\n\n{text}",
+                reply_markup=keyboard,
                 parse_mode="HTML"
             )
         else:
+            await message.reply(result.message, parse_mode="HTML")
+    
+    elif action == "off":
+        # Deactivate cage via unified handler
+        result = await toggle_cage(user_id, chat_id, activate=False)
+        
+        if result.success:
+            text = await build_inventory_text(user_id, chat_id)
+            keyboard = await build_inventory_keyboard(user_id, chat_id)
             await message.reply(
-                f"🔒 <b>Пенис-клетка</b>\n\n"
-                f"❌ У тебя нет клетки!\n\n"
-                f"Клетка защищает PP от потерь в PvP,\n"
-                f"но блокирует /grow на 24 часа.\n\n"
-                f"Купи в /shop в разделе 'Защита PP'",
+                f"{result.message}\n\n"
+                f"💡 <b>Совет:</b> Используй /inventory для управления клеткой!\n\n{text}",
+                reply_markup=keyboard,
                 parse_mode="HTML"
             )
+        else:
+            await message.reply(result.message, parse_mode="HTML")
+    
+    else:
+        # Show inventory with cage controls
+        text = await build_inventory_text(user_id, chat_id)
+        keyboard = await build_inventory_keyboard(user_id, chat_id)
+        
+        # Check cage status for info message
+        has_cage = await inventory_service.has_item(user_id, chat_id, ItemType.PP_CAGE)
+        is_active = await inventory_service.has_active_item(user_id, chat_id, ItemType.PP_CAGE)
+        
+        status_text = ""
+        if is_active:
+            status_text = "🔒 <b>Клетка активна!</b>\n\n"
+        elif has_cage:
+            status_text = "🔓 <b>Клетка в инвентаре</b>\n\n"
+        else:
+            status_text = "❌ <b>Клетки нет</b> — купи в /shop\n\n"
+        
+        await message.reply(
+            f"{status_text}"
+            f"💡 <b>Совет:</b> Используй /inventory для управления клеткой!\n\n{text}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    
+    logger.info(f"User {user_id} used /cage command (redirected to inventory)")
 
 
 # ============================================================================

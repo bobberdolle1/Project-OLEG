@@ -940,31 +940,31 @@ async def build_inventory_keyboard(user_id: int, chat_id: int) -> InlineKeyboard
             if item.equipped:
                 btn_text = f"✅ {item_info.emoji} {item_info.name}"
                 action = "equipped"  # Already equipped, no action
+                callback_data = None
             else:
                 btn_text = f"🎣 Экипировать {item_info.name}"
-                action = f"equip:{item_type}"
+                callback_data = f"{INV_PREFIX}{user_id}:equip:{item_type}"
         elif is_lootbox(item_type):
             # Open button for lootboxes
             btn_text = f"📦 Открыть {item_info.name}"
-            action = f"open:{item_type}"
+            callback_data = f"{INV_PREFIX}{user_id}:open:{item_type}"
         elif is_pp_cage(item_type):
             # Activate/Deactivate for PP cage
             if item.equipped:
                 btn_text = f"🔓 Снять {item_info.name}"
-                action = f"cage:off"
+                callback_data = f"{INV_PREFIX}{user_id}:cage:off"
             else:
                 btn_text = f"🔒 Надеть {item_info.name}"
-                action = f"cage:on"
+                callback_data = f"{INV_PREFIX}{user_id}:cage:on"
         else:
             # Use button for consumables (creams, boosters)
             btn_text = f"✨ Использовать {item_info.name}"
-            action = f"use:{item_type}"
+            callback_data = f"{INV_PREFIX}{user_id}:use:{item_type}"
         
-        # Skip "equipped" action (no-op)
-        if action == "equipped":
+        # Skip items without callback (already equipped rods)
+        if callback_data is None:
             continue
         
-        callback_data = f"{INV_PREFIX}{user_id}:{action}"
         buttons.append([InlineKeyboardButton(text=btn_text, callback_data=callback_data)])
     
     # Add refresh and close buttons
@@ -992,13 +992,22 @@ async def cmd_inventory(message: Message):
 @router.callback_query(F.data.startswith(INV_PREFIX))
 async def callback_inventory(callback: CallbackQuery):
     """Handle inventory callback actions."""
-    parts = callback.data.split(":")
-    if len(parts) < 3:
+    # Parse callback data: inv:{user_id}:{action}:{item_type}
+    # Example: inv:123456:use:pp_cream_small or inv:123456:refresh
+    data = callback.data[len(INV_PREFIX):]  # Remove "inv:" prefix
+    parts = data.split(":", 2)  # Split into max 3 parts: user_id, action, item_type
+    
+    if len(parts) < 2:
         return await callback.answer("Ошибка")
     
-    _, owner_id, action = parts[:3]
+    owner_id = parts[0]
+    action = parts[1]
+    item_type = parts[2] if len(parts) > 2 else None
+    
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
+    
+    logger.debug(f"Inventory callback: owner={owner_id}, action={action}, item={item_type}, user={user_id}")
     
     # Check ownership
     if int(owner_id) != user_id:
@@ -1015,10 +1024,8 @@ async def callback_inventory(callback: CallbackQuery):
         await callback.message.delete()
         await callback.answer()
     
-    elif action.startswith("equip:"):
+    elif action == "equip" and item_type:
         # Handle rod equipping (task 5) - Requirements 5.1
-        item_type = parts[3] if len(parts) > 3 else action.split(":", 1)[1]
-        
         result = await equip_rod(user_id, chat_id, item_type)
         if result.success:
             # Refresh inventory display
@@ -1033,10 +1040,8 @@ async def callback_inventory(callback: CallbackQuery):
         else:
             await callback.answer(result.message, show_alert=True)
     
-    elif action.startswith("open:"):
+    elif action == "open" and item_type:
         # Handle lootbox opening (task 6) - Requirements 6.1, 6.2, 6.3
-        item_type = parts[3] if len(parts) > 3 else action.split(":", 1)[1]
-        
         result = await open_lootbox(user_id, chat_id, item_type)
         if result.success:
             # Refresh inventory display
@@ -1051,10 +1056,9 @@ async def callback_inventory(callback: CallbackQuery):
         else:
             await callback.answer(result.message, show_alert=True)
     
-    elif action.startswith("cage:"):
+    elif action == "cage":
         # Handle PP cage toggle (task 3)
-        cage_action = parts[3] if len(parts) > 3 else action.split(":", 1)[1]
-        activate = cage_action == "on"
+        activate = item_type == "on"
         
         result = await toggle_cage(user_id, chat_id, activate)
         if result.success:
@@ -1070,9 +1074,8 @@ async def callback_inventory(callback: CallbackQuery):
         else:
             await callback.answer(result.message, show_alert=True)
     
-    elif action.startswith("use:"):
+    elif action == "use" and item_type:
         # Handle item usage (tasks 2, 4)
-        item_type = parts[3] if len(parts) > 3 else action.split(":", 1)[1]
         
         # Handle PP cream usage (task 2)
         if is_pp_cream(item_type):
@@ -1108,7 +1111,8 @@ async def callback_inventory(callback: CallbackQuery):
         
         else:
             # Unknown consumable type
-            await callback.answer(f"❌ Неизвестный тип предмета")
+            await callback.answer(f"❌ Неизвестный тип предмета: {item_type}")
     
     else:
+        logger.warning(f"Unknown inventory action: {action}, item_type: {item_type}")
         await callback.answer("Неизвестное действие")

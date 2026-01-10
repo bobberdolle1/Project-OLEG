@@ -134,7 +134,7 @@ async def has_pending_proposal(from_user_id: int, to_user_id: int, chat_id: int)
         return result.scalars().first() is not None
 
 
-async def create_proposal(from_user_id: int, to_user_id: int, chat_id: int) -> MarriageProposal:
+async def create_proposal(from_user_id: int, to_user_id: int, chat_id: int) -> MarriageProposal | None:
     """
     Create a new marriage proposal.
     
@@ -146,11 +146,24 @@ async def create_proposal(from_user_id: int, to_user_id: int, chat_id: int) -> M
         chat_id: Chat ID
         
     Returns:
-        Created MarriageProposal object
+        Created MarriageProposal object or None if pending proposal already exists
     """
     async_session = get_session()
     async with async_session() as session:
         now = utc_now()
+        
+        # Check for existing pending proposal
+        existing = await session.execute(
+            select(MarriageProposal).where(
+                MarriageProposal.from_user_id == from_user_id,
+                MarriageProposal.to_user_id == to_user_id,
+                MarriageProposal.chat_id == chat_id,
+                MarriageProposal.status == "pending"
+            )
+        )
+        if existing.scalars().first():
+            return None  # Already has pending proposal
+        
         proposal = MarriageProposal(
             from_user_id=from_user_id,
             to_user_id=to_user_id,
@@ -444,6 +457,14 @@ async def cmd_marry(msg: Message):
     
     # Create proposal
     proposal = await create_proposal(proposer_id, target_id, chat_id)
+    
+    # Handle race condition - proposal already exists
+    if not proposal:
+        await msg.reply(
+            "⏳ Предложение уже отправлено! Ожидай ответа.",
+            parse_mode="HTML"
+        )
+        return
     
     # Send proposal message
     await msg.reply(

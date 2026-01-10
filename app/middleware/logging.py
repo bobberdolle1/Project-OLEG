@@ -88,6 +88,29 @@ class MessageLoggerMiddleware(BaseMiddleware):
                     await session.commit()
                 except Exception:
                     await session.rollback()
+            
+            # Extract facts from ALL messages for /whois dossier (background task)
+            if text and len(text) >= 10 and event.from_user:
+                import asyncio
+                from app.services.ollama_client import extract_facts_from_message, store_fact_to_memory
+                from app.services.user_memory import user_memory
+                
+                async def extract_facts_background():
+                    try:
+                        user_info = {"username": event.from_user.username} if event.from_user.username else {}
+                        topic_id = getattr(event, 'message_thread_id', None)
+                        new_facts = await extract_facts_from_message(text, event.chat.id, user_info, topic_id=topic_id)
+                        if new_facts:
+                            for fact in new_facts:
+                                await store_fact_to_memory(fact['text'], event.chat.id, fact['metadata'], topic_id=topic_id)
+                            await user_memory.update_profile_from_facts(
+                                event.chat.id, event.from_user.id, event.from_user.username, new_facts
+                            )
+                            logger.debug(f"[FACTS] Extracted {len(new_facts)} facts from message in chat {event.chat.id}")
+                    except Exception as e:
+                        logger.debug(f"Background fact extraction failed: {e}")
+                
+                asyncio.create_task(extract_facts_background())
 
             # Track message metrics
             try:

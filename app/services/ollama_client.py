@@ -3386,6 +3386,8 @@ async def extract_facts_from_message(text: str, chat_id: int, user_info: dict = 
         logger.debug(f"Fact extraction skipped by pre-filter: '{clean_text[:50]}...'")
         return []
     
+    logger.info(f"[FACTS] Pre-filter passed, extracting facts from: '{clean_text[:60]}...'")
+    
     # Добавляем информацию о пользователе в контекст
     user_context = ""
     if user_info and user_info.get("username"):
@@ -3873,13 +3875,16 @@ async def generate_reply_with_context(user_text: str, username: str | None,
         """Извлекает и сохраняет факты в фоне."""
         try:
             new_facts = await extract_facts_from_message(user_text, chat_id, user_info, topic_id=topic_id)
-            for fact in new_facts:
-                await store_fact_to_memory(fact['text'], chat_id, fact['metadata'], topic_id=topic_id)
-            # Обновляем профиль пользователя
-            if new_facts and user_id:
-                await user_memory.update_profile_from_facts(chat_id, user_id, username, new_facts)
+            if new_facts:
+                logger.info(f"[FACTS] Extracted {len(new_facts)} facts from user {username or user_id}")
+                for fact in new_facts:
+                    await store_fact_to_memory(fact['text'], chat_id, fact['metadata'], topic_id=topic_id)
+                # Обновляем профиль пользователя
+                if user_id:
+                    await user_memory.update_profile_from_facts(chat_id, user_id, username, new_facts)
+                    logger.info(f"[FACTS] Profile updated for user {username or user_id}")
         except Exception as e:
-            logger.debug(f"Background fact extraction failed: {e}")
+            logger.warning(f"Background fact extraction failed: {e}")
     
     # Запускаем извлечение фактов в фоне — НЕ ждём результата
     asyncio.create_task(extract_and_store_facts())

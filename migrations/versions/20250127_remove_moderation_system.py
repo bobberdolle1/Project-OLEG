@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20250127_remove_moderation'
-down_revision = '20251231_marriage_system'
+down_revision = '20251231_marriage'
 branch_labels = None
 depends_on = None
 

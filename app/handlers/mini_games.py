@@ -1022,13 +1022,13 @@ def get_cockfight_bet_keyboard(user_id: int, tier: str) -> InlineKeyboardMarkup:
     """Create cockfight bet keyboard."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💰 25", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:25"),
             InlineKeyboardButton(text="💰 50", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:50"),
             InlineKeyboardButton(text="💰 100", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:100"),
+            InlineKeyboardButton(text="💰 200", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:200"),
         ],
         [
-            InlineKeyboardButton(text="💰 250", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:250"),
             InlineKeyboardButton(text="💰 500", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:500"),
+            InlineKeyboardButton(text="💰 1000", callback_data=f"{COCK_PREFIX}{user_id}:fight:{tier}:1000"),
         ],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{COCK_PREFIX}{user_id}:back")],
     ])
@@ -1037,8 +1037,40 @@ def get_cockfight_bet_keyboard(user_id: int, tier: str) -> InlineKeyboardMarkup:
 @router.message(Command("cockfight"))
 async def cmd_cockfight(message: Message):
     """Start cockfight game."""
+    from datetime import datetime, timezone, timedelta
+    from app.database.models import GameStat
+    from app.database.session import get_session
+    from sqlalchemy import select
+    
     user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    # Check cooldown (60 seconds)
+    async_session = get_session()
+    async with async_session() as session:
+        result = await session.execute(
+            select(GameStat).where(GameStat.tg_user_id == user_id)
+        )
+        game_stat = result.scalars().first()
+        
+        if game_stat and game_stat.last_cockfight:
+            now = datetime.now(timezone.utc)
+            if game_stat.last_cockfight.tzinfo is None:
+                last_fight = game_stat.last_cockfight.replace(tzinfo=timezone.utc)
+            else:
+                last_fight = game_stat.last_cockfight
+            
+            cooldown_seconds = 60  # 1 minute
+            elapsed = (now - last_fight).total_seconds()
+            
+            if elapsed < cooldown_seconds:
+                remaining = int(cooldown_seconds - elapsed)
+                await message.reply(
+                    f"⏳ Петухи отдыхают! Подожди {remaining} сек.",
+                    parse_mode="HTML"
+                )
+                return
+    
     balance = await get_user_balance(user_id, chat_id)
     
     text = (
@@ -1081,12 +1113,29 @@ async def callback_cockfight(callback: CallbackQuery):
         await callback.answer()
     
     elif action == "fight":
+        from datetime import datetime, timezone
+        from app.database.models import GameStat
+        from app.database.session import get_session
+        from sqlalchemy import select
+        
         tier = parts[3] if len(parts) > 3 else "common"
         bet = int(parts[4]) if len(parts) > 4 else 25
         
         balance = await get_user_balance(user_id, chat_id)
         if balance < bet:
             return await callback.answer(f"Недостаточно монет! У тебя {balance}", show_alert=True)
+        
+        # Update cooldown
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(GameStat).where(GameStat.tg_user_id == user_id)
+            )
+            game_stat = result.scalars().first()
+            
+            if game_stat:
+                game_stat.last_cockfight = datetime.now(timezone.utc)
+                await session.commit()
         
         # Deduct bet first
         await update_user_balance(user_id, chat_id, -bet)
@@ -1151,8 +1200,8 @@ async def cmd_daily(message: Message):
     chat_id = message.chat.id
     
     # TODO: Add proper daily tracking with cooldown
-    # For now, just give a small bonus
-    bonus = 25
+    # For now, just give a small bonus (reduced from 100 to 50 for balance)
+    bonus = 50
     new_balance = await update_user_balance(user_id, chat_id, bonus)
     
     await message.reply(
@@ -1777,9 +1826,30 @@ async def execute_pp_battle(
     bet: int
 ) -> str:
     """Execute PP battle and return result text."""
-    # Определяем победителя (с элементом случайности ±20%)
-    challenger_power = challenger_size + random.randint(-challenger_size // 5, challenger_size // 5)
-    target_power = target_size + random.randint(-target_size // 5, target_size // 5)
+    # Определяем победителя (увеличен рандом до ±40% + шанс крита)
+    challenger_variance = random.randint(-challenger_size * 2 // 5, challenger_size * 2 // 5)
+    target_variance = random.randint(-target_size * 2 // 5, target_size * 2 // 5)
+    
+    # 15% шанс критического удара (x1.5 к силе)
+    challenger_crit = random.random() < 0.15
+    target_crit = random.random() < 0.15
+    
+    challenger_power = challenger_size + challenger_variance
+    target_power = target_size + target_variance
+    
+    if challenger_crit:
+        challenger_power = int(challenger_power * 1.5)
+    if target_crit:
+        target_power = int(target_power * 1.5)
+    
+    crit_text = ""
+    if challenger_crit or target_crit:
+        crit_names = []
+        if challenger_crit:
+            crit_names.append(challenger_name)
+        if target_crit:
+            crit_names.append(target_name)
+        crit_text = f"\n💥 <b>КРИТИЧЕСКИЙ УДАР!</b> ({', '.join(crit_names)})"
     
     if challenger_power > target_power:
         winner_id, winner_name = challenger_id, challenger_name
@@ -1794,44 +1864,106 @@ async def execute_pp_battle(
         return (
             f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
             f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
-            f"🍆 {target_name}: {target_size} см (сила: {target_power})\n\n"
+            f"🍆 {target_name}: {target_size} см (сила: {target_power}){crit_text}\n\n"
             f"🤝 <b>НИЧЬЯ!</b>\n"
             f"Пиписьки оказались равны по силе!\n"
             f"Ставка {bet} см возвращена обоим."
         )
     
+    # Check if loser has active cage and handle HP system
+    cage_protected = False
+    cage_broken = False
+    reduced_bet = bet
+    
+    if loser_id > 0:
+        from app.services.inventory import inventory_service, ItemType
+        has_cage = await inventory_service.has_active_item(loser_id, chat_id, ItemType.PP_CAGE)
+        
+        if has_cage:
+            # Get cage item and check HP
+            cage_item = await inventory_service.get_item(loser_id, chat_id, ItemType.PP_CAGE)
+            if cage_item and cage_item.item_data:
+                import json
+                try:
+                    cage_data = json.loads(cage_item.item_data)
+                    cage_hp = cage_data.get("cage_hp", 5)
+                    
+                    if cage_hp > 1:
+                        # Cage takes damage but survives
+                        cage_data["cage_hp"] = cage_hp - 1
+                        cage_item.item_data = json.dumps(cage_data)
+                        
+                        from app.database.session import get_session
+                        async_session = get_session()
+                        async with async_session() as session:
+                            await session.merge(cage_item)
+                            await session.commit()
+                        
+                        cage_protected = True
+                        reduced_bet = bet // 2  # Winner gets only 50% when cage protects
+                    else:
+                        # Cage breaks (HP = 1 -> 0)
+                        cage_broken = True
+                        await inventory_service.remove_item(loser_id, chat_id, ItemType.PP_CAGE, 1)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+    
     # Обновляем статистику (только для реальных игроков, не для Олега id=0)
     if winner_id > 0:
         await update_pp_stats(winner_id, won=True)
-        await update_pp_size(winner_id, bet, chat_id)
+        await update_pp_size(winner_id, reduced_bet, chat_id)
         winner_new_size, _, _ = await get_or_create_game_stat(winner_id)
     else:
-        winner_new_size = target_size + bet  # Олег "выиграл"
+        winner_new_size = target_size + reduced_bet  # Олег "выиграл"
     
     if loser_id > 0:
         await update_pp_stats(loser_id, won=False)
-        # Pass chat_id for PP_CAGE protection check (Requirements 10.3)
-        actual_loss = await apply_pp_change(loser_id, chat_id, -bet)
-        if actual_loss == 0:
-            # PP_CAGE protected the loser
+        
+        if cage_protected:
+            # Cage protected - no size loss for loser
+            loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
+            cage_hp_remaining = 0
+            cage_item = await inventory_service.get_item(loser_id, chat_id, ItemType.PP_CAGE)
+            if cage_item and cage_item.item_data:
+                try:
+                    cage_data = json.loads(cage_item.item_data)
+                    cage_hp_remaining = cage_data.get("cage_hp", 0)
+                except:
+                    pass
+            
+            return (
+                f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
+                f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
+                f"🍆 {target_name}: {target_size} см (сила: {target_power}){crit_text}\n\n"
+                f"🏆 <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
+                f"💪 {winner_name}: +{reduced_bet} см → <b>{winner_new_size} см</b>\n"
+                f"🔒 {loser_name}: Клетка защитила! Размер: <b>{loser_new_size} см</b>\n"
+                f"⚠️ Прочность клетки: {cage_hp_remaining} HP"
+            )
+        elif cage_broken:
+            # Cage broke - full damage
+            await update_pp_size(loser_id, -bet, chat_id)
             loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
             return (
                 f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
                 f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
-                f"🍆 {target_name}: {target_size} см (сила: {target_power})\n\n"
+                f"🍆 {target_name}: {target_size} см (сила: {target_power}){crit_text}\n\n"
                 f"🏆 <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
                 f"💪 {winner_name}: +{bet} см → <b>{winner_new_size} см</b>\n"
-                f"🔒 {loser_name}: Клетка защитила! Размер: <b>{loser_new_size} см</b>"
+                f"💀 {loser_name}: -{bet} см → <b>{loser_new_size} см</b>\n"
+                f"💔 <b>КЛЕТКА СЛОМАЛАСЬ!</b>"
             )
-        await update_pp_size(loser_id, -bet, chat_id)
-        loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
+        else:
+            # No cage - normal damage
+            await update_pp_size(loser_id, -bet, chat_id)
+            loser_new_size, _, _ = await get_or_create_game_stat(loser_id)
     else:
         loser_new_size = target_size - bet  # Олег "проиграл"
     
     return (
         f"⚔️ <b>БИТВА ПИПИСЕК!</b>\n\n"
         f"🍆 {challenger_name}: {challenger_size} см (сила: {challenger_power})\n"
-        f"🍆 {target_name}: {target_size} см (сила: {target_power})\n\n"
+        f"🍆 {target_name}: {target_size} см (сила: {target_power}){crit_text}\n\n"
         f"🏆 <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
         f"💪 {winner_name}: +{bet} см → <b>{winner_new_size} см</b>\n"
         f"💀 {loser_name}: -{bet} см → <b>{loser_new_size} см</b>"

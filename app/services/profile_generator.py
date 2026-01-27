@@ -301,12 +301,12 @@ class ProfileGenerator:
             f"Grow: {data.grow_count}",
         ]
         
-        # Right column
+        # Right column (removed reputation)
         stats_right = [
-            f"Репутация: {data.reputation}",
             f"Джекпотов: {data.casino_jackpots}",
             f"Поражений: {data.losses}",
             f"Винрейт: {self._calc_winrate(data.wins, data.losses)}",
+            f"Брак: {strip_emojis(data.spouse_name) if data.spouse_name else 'norevived'}",
         ]
         
         for i, text in enumerate(stats_left):
@@ -316,22 +316,17 @@ class ProfileGenerator:
             draw.text((right_x, start_y + i * line_h), text, fill=theme["text"], font=self._font_medium)
     
     def _draw_social_section(self, draw: ImageDraw.ImageDraw, data: ProfileData, theme: dict):
-        """Draw social info (marriage, guild, duo)."""
+        """Draw social info (guild, duo)."""
         start_y = 340
         x = 30
         
         social_items = []
-        if data.spouse_name:
-            social_items.append(f"Брак: {strip_emojis(data.spouse_name)}")
         if data.guild_name:
             social_items.append(f"Гильдия: {strip_emojis(data.guild_name)}")
         if data.duo_partner:
             social_items.append(f"Дуо: {strip_emojis(data.duo_partner)}")
         
         if social_items:
-            draw.line([(20, start_y - 10), (self.CARD_WIDTH - 20, start_y - 10)],
-                     fill=theme["accent"], width=1)
-            
             # Draw horizontally
             current_x = x
             for item in social_items:

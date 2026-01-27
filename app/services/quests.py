@@ -1,11 +1,11 @@
 """
-Quest Service - ежедневные квесты.
+Quest Service - ежедневные квесты и турниры.
 """
 
 import logging
 import random
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,40 +15,143 @@ from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
-# Определения квестов
-QUESTS = [
+# Базовые квесты
+BASE_QUESTS = [
     # Сообщения
     {"code": "send_messages_5", "name": "📝 Общительный", "description": "Написать 5 сообщений", 
      "reward_type": "coins", "reward_amount": 50, "event_type": "message", "target_value": 5},
     {"code": "send_messages_20", "name": "💬 Болтун дня", "description": "Написать 20 сообщений",
      "reward_type": "coins", "reward_amount": 150, "event_type": "message", "target_value": 20},
+    {"code": "send_messages_50", "name": "🗣️ Спамер", "description": "Написать 50 сообщений",
+     "reward_type": "coins", "reward_amount": 300, "event_type": "message", "target_value": 50},
     
     # Игры
     {"code": "play_games_3", "name": "🎮 Игрок", "description": "Сыграть 3 игры",
      "reward_type": "coins", "reward_amount": 100, "event_type": "game", "target_value": 3},
+    {"code": "play_games_10", "name": "🕹️ Геймер", "description": "Сыграть 10 игр",
+     "reward_type": "coins", "reward_amount": 250, "event_type": "game", "target_value": 10},
+    {"code": "play_games_25", "name": "👾 Хардкорщик", "description": "Сыграть 25 игр",
+     "reward_type": "coins", "reward_amount": 500, "event_type": "game", "target_value": 25},
+    
+    # PvP
     {"code": "win_pvp_1", "name": "⚔️ Победитель", "description": "Выиграть PvP",
      "reward_type": "coins", "reward_amount": 200, "event_type": "pvp_win", "target_value": 1},
     {"code": "win_pvp_3", "name": "🏆 Доминатор", "description": "Выиграть 3 PvP",
      "reward_type": "coins", "reward_amount": 500, "event_type": "pvp_win", "target_value": 3},
+    {"code": "win_pvp_5", "name": "👑 Чемпион", "description": "Выиграть 5 PvP",
+     "reward_type": "coins", "reward_amount": 800, "event_type": "pvp_win", "target_value": 5},
+    {"code": "win_pvp_10", "name": "⚡ Легенда", "description": "Выиграть 10 PvP",
+     "reward_type": "coins", "reward_amount": 1500, "event_type": "pvp_win", "target_value": 10},
     
     # Рыбалка
     {"code": "catch_fish_3", "name": "🎣 Рыбак дня", "description": "Поймать 3 рыбы",
      "reward_type": "coins", "reward_amount": 100, "event_type": "fish", "target_value": 3},
     {"code": "catch_fish_10", "name": "🐟 Мастер удочки", "description": "Поймать 10 рыб",
      "reward_type": "coins", "reward_amount": 300, "event_type": "fish", "target_value": 10},
+    {"code": "catch_fish_25", "name": "🦈 Акула рыбалки", "description": "Поймать 25 рыб",
+     "reward_type": "coins", "reward_amount": 600, "event_type": "fish", "target_value": 25},
+    {"code": "catch_rare_fish", "name": "✨ Редкий улов", "description": "Поймать редкую рыбу",
+     "reward_type": "coins", "reward_amount": 400, "event_type": "fish_rare", "target_value": 1},
     
     # Казино
     {"code": "casino_plays_5", "name": "🎰 Азартный", "description": "Сыграть 5 раз в казино",
      "reward_type": "coins", "reward_amount": 100, "event_type": "casino", "target_value": 5},
+    {"code": "casino_plays_15", "name": "🎲 Игроман", "description": "Сыграть 15 раз в казино",
+     "reward_type": "coins", "reward_amount": 300, "event_type": "casino", "target_value": 15},
+    {"code": "casino_win_3", "name": "💰 Везунчик", "description": "Выиграть 3 раза в казино",
+     "reward_type": "coins", "reward_amount": 250, "event_type": "casino_win", "target_value": 3},
+    {"code": "casino_jackpot", "name": "🎰 Джекпот!", "description": "Сорвать джекпот",
+     "reward_type": "coins", "reward_amount": 1000, "event_type": "jackpot", "target_value": 1},
     
     # Цитаты
     {"code": "create_quote", "name": "💬 Цитатник", "description": "Создать цитату",
      "reward_type": "coins", "reward_amount": 50, "event_type": "quote", "target_value": 1},
+    {"code": "create_quote_5", "name": "📜 Философ", "description": "Создать 5 цитат",
+     "reward_type": "coins", "reward_amount": 200, "event_type": "quote", "target_value": 5},
     
     # Grow
     {"code": "grow_3", "name": "🌱 Садовод", "description": "Использовать /grow 3 раза",
      "reward_type": "coins", "reward_amount": 75, "event_type": "grow", "target_value": 3},
+    {"code": "grow_10", "name": "🌿 Фермер", "description": "Использовать /grow 10 раз",
+     "reward_type": "coins", "reward_amount": 250, "event_type": "grow", "target_value": 10},
+    {"code": "grow_size_100", "name": "📏 Метровый", "description": "Достичь 100 см",
+     "reward_type": "coins", "reward_amount": 500, "event_type": "size_milestone", "target_value": 100},
+    {"code": "grow_size_500", "name": "🚀 Гигант", "description": "Достичь 500 см",
+     "reward_type": "coins", "reward_amount": 2000, "event_type": "size_milestone", "target_value": 500},
+    
+    # Покупки
+    {"code": "shop_buy_3", "name": "🛒 Покупатель", "description": "Купить 3 предмета",
+     "reward_type": "coins", "reward_amount": 150, "event_type": "shop_buy", "target_value": 3},
+    {"code": "shop_buy_10", "name": "💳 Шопоголик", "description": "Купить 10 предметов",
+     "reward_type": "coins", "reward_amount": 400, "event_type": "shop_buy", "target_value": 10},
+    
+    # Петушиные бои
+    {"code": "cockfight_3", "name": "🐔 Птицевод", "description": "Провести 3 петушиных боя",
+     "reward_type": "coins", "reward_amount": 150, "event_type": "cockfight", "target_value": 3},
+    {"code": "cockfight_win_5", "name": "🐓 Чемпион арены", "description": "Выиграть 5 петушиных боёв",
+     "reward_type": "coins", "reward_amount": 400, "event_type": "cockfight_win", "target_value": 5},
+    
+    # Краш
+    {"code": "crash_survive_2x", "name": "🚀 Осторожный", "description": "Забрать на 2x в крэше",
+     "reward_type": "coins", "reward_amount": 200, "event_type": "crash_2x", "target_value": 1},
+    {"code": "crash_survive_5x", "name": "💎 Рисковый", "description": "Забрать на 5x в крэше",
+     "reward_type": "coins", "reward_amount": 500, "event_type": "crash_5x", "target_value": 1},
 ]
+
+# Генератор динамических квестов
+DYNAMIC_QUEST_TEMPLATES = [
+    # Заработать монеты
+    {"name": "💰 Заработок дня", "description": "Заработать {amount} монет", 
+     "event_type": "coins_earned", "reward_multiplier": 0.5, "amounts": [500, 1000, 2000, 5000]},
+    
+    # Потратить монеты
+    {"name": "💸 Транжира", "description": "Потратить {amount} монет",
+     "event_type": "coins_spent", "reward_multiplier": 0.3, "amounts": [1000, 2500, 5000]},
+    
+    # Выиграть подряд
+    {"name": "🔥 Серия побед", "description": "Выиграть {count} игр подряд",
+     "event_type": "win_streak", "reward_multiplier": 200, "counts": [3, 5, 7]},
+    
+    # Размер PP
+    {"name": "📏 Рост дня", "description": "Вырастить PP на {amount} см за день",
+     "event_type": "pp_growth_daily", "reward_multiplier": 2, "amounts": [50, 100, 200]},
+]
+
+
+def generate_dynamic_quest() -> dict:
+    """Generate a random dynamic quest."""
+    template = random.choice(DYNAMIC_QUEST_TEMPLATES)
+    
+    if "amounts" in template:
+        amount = random.choice(template["amounts"])
+        reward = int(amount * template["reward_multiplier"])
+        return {
+            "code": f"dynamic_{template['event_type']}_{amount}",
+            "name": template["name"],
+            "description": template["description"].format(amount=amount),
+            "reward_type": "coins",
+            "reward_amount": reward,
+            "event_type": template["event_type"],
+            "target_value": amount
+        }
+    elif "counts" in template:
+        count = random.choice(template["counts"])
+        reward = int(count * template["reward_multiplier"])
+        return {
+            "code": f"dynamic_{template['event_type']}_{count}",
+            "name": template["name"],
+            "description": template["description"].format(count=count),
+            "reward_type": "coins",
+            "reward_amount": reward,
+            "event_type": template["event_type"],
+            "target_value": count
+        }
+    
+    return template
+
+
+# Объединяем все квесты
+QUESTS = BASE_QUESTS
 
 
 async def init_quests():
@@ -69,7 +172,7 @@ async def init_quests():
 async def assign_daily_quests(user_id: int, count: int = 3) -> list[Quest]:
     """
     Назначить ежедневные квесты пользователю.
-    Удаляет старые незавершённые квесты и назначает новые.
+    Удаляет старые незавершённые квесты и назначает новые (включая динамические).
     """
     async_session = get_session()
     async with async_session() as session:
@@ -104,12 +207,27 @@ async def assign_daily_quests(user_id: int, count: int = 3) -> list[Quest]:
         if len(active_quest_ids) >= count:
             return []
         
-        # Получаем все квесты
+        # Получаем все базовые квесты
         all_quests = await session.execute(select(Quest))
         available = [q for q in all_quests.scalars() if q.id not in active_quest_ids]
         
+        # Добавляем 1-2 динамических квеста
+        dynamic_count = random.randint(1, 2)
+        for _ in range(dynamic_count):
+            dynamic_quest_data = generate_dynamic_quest()
+            # Проверяем, не существует ли уже такой квест
+            existing = await session.scalar(
+                select(Quest).where(Quest.code == dynamic_quest_data["code"])
+            )
+            if not existing:
+                dynamic_quest = Quest(**dynamic_quest_data)
+                session.add(dynamic_quest)
+                await session.flush()
+                available.append(dynamic_quest)
+        
         # Выбираем случайные
-        to_assign = random.sample(available, min(count - len(active_quest_ids), len(available)))
+        to_assign_count = min(count - len(active_quest_ids), len(available))
+        to_assign = random.sample(available, to_assign_count)
         
         assigned = []
         for quest in to_assign:

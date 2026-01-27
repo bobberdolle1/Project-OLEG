@@ -511,43 +511,19 @@ async def job_start_weekly_tournament(bot: Bot):
     
     **Validates: Requirements 10.2**
     """
+    from app.services.tournaments import tournament_service
+    
     async_session = get_session()
     async with async_session() as session:
         try:
-            # End any active weekly tournaments first
-            result = await session.execute(
-                select(Tournament).filter(
-                    Tournament.type == TournamentType.WEEKLY.value,
-                    Tournament.status == 'active'
-                )
-            )
-            active_tournaments = result.scalars().all()
+            # End previous tournament if active
+            if tournament_service.is_active():
+                await tournament_service.end_tournament(bot)
+                logger.info("Ended previous weekly tournament")
             
-            for tournament in active_tournaments:
-                winners = await tournament_service.end_tournament(tournament.id, session)
-                
-                if winners:
-                    logger.info(
-                        f"Weekly tournament {tournament.id} ended with "
-                        f"{len(winners)} winners"
-                    )
-                    
-                    for discipline in TournamentDiscipline:
-                        discipline_winners = [
-                            w for w in winners 
-                            if w.discipline == discipline and w.rank == 1
-                        ]
-                        for winner in discipline_winners:
-                            logger.info(
-                                f"Weekly {discipline.value} champion: "
-                                f"user {winner.user_id} with score {winner.score}"
-                            )
-            
-            # Start new weekly tournament
-            new_tournament = await tournament_service.start_tournament(
-                TournamentType.WEEKLY, session
-            )
-            logger.info(f"Started new weekly tournament (ID: {new_tournament.id})")
+            # Start new tournament
+            await tournament_service.start_weekly_tournament(bot)
+            logger.info("Started new weekly tournament")
             
         except Exception as e:
             logger.error(f"Error in weekly tournament job: {e}")

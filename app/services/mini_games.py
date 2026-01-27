@@ -49,9 +49,9 @@ class Fish:
 # Fish catalog with probabilities
 FISH_CATALOG: Dict[FishRarity, List[Fish]] = {
     FishRarity.TRASH: [
-        Fish("Старый ботинок", "👟", FishRarity.TRASH, 1, 0.5),
-        Fish("Консервная банка", "🥫", FishRarity.TRASH, 1, 0.1),
-        Fish("Водоросли", "🌿", FishRarity.TRASH, 2, 0.2),
+        Fish("Старый ботинок", "👟", FishRarity.TRASH, 0, 0.5),  # No coins for trash
+        Fish("Консервная банка", "🥫", FishRarity.TRASH, 0, 0.1),
+        Fish("Водоросли", "🌿", FishRarity.TRASH, 0, 0.2),
     ],
     FishRarity.COMMON: [
         Fish("Карась", "🐟", FishRarity.COMMON, 10, 0.8),
@@ -81,14 +81,14 @@ FISH_CATALOG: Dict[FishRarity, List[Fish]] = {
     ],
 }
 
-# Rarity probabilities (base, can be modified by rod)
+# Rarity probabilities (base, can be modified by rod) - Reduced rare chances by 30%
 FISH_PROBABILITIES = {
-    FishRarity.TRASH: 0.15,
-    FishRarity.COMMON: 0.45,
-    FishRarity.UNCOMMON: 0.25,
-    FishRarity.RARE: 0.10,
-    FishRarity.EPIC: 0.04,
-    FishRarity.LEGENDARY: 0.01,
+    FishRarity.TRASH: 0.20,  # Increased from 0.15
+    FishRarity.COMMON: 0.48,  # Increased from 0.45
+    FishRarity.UNCOMMON: 0.22,  # Decreased from 0.25
+    FishRarity.RARE: 0.07,  # Decreased from 0.10
+    FishRarity.EPIC: 0.025,  # Decreased from 0.04
+    FishRarity.LEGENDARY: 0.005,  # Decreased from 0.01
 }
 
 
@@ -105,7 +105,7 @@ class FishingResult:
 class FishingGame:
     """Fishing game logic."""
     
-    COOLDOWN_SECONDS = 30
+    COOLDOWN_SECONDS = 90  # Increased from 30 to 90 for balance
     
     def __init__(self, random_func: Optional[Callable[[], float]] = None):
         self._random = random_func or random.random
@@ -203,7 +203,8 @@ class CrashEngine:
     
     TICK_INTERVAL = 0.5  # seconds between multiplier updates
     MULTIPLIER_INCREMENT = 0.1
-    HOUSE_EDGE = 0.03  # 3% house edge
+    HOUSE_EDGE = 0.05  # Increased from 3% to 5% for balance
+    MAX_BET = 1000  # Maximum bet limit
     
     def __init__(self, random_func: Optional[Callable[[], float]] = None):
         self._random = random_func or random.random
@@ -885,7 +886,7 @@ class CockfightGame:
         msg += f"{opponent_rooster.name} отвечает {opponent_rooster.special_move}! (💪 {opponent_power})\n\n"
         
         if player_power > opponent_power:
-            winnings = int(bet * (1.5 if rooster_tier == RoosterTier.COMMON else 2.0 if rooster_tier == RoosterTier.RARE else 2.5))
+            winnings = int(bet * (1.3 if rooster_tier == RoosterTier.COMMON else 1.6 if rooster_tier == RoosterTier.RARE else 2.0))
             msg += f"🎉 <b>ПОБЕДА!</b> {player_rooster.name} побеждает!\n+{winnings} монет"
             return CockfightResult(True, msg, player_rooster, opponent_rooster, player_power, opponent_power, True, winnings)
         elif player_power < opponent_power:

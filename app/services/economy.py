@@ -66,89 +66,89 @@ class ShopItem:
     duration_hours: int = 0  # 0 = permanent/consumable
 
 
-# Shop catalog
+# Shop catalog (prices increased by 1.5x for balance, creams by 2x)
 SHOP_ITEMS: Dict[ItemType, ShopItem] = {
     ItemType.LOOTBOX_COMMON: ShopItem(
         ItemType.LOOTBOX_COMMON, "Обычный лутбокс", "Шанс на редкие предметы", 
-        50, "📦", Rarity.COMMON
+        75, "📦", Rarity.COMMON
     ),
     ItemType.LOOTBOX_RARE: ShopItem(
         ItemType.LOOTBOX_RARE, "Редкий лутбокс", "Повышенный шанс на эпики",
-        150, "📦", Rarity.RARE
+        225, "📦", Rarity.RARE
     ),
     ItemType.LOOTBOX_EPIC: ShopItem(
         ItemType.LOOTBOX_EPIC, "Эпический лутбокс", "Гарантированный эпик+",
-        400, "📦", Rarity.EPIC
+        600, "📦", Rarity.EPIC
     ),
     ItemType.LOOTBOX_LEGENDARY: ShopItem(
         ItemType.LOOTBOX_LEGENDARY, "Легендарный лутбокс", "Шанс на легендарку!",
-        1000, "📦", Rarity.LEGENDARY
+        1500, "📦", Rarity.LEGENDARY
     ),
     ItemType.FISHING_ROD_BASIC: ShopItem(
         ItemType.FISHING_ROD_BASIC, "Удочка новичка", "Базовая удочка для рыбалки",
-        100, "🎣", Rarity.COMMON
+        150, "🎣", Rarity.COMMON
     ),
     ItemType.FISHING_ROD_PRO: ShopItem(
         ItemType.FISHING_ROD_PRO, "Про удочка", "+20% к редкой рыбе",
-        500, "🎣", Rarity.RARE
+        750, "🎣", Rarity.RARE
     ),
     ItemType.FISHING_ROD_GOLDEN: ShopItem(
         ItemType.FISHING_ROD_GOLDEN, "Золотая удочка", "+50% к редкой рыбе",
-        2000, "🎣", Rarity.EPIC
+        3000, "🎣", Rarity.EPIC
     ),
     ItemType.LUCKY_CHARM: ShopItem(
         ItemType.LUCKY_CHARM, "Талисман удачи", "+5% к выигрышам на 1 час",
-        200, "🍀", Rarity.UNCOMMON, duration_hours=1
+        300, "🍀", Rarity.UNCOMMON, duration_hours=1
     ),
     ItemType.DOUBLE_XP: ShopItem(
         ItemType.DOUBLE_XP, "Энергетик x2", "Двойной опыт на 1 час",
-        300, "⚡", Rarity.RARE, duration_hours=1
+        450, "⚡", Rarity.RARE, duration_hours=1
     ),
     ItemType.SHIELD: ShopItem(
         ItemType.SHIELD, "Щит", "Защита от PvP на 1 час",
-        250, "🛡️", Rarity.UNCOMMON, duration_hours=1
+        375, "🛡️", Rarity.UNCOMMON, duration_hours=1
     ),
     ItemType.ENERGY_DRINK: ShopItem(
         ItemType.ENERGY_DRINK, "Энергетик", "Сброс кулдауна /grow",
-        150, "🥤", Rarity.UNCOMMON
+        225, "🥤", Rarity.UNCOMMON
     ),
     ItemType.VIP_STATUS: ShopItem(
         ItemType.VIP_STATUS, "VIP статус", "VIP бонусы на 24 часа",
-        500, "👑", Rarity.EPIC, duration_hours=24
+        750, "👑", Rarity.EPIC, duration_hours=24
     ),
     ItemType.ROOSTER_COMMON: ShopItem(
         ItemType.ROOSTER_COMMON, "Обычный петух", "Базовый боец",
-        200, "🐔", Rarity.COMMON
+        300, "🐔", Rarity.COMMON
     ),
     ItemType.ROOSTER_RARE: ShopItem(
         ItemType.ROOSTER_RARE, "Редкий петух", "Сильный боец",
-        600, "🐓", Rarity.RARE
+        900, "🐓", Rarity.RARE
     ),
     ItemType.ROOSTER_EPIC: ShopItem(
         ItemType.ROOSTER_EPIC, "Эпический петух", "Элитный боец",
-        1500, "🦃", Rarity.EPIC
+        2250, "🦃", Rarity.EPIC
     ),
-    # Мази для роста пиписьки
+    # Мази для роста пиписьки (prices x2 for balance)
     ItemType.PP_CREAM_SMALL: ShopItem(
         ItemType.PP_CREAM_SMALL, "Мазь 'Подрастай'", "+1-3 см к размеру",
-        100, "🧴", Rarity.COMMON
+        200, "🧴", Rarity.COMMON
     ),
     ItemType.PP_CREAM_MEDIUM: ShopItem(
         ItemType.PP_CREAM_MEDIUM, "Крем 'Титан'", "+2-5 см к размеру",
-        300, "🧴", Rarity.UNCOMMON
+        600, "🧴", Rarity.UNCOMMON
     ),
     ItemType.PP_CREAM_LARGE: ShopItem(
         ItemType.PP_CREAM_LARGE, "Гель 'Мегамен'", "+5-10 см к размеру",
-        800, "🧴", Rarity.RARE
+        1600, "🧴", Rarity.RARE
     ),
     ItemType.PP_CREAM_TITAN: ShopItem(
         ItemType.PP_CREAM_TITAN, "Эликсир 'Годзилла'", "+10-20 см к размеру",
-        2000, "🧪", Rarity.EPIC
+        4000, "🧪", Rarity.EPIC
     ),
     # PP Protection
     ItemType.PP_CAGE: ShopItem(
         ItemType.PP_CAGE, "Пенис-клетка", "Защита PP от негативных эффектов, блокирует рост (24ч)",
-        1000, "🔒", Rarity.RARE, duration_hours=24
+        1500, "🔒", Rarity.RARE, duration_hours=24
     ),
 }
 

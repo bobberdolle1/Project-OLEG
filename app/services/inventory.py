@@ -641,12 +641,17 @@ class InventoryService:
             now = datetime.now(timezone.utc)
             expires_at = now + timedelta(hours=duration_hours)
             
-            # Update item
-            item.equipped = True
-            item.item_data = json.dumps({
+            # Initialize cage HP if it's a PP_CAGE
+            item_data = {
                 "activated_at": now.isoformat(),
                 "expires_at": expires_at.isoformat()
-            })
+            }
+            if item_type == ItemType.PP_CAGE:
+                item_data["cage_hp"] = 5  # Initial HP for cage
+            
+            # Update item
+            item.equipped = True
+            item.item_data = json.dumps(item_data)
             
             await session.commit()
             

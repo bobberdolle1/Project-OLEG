@@ -35,6 +35,7 @@ from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
 from app.handlers.stickers import router as stickers_router
 from app.handlers.tournaments import router as tournaments_router
+from app.handlers.tournaments import router as new_tournaments_router  # New tournament system
 from app.handlers.health import router as health_router
 from app.handlers.chat_join import router as chat_join_router
 from app.handlers.voice import router as voice_router
@@ -327,6 +328,7 @@ def build_dp() -> Dispatcher:
         shop_router,  # Shop system v7.5
         inventory_router,  # Unified inventory system v7.6 (Requirements 1.x)
         tournaments_router,  # Tournament standings (Requirements 10.5)
+        new_tournaments_router,  # New tournament system with announcements
         games.router,
         voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)

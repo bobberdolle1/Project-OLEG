@@ -62,6 +62,11 @@ class GameStat(Base):
     # Grand Casino v7.0: Growth history for sparkline (Requirements 7.4)
     # Stores last 7 days of growth data as JSON: [{"date": "2025-12-08", "size": 50, "change": 5}, ...]
     grow_history: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
+    
+    # Game balance cooldowns (v8.0)
+    last_cream_use: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_cockfight: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_energy_drink_use: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user: Mapped[User] = relationship(back_populates="game")
 

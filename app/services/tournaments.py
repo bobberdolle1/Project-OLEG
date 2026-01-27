@@ -1,748 +1,307 @@
-"""Tournament Service - Periodic Competitions System.
-
-This module provides the Tournament system for tracking periodic competitions
-across different disciplines (grow, pvp, roulette).
-
-**Feature: fortress-update**
-**Validates: Requirements 10.1, 10.2, 10.3, 10.4, 10.5, 10.6**
+"""
+Tournament System - еженедельные турниры с призами.
 """
 
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Optional, List
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
+from aiogram import Bot
 
-from app.database.models import Tournament, TournamentScore, UserAchievement, Achievement, User
+from app.database.models import User, GameStat, UserBalance
 from app.database.session import get_session
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# Tournament Type and Discipline Enums
-# ============================================================================
-
-class TournamentType(Enum):
-    """
-    Types of tournaments based on duration.
-    
-    **Validates: Requirements 10.1, 10.2, 10.3**
-    """
-    DAILY = "daily"       # Resets at 00:00 UTC (Requirement 10.1)
-    WEEKLY = "weekly"     # Resets on Monday 00:00 UTC (Requirement 10.2)
-    GRAND_CUP = "grand_cup"  # Monthly tournament (Requirement 10.3)
+# ID канала для объявлений (Steam Deck OC - Игры)
+TOURNAMENT_CHANNEL_ID = -1002739723  # https://t.me/steamdeckoverclock/739723
 
 
-class TournamentDiscipline(Enum):
-    """
-    Disciplines tracked in tournaments.
-    
-    **Validates: Requirements 10.1**
-    """
-    GROW = "grow"         # /grow gains
-    PVP = "pvp"           # /pvp wins
-    ROULETTE = "roulette" # /roulette survival streaks
+class TournamentType(str, Enum):
+    """Типы турниров."""
+    PP_SIZE = "pp_size"  # Самый большой размер
+    PP_GROWTH = "pp_growth"  # Наибольший рост за неделю
+    PVP_WINS = "pvp_wins"  # Больше всего побед в PvP
+    FISHING = "fishing"  # Больше всего рыбы поймано
+    CASINO = "casino"  # Больше всего выигрышей в казино
+    COINS_EARNED = "coins_earned"  # Больше всего монет заработано
+    GAMES_PLAYED = "games_played"  # Больше всего игр сыграно
 
 
-# ============================================================================
-# Constants
-# ============================================================================
+@dataclass
+class TournamentConfig:
+    """Конфигурация турнира."""
+    type: TournamentType
+    name: str
+    description: str
+    emoji: str
+    prizes: List[int]  # Призы для топ-3
+    duration_days: int = 7
 
-# Number of winners to announce per discipline (Requirement 10.4)
-TOP_WINNERS_COUNT = 3
 
-# Achievement codes for tournament wins
-ACHIEVEMENT_CODES = {
-    TournamentType.DAILY: "daily_champion",
-    TournamentType.WEEKLY: "weekly_champion",
-    TournamentType.GRAND_CUP: "grand_cup_champion",
+# Конфигурации турниров
+TOURNAMENT_CONFIGS = {
+    TournamentType.PP_SIZE: TournamentConfig(
+        type=TournamentType.PP_SIZE,
+        name="Битва Титанов",
+        description="Самый большой размер PP к концу недели",
+        emoji="🍆",
+        prizes=[5000, 3000, 1500]
+    ),
+    TournamentType.PP_GROWTH: TournamentConfig(
+        type=TournamentType.PP_GROWTH,
+        name="Гонка Роста",
+        description="Наибольший прирост PP за неделю",
+        emoji="📈",
+        prizes=[4000, 2500, 1200]
+    ),
+    TournamentType.PVP_WINS: TournamentConfig(
+        type=TournamentType.PVP_WINS,
+        name="Арена Чемпионов",
+        description="Больше всего побед в PvP за неделю",
+        emoji="⚔️",
+        prizes=[6000, 3500, 1800]
+    ),
+    TournamentType.FISHING: TournamentConfig(
+        type=TournamentType.FISHING,
+        name="Рыбацкий Турнир",
+        description="Больше всего рыбы поймано за неделю",
+        emoji="🎣",
+        prizes=[3500, 2000, 1000]
+    ),
+    TournamentType.CASINO: TournamentConfig(
+        type=TournamentType.CASINO,
+        name="Казино Королей",
+        description="Больше всего джекпотов за неделю",
+        emoji="🎰",
+        prizes=[7000, 4000, 2000]
+    ),
 }
 
 
-# ============================================================================
-# Data Classes
-# ============================================================================
-
 @dataclass
-class TournamentStanding:
-    """
-    A single standing entry in tournament rankings.
-    
-    Attributes:
-        user_id: Telegram user ID
-        username: Username for display
-        score: Current score in the discipline
-        rank: Position in rankings (1-based)
-    """
+class TournamentResult:
+    """Результат турнира."""
     user_id: int
-    username: Optional[str]
+    username: str
     score: int
     rank: int
+    prize: int
 
-
-@dataclass
-class TournamentInfo:
-    """
-    Information about a tournament.
-    
-    Attributes:
-        id: Tournament database ID
-        type: Tournament type (daily, weekly, grand_cup)
-        start_at: Tournament start time
-        end_at: Tournament end time
-        status: Current status (active, completed)
-        standings: Dict mapping discipline to list of standings
-    """
-    id: int
-    type: TournamentType
-    start_at: datetime
-    end_at: datetime
-    status: str
-    standings: Dict[TournamentDiscipline, List[TournamentStanding]] = field(default_factory=dict)
-
-
-@dataclass
-class TournamentWinner:
-    """
-    A tournament winner entry.
-    
-    Attributes:
-        user_id: Telegram user ID
-        username: Username for display
-        discipline: The discipline won
-        score: Final score
-        rank: Final rank (1, 2, or 3)
-        tournament_type: Type of tournament won
-    """
-    user_id: int
-    username: Optional[str]
-    discipline: TournamentDiscipline
-    score: int
-    rank: int
-    tournament_type: TournamentType
-
-
-# ============================================================================
-# Tournament Service
-# ============================================================================
 
 class TournamentService:
-    """
-    Service for managing tournaments and tracking scores.
-    
-    Provides methods for:
-    - Starting and ending tournaments
-    - Updating scores for disciplines
-    - Getting current standings
-    - Recording achievements for winners
-    
-    **Validates: Requirements 10.1, 10.2, 10.3, 10.4, 10.5, 10.6**
-    """
+    """Сервис управления турнирами."""
     
     def __init__(self):
-        """Initialize TournamentService."""
-        pass
+        self.current_tournament: Optional[TournamentType] = None
+        self.tournament_start: Optional[datetime] = None
+        self.tournament_end: Optional[datetime] = None
     
-    # =========================================================================
-    # Tournament Lifecycle Methods
-    # =========================================================================
+    async def start_weekly_tournament(self, bot: Bot) -> None:
+        """Запустить еженедельный турнир."""
+        # Выбираем случайный тип турнира
+        import random
+        tournament_type = random.choice(list(TOURNAMENT_CONFIGS.keys()))
+        config = TOURNAMENT_CONFIGS[tournament_type]
+        
+        self.current_tournament = tournament_type
+        self.tournament_start = utc_now()
+        self.tournament_end = self.tournament_start + timedelta(days=config.duration_days)
+        
+        # Отправляем объявление в канал
+        await self._announce_tournament_start(bot, config)
+        
+        logger.info(f"Started tournament: {config.name} ({tournament_type})")
     
-    async def start_tournament(
-        self,
-        tournament_type: TournamentType,
-        session: Optional[AsyncSession] = None
-    ) -> TournamentInfo:
-        """
-        Start a new tournament of the specified type.
-        
-        Calculates appropriate start and end times based on tournament type.
-        
-        Args:
-            tournament_type: Type of tournament to start
-            session: Optional database session
-            
-        Returns:
-            TournamentInfo for the new tournament
-            
-        **Validates: Requirements 10.1, 10.2, 10.3**
-        """
-        close_session = False
-        if session is None:
-            async_session = get_session()
-            session = async_session()
-            close_session = True
-        
-        try:
-            now = utc_now()
-            
-            # Calculate start and end times based on tournament type
-            if tournament_type == TournamentType.DAILY:
-                # Daily: starts now, ends at next 00:00 UTC
-                start_at = now
-                end_at = (now + timedelta(days=1)).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-            elif tournament_type == TournamentType.WEEKLY:
-                # Weekly: starts now, ends next Monday 00:00 UTC
-                start_at = now
-                days_until_monday = (7 - now.weekday()) % 7
-                if days_until_monday == 0:
-                    days_until_monday = 7  # If today is Monday, end next Monday
-                end_at = (now + timedelta(days=days_until_monday)).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-            else:  # GRAND_CUP (monthly)
-                # Monthly: starts now, ends on 1st of next month 00:00 UTC
-                start_at = now
-                if now.month == 12:
-                    end_at = now.replace(
-                        year=now.year + 1, month=1, day=1,
-                        hour=0, minute=0, second=0, microsecond=0
-                    )
-                else:
-                    end_at = now.replace(
-                        month=now.month + 1, day=1,
-                        hour=0, minute=0, second=0, microsecond=0
-                    )
-            
-            # Create tournament record
-            tournament = Tournament(
-                type=tournament_type.value,
-                start_at=start_at,
-                end_at=end_at,
-                status='active'
-            )
-            session.add(tournament)
-            await session.commit()
-            await session.refresh(tournament)
-            
-            logger.info(
-                f"Started {tournament_type.value} tournament (ID: {tournament.id}), "
-                f"ends at {end_at}"
-            )
-            
-            return TournamentInfo(
-                id=tournament.id,
-                type=tournament_type,
-                start_at=start_at,
-                end_at=end_at,
-                status='active',
-                standings={}
-            )
-            
-        finally:
-            if close_session:
-                await session.close()
-    
-    async def end_tournament(
-        self,
-        tournament_id: int,
-        session: Optional[AsyncSession] = None
-    ) -> List[TournamentWinner]:
-        """
-        End a tournament and determine winners.
-        
-        Returns top 3 winners for each discipline and records achievements.
-        
-        Args:
-            tournament_id: ID of tournament to end
-            session: Optional database session
-            
-        Returns:
-            List of TournamentWinner for all disciplines (top 3 each)
-            
-        **Validates: Requirements 10.4, 10.6**
-        """
-        close_session = False
-        if session is None:
-            async_session = get_session()
-            session = async_session()
-            close_session = True
-        
-        try:
-            # Get tournament
-            result = await session.execute(
-                select(Tournament).filter_by(id=tournament_id)
-            )
-            tournament = result.scalar_one_or_none()
-            
-            if tournament is None:
-                logger.warning(f"Tournament {tournament_id} not found")
-                return []
-            
-            if tournament.status == 'completed':
-                logger.warning(f"Tournament {tournament_id} already completed")
-                return []
-            
-            tournament_type = TournamentType(tournament.type)
-            winners: List[TournamentWinner] = []
-            
-            # Get top 3 for each discipline
-            for discipline in TournamentDiscipline:
-                standings = await self._get_discipline_standings(
-                    tournament_id, discipline, limit=TOP_WINNERS_COUNT, session=session
-                )
-                
-                for standing in standings:
-                    winner = TournamentWinner(
-                        user_id=standing.user_id,
-                        username=standing.username,
-                        discipline=discipline,
-                        score=standing.score,
-                        rank=standing.rank,
-                        tournament_type=tournament_type
-                    )
-                    winners.append(winner)
-                    
-                    # Record achievement for 1st place winners (Requirement 10.6)
-                    if standing.rank == 1:
-                        await self._record_achievement(
-                            standing.user_id, tournament_type, discipline, session
-                        )
-            
-            # Mark tournament as completed
-            tournament.status = 'completed'
-            await session.commit()
-            
-            logger.info(
-                f"Ended {tournament_type.value} tournament (ID: {tournament_id}), "
-                f"{len(winners)} winners determined"
-            )
-            
-            return winners
-            
-        finally:
-            if close_session:
-                await session.close()
-    
-    # =========================================================================
-    # Score Management Methods
-    # =========================================================================
-    
-    async def update_score(
-        self,
-        user_id: int,
-        discipline: TournamentDiscipline,
-        delta: int,
-        username: Optional[str] = None,
-        session: Optional[AsyncSession] = None
-    ) -> int:
-        """
-        Update a user's score in the current active tournaments.
-        
-        Updates score in all active tournaments (daily, weekly, monthly).
-        
-        Args:
-            user_id: Telegram user ID
-            discipline: The discipline to update
-            delta: Amount to add to score (can be negative)
-            username: Optional username for display
-            session: Optional database session
-            
-        Returns:
-            New total score across all active tournaments
-            
-        **Validates: Requirements 10.1**
-        """
-        close_session = False
-        if session is None:
-            async_session = get_session()
-            session = async_session()
-            close_session = True
-        
-        try:
-            now = utc_now()
-            total_score = 0
-            
-            # Get all active tournaments
-            result = await session.execute(
-                select(Tournament).filter(
-                    Tournament.status == 'active',
-                    Tournament.start_at <= now,
-                    Tournament.end_at > now
-                )
-            )
-            active_tournaments = result.scalars().all()
-            
-            for tournament in active_tournaments:
-                # Get or create score record
-                score_result = await session.execute(
-                    select(TournamentScore).filter_by(
-                        tournament_id=tournament.id,
-                        user_id=user_id,
-                        discipline=discipline.value
-                    )
-                )
-                score_record = score_result.scalar_one_or_none()
-                
-                if score_record is None:
-                    score_record = TournamentScore(
-                        tournament_id=tournament.id,
-                        user_id=user_id,
-                        discipline=discipline.value,
-                        score=0
-                    )
-                    session.add(score_record)
-                
-                # Update score
-                score_record.score += delta
-                total_score += score_record.score
-            
-            await session.commit()
-            
-            logger.debug(
-                f"Updated tournament score: user={user_id}, "
-                f"discipline={discipline.value}, delta={delta}"
-            )
-            
-            return total_score
-            
-        finally:
-            if close_session:
-                await session.close()
-    
-    # =========================================================================
-    # Standings Methods
-    # =========================================================================
-    
-    async def get_standings(
-        self,
-        tournament_id: int,
-        discipline: TournamentDiscipline,
-        limit: int = 10,
-        session: Optional[AsyncSession] = None
-    ) -> List[TournamentStanding]:
-        """
-        Get current standings for a tournament discipline.
-        
-        Args:
-            tournament_id: Tournament ID
-            discipline: Discipline to get standings for
-            limit: Maximum number of standings to return
-            session: Optional database session
-            
-        Returns:
-            List of TournamentStanding ordered by score descending
-            
-        **Validates: Requirements 10.5**
-        """
-        return await self._get_discipline_standings(
-            tournament_id, discipline, limit, session
+    async def _announce_tournament_start(self, bot: Bot, config: TournamentConfig) -> None:
+        """Объявить начало турнира в канале."""
+        text = (
+            f"{config.emoji} <b>ТУРНИР: {config.name}</b> {config.emoji}\n\n"
+            f"📋 <b>Задание:</b> {config.description}\n\n"
+            f"⏰ <b>Длительность:</b> {config.duration_days} дней\n\n"
+            f"🏆 <b>Призы:</b>\n"
+            f"  🥇 1 место: {config.prizes[0]:,} монет\n"
+            f"  🥈 2 место: {config.prizes[1]:,} монет\n"
+            f"  🥉 3 место: {config.prizes[2]:,} монет\n\n"
+            f"💪 Участвуйте и побеждайте!\n"
+            f"Проверить таблицу лидеров: /tournament"
         )
-    
-    async def get_current_tournament(
-        self,
-        tournament_type: TournamentType,
-        session: Optional[AsyncSession] = None
-    ) -> Optional[TournamentInfo]:
-        """
-        Get the current active tournament of a specific type.
-        
-        Args:
-            tournament_type: Type of tournament to find
-            session: Optional database session
-            
-        Returns:
-            TournamentInfo if found, None otherwise
-        """
-        close_session = False
-        if session is None:
-            async_session = get_session()
-            session = async_session()
-            close_session = True
         
         try:
-            now = utc_now()
-            
-            result = await session.execute(
-                select(Tournament).filter(
-                    Tournament.type == tournament_type.value,
-                    Tournament.status == 'active',
-                    Tournament.start_at <= now,
-                    Tournament.end_at > now
-                ).order_by(Tournament.start_at.desc()).limit(1)
+            await bot.send_message(
+                chat_id=TOURNAMENT_CHANNEL_ID,
+                text=text,
+                parse_mode="HTML"
             )
-            tournament = result.scalar_one_or_none()
-            
-            if tournament is None:
-                return None
-            
-            # Get standings for all disciplines
-            standings = {}
-            for discipline in TournamentDiscipline:
-                standings[discipline] = await self._get_discipline_standings(
-                    tournament.id, discipline, limit=10, session=session
-                )
-            
-            return TournamentInfo(
-                id=tournament.id,
-                type=tournament_type,
-                start_at=tournament.start_at,
-                end_at=tournament.end_at,
-                status=tournament.status,
-                standings=standings
-            )
-            
-        finally:
-            if close_session:
-                await session.close()
-    
-    async def get_all_active_tournaments(
-        self,
-        session: Optional[AsyncSession] = None
-    ) -> List[TournamentInfo]:
-        """
-        Get all currently active tournaments.
-        
-        Args:
-            session: Optional database session
-            
-        Returns:
-            List of TournamentInfo for all active tournaments
-        """
-        close_session = False
-        if session is None:
-            async_session = get_session()
-            session = async_session()
-            close_session = True
-        
-        try:
-            now = utc_now()
-            
-            result = await session.execute(
-                select(Tournament).filter(
-                    Tournament.status == 'active',
-                    Tournament.start_at <= now,
-                    Tournament.end_at > now
-                )
-            )
-            tournaments = result.scalars().all()
-            
-            infos = []
-            for tournament in tournaments:
-                tournament_type = TournamentType(tournament.type)
-                
-                # Get standings for all disciplines
-                standings = {}
-                for discipline in TournamentDiscipline:
-                    standings[discipline] = await self._get_discipline_standings(
-                        tournament.id, discipline, limit=10, session=session
-                    )
-                
-                infos.append(TournamentInfo(
-                    id=tournament.id,
-                    type=tournament_type,
-                    start_at=tournament.start_at,
-                    end_at=tournament.end_at,
-                    status=tournament.status,
-                    standings=standings
-                ))
-            
-            return infos
-            
-        finally:
-            if close_session:
-                await session.close()
-    
-    # =========================================================================
-    # Helper Methods
-    # =========================================================================
-    
-    async def _get_discipline_standings(
-        self,
-        tournament_id: int,
-        discipline: TournamentDiscipline,
-        limit: int,
-        session: Optional[AsyncSession] = None
-    ) -> List[TournamentStanding]:
-        """Get standings for a specific discipline."""
-        close_session = False
-        if session is None:
-            async_session = get_session()
-            session = async_session()
-            close_session = True
-        
-        try:
-            # Get scores ordered by score descending
-            result = await session.execute(
-                select(TournamentScore)
-                .filter_by(
-                    tournament_id=tournament_id,
-                    discipline=discipline.value
-                )
-                .order_by(TournamentScore.score.desc())
-                .limit(limit)
-            )
-            scores = result.scalars().all()
-            
-            standings = []
-            for rank, score_record in enumerate(scores, start=1):
-                # Try to get username from User table
-                username = None
-                user_result = await session.execute(
-                    select(User).filter_by(tg_user_id=score_record.user_id)
-                )
-                user = user_result.scalar_one_or_none()
-                if user:
-                    username = user.username or user.first_name
-                
-                standings.append(TournamentStanding(
-                    user_id=score_record.user_id,
-                    username=username,
-                    score=score_record.score,
-                    rank=rank
-                ))
-            
-            return standings
-            
-        finally:
-            if close_session:
-                await session.close()
-    
-    async def _record_achievement(
-        self,
-        user_id: int,
-        tournament_type: TournamentType,
-        discipline: TournamentDiscipline,
-        session: AsyncSession
-    ) -> bool:
-        """
-        Record an achievement for a tournament winner.
-        
-        **Validates: Requirements 10.6**
-        """
-        try:
-            # Get user from database
-            user_result = await session.execute(
-                select(User).filter_by(tg_user_id=user_id)
-            )
-            user = user_result.scalar_one_or_none()
-            
-            if user is None:
-                logger.warning(f"User {user_id} not found for achievement recording")
-                return False
-            
-            # Get or create achievement
-            achievement_code = f"{ACHIEVEMENT_CODES[tournament_type]}_{discipline.value}"
-            achievement_result = await session.execute(
-                select(Achievement).filter_by(code=achievement_code)
-            )
-            achievement = achievement_result.scalar_one_or_none()
-            
-            if achievement is None:
-                # Create the achievement if it doesn't exist
-                achievement = Achievement(
-                    code=achievement_code,
-                    name=f"{tournament_type.value.title()} {discipline.value.title()} Champion",
-                    description=f"Won 1st place in {tournament_type.value} {discipline.value} tournament"
-                )
-                session.add(achievement)
-                await session.flush()
-            
-            # Check if user already has this achievement
-            existing_result = await session.execute(
-                select(UserAchievement).filter_by(
-                    user_id=user.id,
-                    achievement_id=achievement.id
-                )
-            )
-            existing = existing_result.scalar_one_or_none()
-            
-            if existing is None:
-                # Award achievement
-                user_achievement = UserAchievement(
-                    user_id=user.id,
-                    achievement_id=achievement.id
-                )
-                session.add(user_achievement)
-                
-                logger.info(
-                    f"Recorded achievement {achievement_code} for user {user_id}"
-                )
-            
-            return True
-            
         except Exception as e:
-            logger.error(f"Failed to record achievement: {e}")
+            logger.error(f"Failed to announce tournament: {e}")
+    
+    async def end_tournament(self, bot: Bot) -> List[TournamentResult]:
+        """Завершить турнир и выдать призы."""
+        if not self.current_tournament:
+            return []
+        
+        config = TOURNAMENT_CONFIGS[self.current_tournament]
+        
+        # Получаем топ-3
+        results = await self._get_tournament_results(self.current_tournament, limit=3)
+        
+        # Выдаём призы
+        async_session = get_session()
+        async with async_session() as session:
+            for i, result in enumerate(results):
+                if i < len(config.prizes):
+                    prize = config.prizes[i]
+                    result.prize = prize
+                    
+                    # Начисляем монеты
+                    balance = await session.scalar(
+                        select(UserBalance)
+                        .where(
+                            UserBalance.user_id == result.user_id,
+                            UserBalance.chat_id == 0
+                        )
+                    )
+                    if balance:
+                        balance.balance += prize
+                    else:
+                        balance = UserBalance(user_id=result.user_id, chat_id=0, balance=prize)
+                        session.add(balance)
+            
+            await session.commit()
+        
+        # Объявляем результаты
+        await self._announce_tournament_end(bot, config, results)
+        
+        # Сбрасываем турнир
+        self.current_tournament = None
+        self.tournament_start = None
+        self.tournament_end = None
+        
+        logger.info(f"Ended tournament: {config.name}")
+        return results
+    
+    async def _announce_tournament_end(self, bot: Bot, config: TournamentConfig, 
+                                       results: List[TournamentResult]) -> None:
+        """Объявить результаты турнира в канале."""
+        text = (
+            f"{config.emoji} <b>ТУРНИР ЗАВЕРШЁН: {config.name}</b> {config.emoji}\n\n"
+            f"🏆 <b>Победители:</b>\n\n"
+        )
+        
+        medals = ["🥇", "🥈", "🥉"]
+        for i, result in enumerate(results):
+            if i < 3:
+                text += (
+                    f"{medals[i]} <b>{result.username}</b>\n"
+                    f"   Результат: {result.score:,}\n"
+                    f"   Приз: {result.prize:,} монет\n\n"
+                )
+        
+        text += f"🎉 Поздравляем победителей!\n"
+        text += f"Следующий турнир скоро..."
+        
+        try:
+            await bot.send_message(
+                chat_id=TOURNAMENT_CHANNEL_ID,
+                text=text,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Failed to announce tournament results: {e}")
+    
+    async def _get_tournament_results(self, tournament_type: TournamentType, 
+                                      limit: int = 10) -> List[TournamentResult]:
+        """Получить результаты турнира."""
+        async_session = get_session()
+        async with async_session() as session:
+            if tournament_type == TournamentType.PP_SIZE:
+                # Топ по размеру PP
+                result = await session.execute(
+                    select(User, GameStat)
+                    .join(GameStat, User.id == GameStat.user_id)
+                    .order_by(desc(GameStat.size_cm))
+                    .limit(limit)
+                )
+                rows = result.fetchall()
+                return [
+                    TournamentResult(
+                        user_id=user.tg_user_id,
+                        username=user.username or user.first_name or f"User{user.tg_user_id}",
+                        score=game_stat.size_cm,
+                        rank=i+1,
+                        prize=0
+                    )
+                    for i, (user, game_stat) in enumerate(rows)
+                ]
+            
+            elif tournament_type == TournamentType.PVP_WINS:
+                # Топ по победам в PvP
+                result = await session.execute(
+                    select(User, GameStat)
+                    .join(GameStat, User.id == GameStat.user_id)
+                    .order_by(desc(GameStat.pvp_wins))
+                    .limit(limit)
+                )
+                rows = result.fetchall()
+                return [
+                    TournamentResult(
+                        user_id=user.tg_user_id,
+                        username=user.username or user.first_name or f"User{user.tg_user_id}",
+                        score=game_stat.pvp_wins,
+                        rank=i+1,
+                        prize=0
+                    )
+                    for i, (user, game_stat) in enumerate(rows)
+                ]
+            
+            elif tournament_type == TournamentType.CASINO:
+                # Топ по джекпотам
+                result = await session.execute(
+                    select(User, GameStat)
+                    .join(GameStat, User.id == GameStat.user_id)
+                    .order_by(desc(GameStat.casino_jackpots))
+                    .limit(limit)
+                )
+                rows = result.fetchall()
+                return [
+                    TournamentResult(
+                        user_id=user.tg_user_id,
+                        username=user.username or user.first_name or f"User{user.tg_user_id}",
+                        score=game_stat.casino_jackpots,
+                        rank=i+1,
+                        prize=0
+                    )
+                    for i, (user, game_stat) in enumerate(rows)
+                ]
+            
+            # Для других типов турниров нужна дополнительная логика
+            return []
+    
+    async def get_leaderboard(self, limit: int = 10) -> List[TournamentResult]:
+        """Получить текущую таблицу лидеров."""
+        if not self.current_tournament:
+            return []
+        
+        return await self._get_tournament_results(self.current_tournament, limit)
+    
+    def is_active(self) -> bool:
+        """Проверить, активен ли турнир."""
+        if not self.current_tournament or not self.tournament_end:
             return False
+        return utc_now() < self.tournament_end
     
-    # =========================================================================
-    # Formatting Methods
-    # =========================================================================
-    
-    def format_standings(
-        self,
-        standings: List[TournamentStanding],
-        discipline: TournamentDiscipline
-    ) -> str:
-        """
-        Format standings for display.
-        
-        Args:
-            standings: List of standings to format
-            discipline: The discipline being displayed
-            
-        Returns:
-            Formatted string for display
-        """
-        if not standings:
-            return f"Нет участников в {discipline.value}"
-        
-        # Emoji for ranks
-        rank_emoji = {1: "🥇", 2: "🥈", 3: "🥉"}
-        
-        lines = []
-        for standing in standings:
-            emoji = rank_emoji.get(standing.rank, f"{standing.rank}.")
-            name = standing.username or f"User {standing.user_id}"
-            lines.append(f"{emoji} {name}: {standing.score}")
-        
-        return "\n".join(lines)
-    
-    def format_tournament_info(self, info: TournamentInfo) -> str:
-        """
-        Format tournament info for display.
-        
-        Args:
-            info: Tournament info to format
-            
-        Returns:
-            Formatted string for display
-        """
-        type_names = {
-            TournamentType.DAILY: "🌅 Дневной турнир",
-            TournamentType.WEEKLY: "📅 Недельный турнир",
-            TournamentType.GRAND_CUP: "🏆 Гранд Кубок"
-        }
-        
-        discipline_names = {
-            TournamentDiscipline.GROW: "📏 Рост",
-            TournamentDiscipline.PVP: "⚔️ PvP",
-            TournamentDiscipline.ROULETTE: "🔫 Рулетка"
-        }
-        
-        lines = [
-            f"{type_names.get(info.type, info.type.value)}",
-            f"Статус: {'🟢 Активен' if info.status == 'active' else '🔴 Завершён'}",
-            f"Окончание: {info.end_at.strftime('%d.%m.%Y %H:%M')} UTC",
-            ""
-        ]
-        
-        for discipline, standings in info.standings.items():
-            lines.append(f"{discipline_names.get(discipline, discipline.value)}:")
-            if standings:
-                lines.append(self.format_standings(standings[:3], discipline))
-            else:
-                lines.append("  Нет участников")
-            lines.append("")
-        
-        return "\n".join(lines)
+    def get_time_remaining(self) -> Optional[timedelta]:
+        """Получить оставшееся время турнира."""
+        if not self.tournament_end:
+            return None
+        remaining = self.tournament_end - utc_now()
+        return remaining if remaining.total_seconds() > 0 else timedelta(0)
 
 
-# Global service instance
+# Singleton
 tournament_service = TournamentService()

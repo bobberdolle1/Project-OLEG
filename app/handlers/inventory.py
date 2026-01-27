@@ -163,6 +163,44 @@ async def apply_booster(user_id: int, chat_id: int, item_type: str) -> EffectRes
     effect_result = None
     
     if item_type == ItemType.ENERGY_DRINK:
+        from datetime import datetime, timezone, timedelta
+        from app.database.models import GameStat
+        from app.database.session import get_session
+        from sqlalchemy import select
+        
+        # Check cooldown (10 minutes between energy drink uses)
+        async_session = get_session()
+        async with async_session() as session:
+            result = await session.execute(
+                select(GameStat).where(GameStat.tg_user_id == user_id)
+            )
+            game_stat = result.scalars().first()
+            
+            if game_stat and game_stat.last_energy_drink_use:
+                now = datetime.now(timezone.utc)
+                if game_stat.last_energy_drink_use.tzinfo is None:
+                    last_use = game_stat.last_energy_drink_use.replace(tzinfo=timezone.utc)
+                else:
+                    last_use = game_stat.last_energy_drink_use
+                
+                cooldown_seconds = 600  # 10 minutes
+                elapsed = (now - last_use).total_seconds()
+                
+                if elapsed < cooldown_seconds:
+                    remaining = int(cooldown_seconds - elapsed)
+                    minutes = remaining // 60
+                    seconds = remaining % 60
+                    return EffectResult(
+                        success=False,
+                        message=f"⏳ Подожди {minutes}м {seconds}с перед следующим энергетиком!",
+                        details={"cooldown_remaining": remaining}
+                    )
+            
+            # Update cooldown
+            if game_stat:
+                game_stat.last_energy_drink_use = datetime.now(timezone.utc)
+                await session.commit()
+        
         # Requirement 4.1: Reset fishing cooldown
         fishing_game.reset_cooldown(user_id)
         effect_result = EffectResult(
@@ -748,6 +786,8 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
         
     Requirements: 2.1, 2.2, 2.3
     """
+    from datetime import datetime, timezone, timedelta
+    
     # Validate item type is a PP cream
     if not is_pp_cream(item_type):
         return EffectResult(
@@ -778,14 +818,7 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
             details={"blocked_by": "pp_cage"}
         )
     
-    # Get effect range from item catalog
-    pp_boost_min = item_info.effect.get("pp_boost_min", 1)
-    pp_boost_max = item_info.effect.get("pp_boost_max", 3)
-    
-    # Generate random increase within range
-    increase = random.randint(pp_boost_min, pp_boost_max)
-    
-    # Update GameStat.size_cm
+    # Check cooldown (5 minutes between cream uses)
     async_session = get_session()
     async with async_session() as session:
         result = await session.execute(
@@ -799,8 +832,37 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
                 message="❌ Сначала используй /grow чтобы создать профиль!"
             )
         
+        # Check last cream use
+        if game_stat.last_cream_use:
+            now = datetime.now(timezone.utc)
+            if game_stat.last_cream_use.tzinfo is None:
+                last_use = game_stat.last_cream_use.replace(tzinfo=timezone.utc)
+            else:
+                last_use = game_stat.last_cream_use
+            
+            cooldown_seconds = 300  # 5 minutes
+            elapsed = (now - last_use).total_seconds()
+            
+            if elapsed < cooldown_seconds:
+                remaining = int(cooldown_seconds - elapsed)
+                minutes = remaining // 60
+                seconds = remaining % 60
+                return EffectResult(
+                    success=False,
+                    message=f"⏳ Подожди {minutes}м {seconds}с перед следующим использованием мази!",
+                    details={"cooldown_remaining": remaining}
+                )
+        
+        # Get effect range from item catalog
+        pp_boost_min = item_info.effect.get("pp_boost_min", 1)
+        pp_boost_max = item_info.effect.get("pp_boost_max", 3)
+        
+        # Generate random increase within range
+        increase = random.randint(pp_boost_min, pp_boost_max)
+        
         old_size = game_stat.size_cm
         game_stat.size_cm = old_size + increase
+        game_stat.last_cream_use = datetime.now(timezone.utc)
         new_size = game_stat.size_cm
         
         await session.commit()
@@ -816,6 +878,7 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
             game_stat = result.scalars().first()
             if game_stat:
                 game_stat.size_cm = old_size
+                game_stat.last_cream_use = None
                 await session.commit()
         
         return EffectResult(

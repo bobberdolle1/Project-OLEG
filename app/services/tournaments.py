@@ -32,6 +32,15 @@ class TournamentType(str, Enum):
     GAMES_PLAYED = "games_played"  # Больше всего игр сыграно
 
 
+class TournamentDiscipline(str, Enum):
+    """Дисциплины турниров для обновления очков."""
+    GROW = "grow"
+    PVP = "pvp"
+    ROULETTE = "roulette"
+    CASINO = "casino"
+    FISHING = "fishing"
+
+
 @dataclass
 class TournamentConfig:
     """Конфигурация турнира."""

@@ -425,12 +425,6 @@ class NotificationConfig(Base):
     daily_tips: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
-class StickerPack(Base):
-    """DEPRECATED: Removed in migration 042d107b23a8"""
-    __tablename__ = "sticker_packs"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-
 class SecurityBlacklist(Base):
     """Security blacklist for abuse prevention (Requirement 17.7)."""
     __tablename__ = "security_blacklist"

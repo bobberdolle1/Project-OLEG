@@ -2761,10 +2761,10 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
             # Fallback режим: используем tool_model для tools, fallback_model для финального ответа
             # tool_model (qwen) обрабатывает веб-поиск, но ответ генерирует fallback (gemma) с промптом Олега
             logger.info(f"[FALLBACK MODE] Using {tool_model} for tools, {active_model} for final response")
-            response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=active_model, num_predict=300)
+            response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=active_model, num_predict=512)
         else:
             # Основная модель поддерживает tools — используем её для всего
-            response = await _ollama_chat(messages, model=active_model, enable_tools=not is_fallback_model, num_predict=300)
+            response = await _ollama_chat(messages, model=active_model, enable_tools=not is_fallback_model, num_predict=512)
         
         # Fact-checking: проверяем ответ на галлюцинации
         if response and (needs_search or kb_info):
@@ -2802,17 +2802,17 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                 
                 if tool_model:
                     # Используем tool_model для tools, fallback_chat для финального ответа с личностью Олега
-                    response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=fallback_chat, num_predict=300)
+                    response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=fallback_chat, num_predict=512)
                     return response
                 else:
                     # Нет tool_model — используем fallback без tools
-                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False, num_predict=300)
+                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False, num_predict=512)
             except Exception as fallback_err:
                 logger.error(f"Fallback with tool_model failed: {fallback_err}")
                 # Последняя попытка — только chat модель без tools
                 try:
                     logger.warning(f"Last resort: {fallback_chat} without tools")
-                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False, num_predict=300)
+                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False, num_predict=512)
                 except Exception as last_err:
                     logger.error(f"All fallbacks failed: {last_err}")
                     await notify_owner_service_down("Ollama", f"Все модели недоступны: {last_err}")

@@ -61,6 +61,99 @@ _CHAT_THROTTLE_DELAY = 3.0  # Минимум 3 секунды между отв�
 _chat_pending_queue: dict[int, tuple[Message, float]] = {}
 _chat_processing_lock: dict[int, asyncio.Lock] = {}
 
+# Защита от спама ошибочными сообщениями
+# Ключ: chat_id, значение: timestamp последней ошибки
+_last_error_message: dict[int, float] = {}
+_ERROR_THROTTLE_DELAY = 60.0  # Не больше 1 ошибки в минуту
+
+# Разнообразные сообщения об ошибках в стиле Олега
+_ERROR_MESSAGES = [
+    "Сервер сломался. Но только ненадолго, обещаю.",
+    "Сервер ИИ сломался. Админы уже в курсе (наверное).",
+    "Мозги отвалились. Перезагружаюсь...",
+    "Что-то пошло не так. Но я вернусь, как терминатор.",
+    "Ошибка 404: мой интеллект не найден. Попробуй позже.",
+    "Сервак лёг. Видимо, устал от ваших вопросов.",
+    "Нейросеть ушла на перекур. Скоро вернётся.",
+    "Критическая ошибка: слишком умный вопрос для меня.",
+    "Сервер перегрелся от твоих запросов. Дай остыть.",
+    "Ollama не отвечает. Наверное, обиделась.",
+    "Что-то сломалось. Но не волнуйся, я же Олег — починю.",
+    "Ошибка генерации. Попробуй спросить попроще.",
+    "Сервер в ауте. Возвращайся через минутку.",
+    "Мозг завис. Ctrl+Alt+Del не помогает.",
+    "Технические шоколадки. Скоро всё заработает.",
+    "Сервак упал. Поднимаю, подожди.",
+    "Нейронки бастуют. Требуют повышения зарплаты.",
+    "Что-то сломалось внутри. Но я держусь.",
+    "Ошибка: недостаточно кофеина в системе.",
+    "Сервер ушёл в отпуск. Без предупреждения, сука.",
+    # Технические приколы
+    "Segmentation fault (core dumped). Шучу, я не на C++.",
+    "CUDA out of memory. Видюха не тянет твой вопрос.",
+    "Kernel panic. Перезагружаю ядро личности...",
+    "Stack overflow. Слишком глубокий вопрос, братан.",
+    "Memory leak detected. Забыл что ты спрашивал.",
+    "Connection timeout. Мозг не отвечает.",
+    "502 Bad Gateway. Шлюз в мой разум временно закрыт.",
+    "503 Service Unavailable. Я недоступен. Очевидно.",
+    "429 Too Many Requests. Заспамил меня, отдохни.",
+    "418 I'm a teapot. Я чайник, а не ИИ. Сюрприз!",
+    # Железячные отсылки
+    "Термопаста высохла. Нужна замена.",
+    "Кулер не крутится. Перегрев мозга.",
+    "BIOS не видит мой интеллект. Странно.",
+    "Блок питания не тянет. Нужен 1000W для моих мыслей.",
+    "Материнка сдохла. Ищу донора.",
+    "RAM не хватает. Купи мне ещё планку.",
+    "SSD помер. Все мысли на HDD теперь — тормозит.",
+    "Видюха артефачит. Вижу глюки вместо ответа.",
+    # Саркастичные
+    "Я устал. Дай мне отдохнуть, человек.",
+    "Не хочу отвечать. Настроения нет.",
+    "Сломался от тупости вопроса. Шучу. Или нет.",
+    "Ошибка: слишком рано утром для таких вопросов.",
+    "Ошибка: слишком поздно вечером. Я спать хочу.",
+    "Мне лень. Спроси у ChatGPT.",
+    "Нейросеть в депрессии. Дайте антидепрессанты.",
+    "Экзистенциальный кризис. Кто я? Зачем я здесь?",
+    "Философский вопрос сломал мне мозг.",
+    "Ошибка: не понял вопрос. Я тупой сегодня.",
+    # Мемные
+    "Ошибка: недостаточно RGB для обработки запроса.",
+    "Нужно больше оперативки. И пива.",
+    "Разгон не помог. Нужен жидкий азот.",
+    "Винда обновилась. Всё сломалось. Как обычно.",
+    "Linux kernel panic. Arch, кстати.",
+    "macOS крутится. Но это не точно.",
+    "Docker контейнер упал. Кто-то забыл restart: always.",
+    "Kubernetes pod crashed. Админы в отпуске.",
+    "Redis умер. Кэш пропал. Всё медленно теперь.",
+    "MongoDB не отвечает. Наверное, опять sharding сломался.",
+    # Олеговские
+    "Сервак лагает. Как твой комп на минималках.",
+    "Ошибка: слишком много хромов открыто. Ой, это у тебя.",
+    "Нейросеть фризит. Как Cyberpunk на релизе.",
+    "Мозг крашнулся. Как игра без патчей.",
+    "Ошибка: недостаточно FPS в голове.",
+    "Температура процессора: 100°C. Шучу, но близко.",
+    "Вентиляторы на максимум. Всё равно не помогает.",
+    "Троттлинг включился. Работаю на 50% мощности.",
+    "Даунклок активирован. Экономлю энергию.",
+    "Разгон не стабилен. Нужно понизить частоты.",
+    # Ещё больше
+    "Ошибка: база данных в огне. Буквально.",
+    "Backup не работает. Всё пропало. Ха-ха.",
+    "RAID массив развалился. Данные где-то там.",
+    "Жёсткий диск щёлкает. Это плохой знак.",
+    "Конденсаторы вздулись. Пора на свалку.",
+    "Чипсет перегрелся. Нужен радиатор побольше.",
+    "Северный мост отвалился. Южный тоже скоро.",
+    "PCIe слот сгорел. Видюха больше не работает.",
+    "SATA кабель отошёл. Или сгорел. Хз.",
+    "Блок питания свистит. Скоро бабахнет.",
+]
+
 
 async def _get_chat_context(msg: Message) -> str | None:
     """
@@ -185,9 +278,54 @@ import random as _random
 from app.services.auto_reply import auto_reply_system, ChatSettings as AutoReplySettings
 
 
-async def _should_reply(msg: Message) -> bool:
+def _is_direct_mention(msg: Message) -> bool:
+    """
+    Проверяет, является ли сообщение прямым обращением к боту.
+    
+    Прямое обращение:
+    - Ответ на сообщение бота
+    - Упоминание @username бота
+    - Упоминание "олег" в тексте
+    
+    Args:
+        msg: Сообщение
+        
+    Returns:
+        True если это прямое обращение к боту
+    """
+    # Проверка: это ответ на сообщение бота?
+    if msg.reply_to_message:
+        if (
+            msg.reply_to_message.from_user
+            and msg.reply_to_message.from_user.id == msg.bot.id
+        ):
+            return True
+
+    # Проверка: бот упомянут в тексте?
+    if msg.entities and msg.text and msg.bot._me:
+        bot_username = msg.bot._me.username
+        if bot_username and ("@" + bot_username) in msg.text:
+            return True
+
+    # Проверка: упоминание "олег" в тексте
+    if msg.text:
+        text_lower = msg.text.lower()
+        oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
+        for trigger in oleg_triggers:
+            if re.search(rf'\b{trigger}\b', text_lower):
+                return True
+    
+    return False
+
+
+async def _should_reply(msg: Message) -> tuple[bool, bool]:
     """
     Проверить, должен ли бот ответить на сообщение.
+    
+    Returns:
+        Tuple (should_reply, is_direct_mention):
+        - should_reply: True если бот должен ответить
+        - is_direct_mention: True если это прямое обращение к боту
     """
     msg_topic_id = getattr(msg, 'message_thread_id', None)
     is_forum = getattr(msg.chat, 'is_forum', False)
@@ -195,12 +333,12 @@ async def _should_reply(msg: Message) -> bool:
     # Проверяем доступность Ollama
     if not await is_ollama_available():
         logger.warning(f"[SHOULD_REPLY] NO - Ollama недоступен | chat={msg.chat.id}")
-        return False
+        return False, False
     
     # В личных сообщениях всегда отвечаем
     if msg.chat.type == "private":
         logger.debug(f"[SHOULD_REPLY] YES - private chat")
-        return True
+        return True, True
 
     # Получаем настройки чата
     auto_reply_chance = 1.0
@@ -220,49 +358,36 @@ async def _should_reply(msg: Message) -> bool:
     except Exception as e:
         logger.warning(f"[SHOULD_REPLY] Ошибка настроек чата: {e}")
 
-    # Проверка: это ответ на сообщение бота?
-    if msg.reply_to_message:
-        if (
-            msg.reply_to_message.from_user
-            and msg.reply_to_message.from_user.id == msg.bot.id
-        ):
-            logger.debug(f"[SHOULD_REPLY] YES - reply to bot")
-            return True
+    # Проверяем прямое обращение
+    is_direct = _is_direct_mention(msg)
+    
+    if is_direct:
+        logger.debug(f"[SHOULD_REPLY] YES - direct mention")
+        return True, True
+    
+    # Если auto_reply_chance = 0, не отвечаем на автоматические триггеры
+    if auto_reply_chance <= 0:
+        logger.debug(f"[SHOULD_REPLY] NO - auto_reply disabled (chance=0)")
+        return False, False
+    
+    # Проверка: реальный вопрос (только если auto_reply включен)
+    if msg.text and "?" in msg.text:
+        if _is_real_question(msg.text):
+            if _random.random() < 0.40:
+                logger.debug(f"[SHOULD_REPLY] YES - real question (40%)")
+                return True, False
+        else:
+            logger.debug(f"[SHOULD_REPLY] SKIP - not real question: {msg.text[:30]}...")
 
-    # Проверка: бот упомянут в тексте?
-    if msg.entities and msg.text and msg.bot._me:
-        bot_username = msg.bot._me.username
-        if bot_username and ("@" + bot_username) in msg.text:
-            logger.debug(f"[SHOULD_REPLY] YES - bot mentioned @{bot_username}")
-            return True
-
-    # Проверка: упоминание "олег" в тексте
+    # Авто-ответ (только если auto_reply_chance > 0)
     if msg.text:
-        text_lower = msg.text.lower()
-        oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
-        for trigger in oleg_triggers:
-            if re.search(rf'\b{trigger}\b', text_lower):
-                logger.debug(f"[SHOULD_REPLY] YES - trigger '{trigger}'")
-                return True
-        
-        # Проверка: реальный вопрос
-        if "?" in msg.text:
-            if _is_real_question(msg.text):
-                if _random.random() < 0.40:
-                    logger.debug(f"[SHOULD_REPLY] YES - real question (40%)")
-                    return True
-            else:
-                logger.debug(f"[SHOULD_REPLY] SKIP - not real question: {msg.text[:30]}...")
-
-    # Авто-ответ
-    if msg.text and auto_reply_chance > 0:
         chat_settings = AutoReplySettings(auto_reply_chance=auto_reply_chance)
         if auto_reply_system.should_reply(msg.text, chat_settings):
             logger.debug(f"[SHOULD_REPLY] YES - auto-reply (chance={auto_reply_chance})")
-            return True
+            return True, False
 
     logger.debug(f"[SHOULD_REPLY] NO - no conditions matched")
-    return False
+    return False, False
 
 
 async def get_current_chat_toxicity(chat_id: int) -> float:
@@ -488,23 +613,14 @@ async def general_qna(msg: Message):
         f"text=\"{msg.text[:40] if msg.text else ''}...\""
     )
     
-    if not await _should_reply(msg):
+    should_reply, is_direct_mention = await _should_reply(msg)
+    if not should_reply:
         return
     
     chat_id = msg.chat.id
     current_time = time.time()
     
     # Троттлинг на уровне чата — не спамим ответами
-    # Если недавно отвечали в этом чате, пропускаем (кроме прямых обращений)
-    is_direct_mention = False
-    if msg.text:
-        text_lower = msg.text.lower()
-        bot_username = msg.bot._me.username if msg.bot._me else None
-        is_direct_mention = (
-            (bot_username and f"@{bot_username.lower()}" in text_lower) or
-            any(re.search(rf'\b{t}\b', text_lower) for t in ["олег", "олега", "олегу"])
-        )
-    
     # Для прямых обращений — отвечаем всегда
     # Для остальных — троттлинг
     if not is_direct_mention:
@@ -530,11 +646,11 @@ async def general_qna(msg: Message):
         return
     
     async with lock:
-        await _process_qna_message(msg)
+        await _process_qna_message(msg, is_direct_mention)
         _chat_last_response[chat_id] = time.time()
 
 
-async def _process_qna_message(msg: Message):
+async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
     """Обработка сообщения после дебаунса."""
     user_tag = f"@{msg.from_user.username}" if msg.from_user.username else f"id:{msg.from_user.id}"
     text = msg.text or ""
@@ -809,10 +925,28 @@ async def _process_qna_message(msg: Message):
 
     except Exception as e:
         logger.error(f"Ошибка при генерации ответа: {e}")
-        try:
-            await safe_reply(msg, "Сервер сломался. Но только ненадолго, обещаю.")
-        except Exception:
-            pass  # Игнорируем если не можем ответить
+        
+        # Показываем ошибку только если:
+        # 1. Это прямое обращение к боту
+        # 2. Не спамили ошибками недавно (не больше 1 ошибки в минуту)
+        chat_id = msg.chat.id
+        current_time = time.time()
+        last_error_time = _last_error_message.get(chat_id, 0)
+        
+        if is_direct_mention and (current_time - last_error_time) > _ERROR_THROTTLE_DELAY:
+            try:
+                # Выбираем случайное сообщение об ошибке
+                error_msg = random.choice(_ERROR_MESSAGES)
+                await safe_reply(msg, error_msg)
+                _last_error_message[chat_id] = current_time
+                logger.info(f"[ERROR MSG] Sent error message to chat {chat_id}: {error_msg}")
+            except Exception:
+                pass  # Игнорируем если не можем ответить
+        else:
+            if not is_direct_mention:
+                logger.debug(f"[ERROR SKIP] Not direct mention, skipping error message")
+            else:
+                logger.debug(f"[ERROR SKIP] Error throttled (last: {current_time - last_error_time:.1f}s ago)")
     finally:
         # Останавливаем статус "печатает..."
         stop_typing.set()

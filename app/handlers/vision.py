@@ -76,7 +76,7 @@ async def should_process_image(msg: Message) -> tuple[bool, bool]:
     Бот обрабатывает изображение если:
     - В caption есть упоминание бота (@username или "олег")
     - Это ответ на сообщение бота
-    - Авто-ответ сработал по вероятности (2-5%)
+    - Авто-ответ сработал по вероятности (2-5%) - только для фото, НЕ для стикеров
     
     Args:
         msg: Сообщение с изображением
@@ -108,8 +108,8 @@ async def should_process_image(msg: Message) -> tuple[bool, bool]:
             logger.debug(f"Image processing: reply to bot message for message {msg.message_id}")
             return True, False
     
-    # Авто-ответ на изображения с вероятностью 2-5%
-    if random.random() < AUTO_IMAGE_REPLY_PROBABILITY:
+    # Авто-ответ на изображения с вероятностью 2-5% - только для фото, НЕ для стикеров
+    if not msg.sticker and random.random() < AUTO_IMAGE_REPLY_PROBABILITY:
         logger.debug(f"Image processing: auto-reply triggered for message {msg.message_id}")
         return True, True
     
@@ -140,6 +140,9 @@ async def analyze_image_with_vlm(image_data: bytes, prompt: str) -> str:
 async def extract_image_bytes(message: Message) -> Optional[bytes]:
     """
     Извлекает байты изображения из сообщения.
+    
+    Поддерживает фото, документы-изображения и стикеры.
+    Стикеры конвертируются в PNG для анализа.
 
     Args:
         message: Сообщение с изображением
@@ -166,6 +169,47 @@ async def extract_image_bytes(message: Message) -> Optional[bytes]:
             file_bytes_io = await message.bot.download_file(file_info.file_path)
             image_bytes = file_bytes_io.read()
             return image_bytes
+        elif message.sticker:
+            # Обрабатываем стикер как изображение
+            sticker = message.sticker
+            
+            # Получаем file_info для загрузки
+            file_info = await message.bot.get_file(sticker.file_id)
+            
+            # Загружаем стикер (может быть .webp или .tgs для анимированных)
+            file_bytes_io = await message.bot.download_file(file_info.file_path)
+            sticker_bytes = file_bytes_io.read()
+            
+            # Если это анимированный стикер (.tgs) - пропускаем
+            if sticker.is_animated or sticker.is_video:
+                logger.debug(f"Skipping animated/video sticker")
+                return None
+            
+            # Конвертируем .webp в PNG для лучшей совместимости
+            try:
+                from PIL import Image
+                import io
+                
+                img = Image.open(io.BytesIO(sticker_bytes))
+                # Конвертируем в RGB если нужно
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = background
+                
+                # Сохраняем как PNG
+                output = io.BytesIO()
+                img.save(output, format='PNG')
+                return output.getvalue()
+            except ImportError:
+                # Если PIL не установлен, возвращаем как есть
+                logger.warning("PIL not available, returning sticker as-is")
+                return sticker_bytes
+            except Exception as e:
+                logger.warning(f"Failed to convert sticker: {e}, returning as-is")
+                return sticker_bytes
         else:
             return None
     except Exception as e:
@@ -173,15 +217,17 @@ async def extract_image_bytes(message: Message) -> Optional[bytes]:
         return None
 
 
-@router.message(F.photo | F.document)
+@router.message(F.photo | F.document | F.sticker)
 async def handle_image_message(msg: Message):
     """
-    Обработчик сообщений с изображениями.
+    Обработчик сообщений с изображениями и стикерами.
     
     Обрабатывает изображение если:
     - Упоминание в caption (@username или "олег")
     - Ответ на сообщение бота
     - Авто-ответ сработал (2-5% вероятность)
+    
+    Стикеры обрабатываются как изображения (конвертируются в PNG).
     
     Поддерживает media_group — несколько фото за раз анализируются вместе.
     

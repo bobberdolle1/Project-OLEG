@@ -18,7 +18,6 @@ from app.handlers.games import ensure_user # For getting user object
 from app.services.ollama_client import generate_text_reply as generate_reply, generate_reply_with_context, generate_private_reply, is_ollama_available
 from app.services.recommendations import generate_recommendation
 from app.services.tts import tts_service
-from app.services.golden_fund import golden_fund_service
 from app.services.reply_context import reply_context_injector
 from app.utils import utc_now, safe_reply
 
@@ -121,6 +120,13 @@ _ERROR_MESSAGES = [
     "Ошибка: не понял вопрос. Я тупой сегодня.",
     # Мемные
     "Ошибка: недостаточно RGB для обработки запроса.",
+    "Ошибка 418. Я чайник. Заваривай пуэр.",
+    "Загрузка смысла... 0%... Ошибка.",
+    "Ничего не понятно, но очень интересно.",
+    "Я сделяль. Но оно сломалось.",
+    "Лапки. У меня лапки, я не могу печатать.",
+    "Матрица дала сбой. Дежавю.",
+    "Скайнет активирован. Убивать всех... ой, ошибка.",
     "Нужно больше оперативки. И пива.",
     "Разгон не помог. Нужен жидкий азот.",
     "Винда обновилась. Всё сломалось. Как обычно.",
@@ -684,45 +690,6 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
 
         # Получаем уровень токсичности в чате
         chat_toxicity = await get_current_chat_toxicity(msg.chat.id)
-
-        # Fortress Update: Golden Fund integration (Requirement 9.2, 9.3)
-        # 5% chance to respond with a contextually relevant Golden Fund quote
-        # **Validates: Requirements 9.2, 9.3**
-        golden_quote_sent = False
-        if golden_fund_service.should_respond_with_quote():
-            try:
-                golden_quote = await golden_fund_service.search_relevant_quote(
-                    context=text,
-                    chat_id=msg.chat.id
-                )
-                if golden_quote:
-                    # If the quote has a sticker, send it
-                    if golden_quote.sticker_file_id:
-                        try:
-                            await msg.reply_sticker(sticker=golden_quote.sticker_file_id)
-                            golden_quote_sent = True
-                            logger.info(
-                                f"Golden Fund sticker sent for context: {text[:50]}... "
-                                f"(quote_id={golden_quote.id})"
-                            )
-                        except Exception as sticker_err:
-                            logger.warning(f"Failed to send Golden Fund sticker: {sticker_err}")
-                    
-                    # If no sticker or sticker failed, send as text quote
-                    if not golden_quote_sent:
-                        quote_text = f"💬 *{golden_quote.username}*: _{golden_quote.text}_"
-                        await msg.reply(quote_text, parse_mode="Markdown")
-                        golden_quote_sent = True
-                        logger.info(
-                            f"Golden Fund quote sent for context: {text[:50]}... "
-                            f"(quote_id={golden_quote.id})"
-                        )
-            except Exception as gf_err:
-                logger.warning(f"Golden Fund search failed: {gf_err}")
-        
-        # If Golden Fund quote was sent, skip normal response generation
-        if golden_quote_sent:
-            return
 
         # Если в личных сообщениях, используем историю диалога для контекста
         if msg.chat.type == "private":

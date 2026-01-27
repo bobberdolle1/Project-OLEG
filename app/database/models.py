@@ -24,7 +24,6 @@ class User(Base):
     user_quests: Mapped[list["UserQuest"]] = relationship(back_populates="user")
     guild_memberships: Mapped[list["GuildMember"]] = relationship(back_populates="user")
     question_history: Mapped[list["UserQuestionHistory"]] = relationship(back_populates="user")
-    quotes: Mapped[list["Quote"]] = relationship(back_populates="user")
     private_chat: Mapped["PrivateChat"] = relationship(back_populates="user", uselist=False)
 
 
@@ -277,44 +276,21 @@ class UserQuestionHistory(Base):
 
 
 class Quote(Base):
+    """DEPRECATED: Removed in migration 042d107b23a8"""
     __tablename__ = "quotes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    text: Mapped[str] = mapped_column(Text)
-    username: Mapped[str] = mapped_column(String(64))
-    image_data: Mapped[bytes] = mapped_column(LargeBinary)  # Изображение цитаты в байтах
-    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Комментарий Олега
-    likes_count: Mapped[int] = mapped_column(Integer, default=0)
-    dislikes_count: Mapped[int] = mapped_column(Integer, default=0)  # Счётчик дизлайков
-    is_golden_fund: Mapped[bool] = mapped_column(Boolean, default=False)  # В "золотом фонде" или нет
-    is_sticker: Mapped[bool] = mapped_column(Boolean, default=False)  # Является ли стикером
-    sticker_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # ID файла стикера в Telegram
-    telegram_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID чата в Telegram
-    telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID сообщения в Telegram
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
-    # Fortress Update: Link to sticker pack
-    sticker_pack_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sticker_packs.id"), nullable=True)
-
-    user: Mapped["User"] = relationship(back_populates="quotes")
-    sticker_pack: Mapped[Optional["StickerPack"]] = relationship(back_populates="quotes")
-    votes: Mapped[list["QuoteVote"]] = relationship(back_populates="quote", cascade="all, delete-orphan")
 
 
 class QuoteVote(Base):
-    """Голоса за цитаты (лайки/дизлайки)."""
+    """DEPRECATED: Removed in migration 042d107b23a8"""
     __tablename__ = "quote_votes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    quote_id: Mapped[int] = mapped_column(ForeignKey("quotes.id", ondelete="CASCADE"), index=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)  # Telegram user ID
-    vote_type: Mapped[str] = mapped_column(String(10))  # "like" или "dislike"
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    
-    quote: Mapped["Quote"] = relationship(back_populates="votes")
-    
-    __table_args__ = (
-        # Один голос на пользователя на цитату
-        {"sqlite_autoincrement": True},
-    )
+
+
+class StickerPack(Base):
+    """DEPRECATED: Removed in migration 042d107b23a8"""
+    __tablename__ = "sticker_packs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
 
 class Chat(Base):
@@ -450,19 +426,9 @@ class NotificationConfig(Base):
 
 
 class StickerPack(Base):
-    """Sticker pack management per chat (Requirement 8.1)."""
+    """DEPRECATED: Removed in migration 042d107b23a8"""
     __tablename__ = "sticker_packs"
-    
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    pack_name: Mapped[str] = mapped_column(String(64), unique=True)
-    pack_title: Mapped[str] = mapped_column(String(64))
-    sticker_count: Mapped[int] = mapped_column(Integer, default=0)
-    is_current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    owner_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Telegram user ID who created the pack
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    
-    quotes: Mapped[list["Quote"]] = relationship(back_populates="sticker_pack")
 
 
 class SecurityBlacklist(Base):

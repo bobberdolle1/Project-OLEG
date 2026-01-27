@@ -30,10 +30,9 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db, async_session
 from app.database.models import Chat
-from app.handlers import qna, games, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
+from app.handlers import qna, games, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, vision, random_responses, help
 from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
-from app.handlers.stickers import router as stickers_router
 from app.handlers.tournaments import router as tournaments_router
 from app.handlers.tournaments import router as new_tournaments_router  # New tournament system
 from app.handlers.health import router as health_router
@@ -51,7 +50,6 @@ from app.handlers.mini_games import router as mini_games_router
 from app.handlers.shop import router as shop_router
 from app.handlers.inventory import router as inventory_router
 from app.services.content_downloader import router as content_downloader_router
-from app.handlers.quotes import reactions_router
 from app.handlers.reactions import router as oleg_reactions_router
 from app.handlers.marriages import router as marriages_router
 from app.middleware.logging import MessageLoggerMiddleware
@@ -333,7 +331,6 @@ def build_dp() -> Dispatcher:
         voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
         tips_router,  # Советы для админов
-        quotes.router,  # Цитатник (до qna, чтобы /q не перехватывался general_qna)
         marriages_router,  # Роутер для системы браков (до qna!)
         qna.router,
         achievements.router,  # Достижения
@@ -345,10 +342,8 @@ def build_dp() -> Dispatcher:
         duos.router,  # Дуэты
         statistics.router,
         gif_patrol_router,  # GIF Patrol - анализ GIF на запрещённый контент (до vision)
-        stickers_router,  # Реакции на стикеры
         vision.router,  # Роутер для обработки изображений
         random_responses.router,  # Роутер для рандомных ответов
-        reactions_router,  # Роутер для обработки реакций на цитаты
         oleg_reactions_router,  # Роутер для реакций на сообщения Олега (Requirements 8.x)
         content_downloader_router,  # Роутер для скачивания контента
         chat_join_router,  # Роутер для обработки событий добавления в чат

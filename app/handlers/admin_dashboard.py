@@ -130,7 +130,6 @@ class AdminDashboard:
         
         keyboard.button(text="📝 Дневной отчёт", callback_data=f"adm_summary_{chat_id}")
         keyboard.button(text="📖 Сгенерить историю", callback_data=f"adm_story_{chat_id}")
-        keyboard.button(text="💬 Сгенерить цитаты", callback_data=f"adm_quotes_{chat_id}")
         keyboard.button(text="🧹 Очистить контекст", callback_data=f"adm_clear_{chat_id}")
         keyboard.button(text="🔄 Перезапуск бота", callback_data=f"adm_restart_{chat_id}")
         keyboard.button(text="🔙 Назад", callback_data=f"adm_chat_{chat_id}")
@@ -505,55 +504,6 @@ async def cb_generate_story(callback: CallbackQuery, bot: Bot):
         
         await callback.message.edit_text(
             f"❌ Ошибка генерации истории: {str(e)[:100]}",
-            reply_markup=keyboard.as_markup()
-        )
-
-
-@router.callback_query(F.data.startswith("adm_quotes_"))
-async def cb_generate_quotes(callback: CallbackQuery, bot: Bot):
-    """Generate quotes. Requirements: 7.5"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    
-    await callback.answer("Генерирую цитаты...", show_alert=False)
-    
-    try:
-        from app.services.ollama_client import generate_creative
-        
-        async with get_session()() as session:
-            chat = await session.get(Chat, chat_id)
-            chat_title = chat.title if chat else "Чат"
-        
-        # generate_creative randomly picks quotes, story, joke, or poem
-        # Call it to get creative content
-        quotes = await generate_creative(chat_id)
-        
-        # Send quotes to the chat
-        target_topic = chat.creative_topic_id if chat else None
-        await bot.send_message(
-            chat_id=chat_id,
-            text=quotes,
-            message_thread_id=target_topic
-        )
-        
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="🔙 Назад", callback_data=f"adm_act_{chat_id}")
-        
-        await callback.message.edit_text(
-            f"✅ Контент отправлен в чат '{chat_title}'",
-            reply_markup=keyboard.as_markup()
-        )
-        
-    except Exception as e:
-        logger.error(f"Error generating quotes: {e}")
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text="🔙 Назад", callback_data=f"adm_act_{chat_id}")
-        
-        await callback.message.edit_text(
-            f"❌ Ошибка генерации цитат: {str(e)[:100]}",
             reply_markup=keyboard.as_markup()
         )
 

@@ -55,7 +55,6 @@ class BotFeatures:
             "rate_limit": settings.rate_limit_enabled,
             "web_search": settings.ollama_web_search_enabled,
             "games": True,  # Игры всегда включены по умолчанию
-            "quotes": True,  # Цитаты
             "vision": True,  # Анализ изображений
             "random_responses": True,  # Случайные ответы
             "summarizer": True,  # Пересказ контента
@@ -96,7 +95,6 @@ FEATURE_NAMES = {
     "rate_limit": "⏱ Rate Limiting",
     "web_search": "🌐 Веб-поиск",
     "games": "🎮 Игры",
-    "quotes": "💬 Цитаты",
     "vision": "👁 Анализ изображений",
     "random_responses": "🎲 Случайные ответы",
     "summarizer": "📝 Пересказ контента",
@@ -1128,10 +1126,10 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
             User, MessageLog, GameStat, Wallet, Achievement, UserAchievement,
             TradeOffer, Auction, Bid, Quest, UserQuest, Guild, GuildMember,
             TeamWar, TeamWarParticipant, DuoTeam, DuoStat, GlobalStats,
-            UserQuestionHistory, Quote, Chat, Admin, PrivateChat,
+            UserQuestionHistory, Chat, Admin, PrivateChat,
             PendingVerification, GameChallenge, UserBalance,
             Tournament, TournamentScore,
-            UserElo, NotificationConfig, StickerPack
+            UserElo, NotificationConfig
         )
         from sqlalchemy import delete
         
@@ -1146,7 +1144,6 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
                 (PendingVerification, "PendingVerification"),
                 (PrivateChat, "PrivateChat"),
                 (Admin, "Admin"),
-                (Quote, "Quote"),
                 (UserQuestionHistory, "UserQuestionHistory"),
                 (GlobalStats, "GlobalStats"),
                 (DuoStat, "DuoStat"),
@@ -1465,7 +1462,7 @@ async def cb_owner_stats(callback: CallbackQuery):
     
     async_session = get_session()
     async with async_session() as session:
-        from app.database.models import GameStat, Quote, MessageLog
+        from app.database.models import GameStat, MessageLog
         from datetime import timedelta
         
         # Общее количество пользователей
@@ -1514,12 +1511,6 @@ async def cb_owner_stats(callback: CallbackQuery):
         
         # Всего grow операций
         total_grows = await session.scalar(select(func.sum(GameStat.grow_count))) or 0
-        
-        # Количество цитат
-        total_quotes = await session.scalar(select(func.count(Quote.id)))
-        
-        # Лайков на цитатах
-        total_likes = await session.scalar(select(func.sum(Quote.likes_count))) or 0
     
     text = "📈 <b>Общая статистика бота</b>\n\n"
     
@@ -1540,11 +1531,7 @@ async def cb_owner_stats(callback: CallbackQuery):
     text += f"├ Игроков: {total_players or 0}\n"
     text += f"├ Общий размер: {total_size:,} см\n"
     text += f"├ PvP побед: {total_pvp_wins:,}\n"
-    text += f"└ Grow операций: {total_grows:,}\n\n"
-    
-    text += "<b>💬 Цитаты:</b>\n"
-    text += f"├ Всего: {total_quotes or 0}\n"
-    text += f"└ Лайков: {total_likes:,}\n"
+    text += f"└ Grow операций: {total_grows:,}\n"
     
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Обновить", callback_data="owner_stats")
@@ -2339,7 +2326,6 @@ async def cb_owner_wipe_menu(callback: CallbackQuery):
     kb = InlineKeyboardBuilder()
     kb.button(text="🧠 RAG память (ChromaDB)", callback_data="owner_wipe_rag")
     kb.button(text="🎮 Игровая статистика", callback_data="owner_wipe_games")
-    kb.button(text="💬 Цитаты", callback_data="owner_wipe_quotes")
     kb.button(text="📝 Логи сообщений", callback_data="owner_wipe_messages")
     kb.button(text="👥 Пользователи и чаты", callback_data="owner_wipe_users")
     kb.button(text="🏆 Достижения и квесты", callback_data="owner_wipe_achievements")
@@ -2352,7 +2338,6 @@ async def cb_owner_wipe_menu(callback: CallbackQuery):
         "Выбери что хочешь сбросить:\n\n"
         "• <b>RAG память</b> — векторная БД (ChromaDB)\n"
         "• <b>Игровая статистика</b> — размеры, PvP, казино\n"
-        "• <b>Цитаты</b> — все сохранённые цитаты\n"
         "• <b>Логи сообщений</b> — история сообщений\n"
         "• <b>Пользователи и чаты</b> — все юзеры и группы\n"
         "• <b>Достижения и квесты</b> — прогресс игроков\n\n"
@@ -2514,60 +2499,6 @@ async def cb_owner_wipe_games_exec(callback: CallbackQuery):
     await callback.message.edit_text(
         "🎮 <b>Вайп игр завершён</b>\n\n" +
         "\n".join(results),
-        reply_markup=kb.as_markup()
-    )
-
-
-@router.callback_query(F.data == "owner_wipe_quotes")
-async def cb_owner_wipe_quotes(callback: CallbackQuery):
-    """Подтверждение вайпа цитат."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещён", show_alert=True)
-        return
-    
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да, удалить цитаты", callback_data="owner_wipe_quotes_exec")
-    kb.button(text="❌ Отмена", callback_data="owner_wipe_menu")
-    kb.adjust(1)
-    
-    await callback.message.edit_text(
-        "💬 <b>Вайп цитат</b>\n\n"
-        "Это удалит все сохранённые цитаты пользователей.\n\n"
-        "⚠️ Действие необратимо!",
-        reply_markup=kb.as_markup()
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "owner_wipe_quotes_exec")
-async def cb_owner_wipe_quotes_exec(callback: CallbackQuery):
-    """Выполнение вайпа цитат."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещён", show_alert=True)
-        return
-    
-    await callback.answer("⏳ Выполняется...")
-    
-    try:
-        from app.database.models import Quote
-        from sqlalchemy import delete
-        
-        async with get_session()() as session:
-            result = await session.execute(delete(Quote))
-            await session.commit()
-            count = result.rowcount
-    except Exception as e:
-        count = f"Ошибка: {e}"
-
-    
-    logger.warning(f"QUOTES WIPE executed by owner {callback.from_user.id}")
-    
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔙 К меню вайпа", callback_data="owner_wipe_menu")
-    kb.adjust(1)
-    
-    await callback.message.edit_text(
-        f"💬 <b>Вайп цитат завершён</b>\n\n✅ Удалено: {count}",
         reply_markup=kb.as_markup()
     )
 

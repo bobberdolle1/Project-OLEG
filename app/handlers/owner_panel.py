@@ -93,7 +93,6 @@ bot_features = BotFeatures()
 FEATURE_NAMES = {
     "voice_recognition": "🎤 Распознавание голоса",
     "content_download": "📥 Загрузка контента",
-    "toxicity_analysis": "🧪 Анализ токсичности",
     "rate_limit": "⏱ Rate Limiting",
     "web_search": "🌐 Веб-поиск",
     "games": "🎮 Игры",
@@ -519,7 +518,6 @@ async def cb_owner_chat_detail(callback: CallbackQuery, bot: Bot):
         f"💬 <b>{chat.title}</b>\n\n"
         f"ID: <code>{chat.id}</code>\n"
         f"Тип: {'Форум' if chat.is_forum else 'Группа'}\n"
-        f"Режим модерации: {chat.moderation_mode or 'normal'}\n"
         f"Добавлен: {chat.created_at.strftime('%d.%m.%Y') if chat.created_at else 'N/A'}\n"
     )
     
@@ -816,8 +814,7 @@ async def cb_owner_settings(callback: CallbackQuery):
         f"├ Memory: {settings.ollama_memory_model}\n"
         f"├ Timeout: {settings.ollama_timeout}s\n\n"
         f"<b>Лимиты:</b>\n"
-        f"├ Rate limit: {settings.rate_limit_requests}/{settings.rate_limit_window}s\n"
-        f"├ Токсичность: {settings.toxicity_threshold}%\n\n"
+        f"├ Rate limit: {settings.rate_limit_requests}/{settings.rate_limit_window}s\n\n"
         f"<b>Медиа:</b>\n"
         f"├ Whisper: {settings.whisper_model}\n"
         f"├ Голос: {'✅' if settings.voice_recognition_enabled else '❌'}\n"
@@ -1131,10 +1128,9 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
             User, MessageLog, GameStat, Wallet, Achievement, UserAchievement,
             TradeOffer, Auction, Bid, Quest, UserQuest, Guild, GuildMember,
             TeamWar, TeamWarParticipant, DuoTeam, DuoStat, GlobalStats,
-            UserQuestionHistory, SpamPattern, Warning, ToxicityConfig, ToxicityLog,
-            Quote, ModerationConfig, Chat, Admin, Blacklist, PrivateChat,
-            PendingVerification, GameChallenge, UserBalance, CitadelConfig,
-            UserReputation, ReputationHistory, Tournament, TournamentScore,
+            UserQuestionHistory, Quote, Chat, Admin, PrivateChat,
+            PendingVerification, GameChallenge, UserBalance,
+            Tournament, TournamentScore,
             UserElo, NotificationConfig, StickerPack
         )
         from sqlalchemy import delete
@@ -1144,22 +1140,13 @@ async def cb_owner_wipe_execute(callback: CallbackQuery):
             tables_to_clear = [
                 (TournamentScore, "TournamentScore"),
                 (Tournament, "Tournament"),
-                (ReputationHistory, "ReputationHistory"),
-                (UserReputation, "UserReputation"),
                 (NotificationConfig, "NotificationConfig"),
-                (CitadelConfig, "CitadelConfig"),
                 (UserBalance, "UserBalance"),
                 (GameChallenge, "GameChallenge"),
                 (PendingVerification, "PendingVerification"),
                 (PrivateChat, "PrivateChat"),
-                (Blacklist, "Blacklist"),
                 (Admin, "Admin"),
-                (ModerationConfig, "ModerationConfig"),
                 (Quote, "Quote"),
-                (ToxicityLog, "ToxicityLog"),
-                (ToxicityConfig, "ToxicityConfig"),
-                (Warning, "Warning"),
-                (SpamPattern, "SpamPattern"),
                 (UserQuestionHistory, "UserQuestionHistory"),
                 (GlobalStats, "GlobalStats"),
                 (DuoStat, "DuoStat"),
@@ -2680,13 +2667,12 @@ async def cb_owner_wipe_users_exec(callback: CallbackQuery):
     
     results = []
     try:
-        from app.database.models import User, Chat, PrivateChat, Admin, Blacklist
+        from app.database.models import User, Chat, PrivateChat, Admin
         from sqlalchemy import delete
         
         async with get_session()() as session:
             # Порядок важен из-за FK
             r1 = await session.execute(delete(Admin))
-            r2 = await session.execute(delete(Blacklist))
             r3 = await session.execute(delete(PrivateChat))
             r4 = await session.execute(delete(Chat))
             # User удаляем последним (много FK ссылаются на него)

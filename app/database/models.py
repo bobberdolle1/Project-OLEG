@@ -16,7 +16,6 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     status: Mapped[str] = mapped_column(String(16), default='active', index=True)  # active, left
-    strikes: Mapped[int] = mapped_column(Integer, default=0)
     # Fortress Update: Global reputation score
     reputation_score: Mapped[int] = mapped_column(Integer, default=1000)
 
@@ -25,10 +24,7 @@ class User(Base):
     user_quests: Mapped[list["UserQuest"]] = relationship(back_populates="user")
     guild_memberships: Mapped[list["GuildMember"]] = relationship(back_populates="user")
     question_history: Mapped[list["UserQuestionHistory"]] = relationship(back_populates="user")
-    warnings: Mapped[list["Warning"]] = relationship(back_populates="user")
     quotes: Mapped[list["Quote"]] = relationship(back_populates="user")
-    admin_roles: Mapped[list["Admin"]] = relationship(back_populates="user")
-    blacklist_entries: Mapped[list["Blacklist"]] = relationship(back_populates="user")
     private_chat: Mapped["PrivateChat"] = relationship(back_populates="user", uselist=False)
 
 
@@ -275,49 +271,6 @@ class UserQuestionHistory(Base):
     user: Mapped["User"] = relationship(back_populates="question_history")
 
 
-class SpamPattern(Base):
-    __tablename__ = "spam_patterns"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pattern: Mapped[str] = mapped_column(String(255), unique=True)
-    is_regex: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-
-class Warning(Base):
-    __tablename__ = "warnings"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    moderator_id: Mapped[int] = mapped_column(BigInteger)
-    reason: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-
-    user: Mapped["User"] = relationship(back_populates="warnings")
-
-class ToxicityConfig(Base):
-    __tablename__ = "toxicity_configs"
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    threshold: Mapped[int] = mapped_column(Integer, default=75) # 0-100
-    action: Mapped[str] = mapped_column(String(64), default="warn") # "warn", "delete", "mute"
-    mute_duration: Mapped[int] = mapped_column(Integer, default=5) # in minutes
-
-
-
-
-
-class ToxicityLog(Base):
-    __tablename__ = "toxicity_logs"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    message_text: Mapped[str] = mapped_column(Text)
-    score: Mapped[float] = mapped_column(Float)
-    category: Mapped[Optional[str]] = mapped_column(String(128))
-    action_taken: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-
-
 class Quote(Base):
     __tablename__ = "quotes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -359,19 +312,6 @@ class QuoteVote(Base):
     )
 
 
-class ModerationConfig(Base):
-    __tablename__ = "moderation_configs"
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    mode: Mapped[str] = mapped_column(String(20), default="normal")  # light, normal, dictatorship
-    enabled_features: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON строка с настройками
-    banned_words: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON строка с запрещенными словами
-    flood_threshold: Mapped[int] = mapped_column(Integer, default=5)  # Порог флуда
-    spam_link_protection: Mapped[bool] = mapped_column(Boolean, default=True)
-    swear_filter: Mapped[bool] = mapped_column(Boolean, default=True)
-    auto_warn_threshold: Mapped[int] = mapped_column(Integer, default=3)  # Порог для авто-варнов
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
-
-
 class Chat(Base):
     __tablename__ = "chats"
 
@@ -383,42 +323,21 @@ class Chat(Base):
     creative_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     active_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Топик где бот активен
     auto_reply_chance: Mapped[float] = mapped_column(Float, default=0.0)  # Шанс автоответа (0.0-1.0)
-    
-    moderation_mode: Mapped[str] = mapped_column(String(20), default="normal")
 
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-    # Fortress Update: DEFCON level and owner notifications
-    defcon_level: Mapped[int] = mapped_column(Integer, default=1)  # 1=Peaceful, 2=Strict, 3=Martial Law
-    owner_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Admin(Base):
     __tablename__ = "admins"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_user_id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     role: Mapped[str] = mapped_column(String(20), default="moderator")  # 'owner', 'moderator'
     added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Кто добавил
     added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-
-    # Связь с пользователем
-    user: Mapped["User"] = relationship(back_populates="admin_roles", foreign_keys=[user_id])
-
-
-class Blacklist(Base):
-    __tablename__ = "blacklist"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_user_id"), index=True)
-    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # Если NULL, то глобальный бан
-    reason: Mapped[str] = mapped_column(Text)
-    added_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-
-    user: Mapped["User"] = relationship(back_populates="blacklist_entries", foreign_keys=[user_id])
 
 
 class PrivateChat(Base):
@@ -479,46 +398,6 @@ class UserBalance(Base):
 # ============================================================================
 
 
-class CitadelConfig(Base):
-    """DEFCON protection configuration per chat (Requirement 1.1)."""
-    __tablename__ = "citadel_configs"
-    
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    defcon_level: Mapped[int] = mapped_column(Integer, default=1)  # 1=Peaceful, 2=Strict, 3=Martial Law
-    raid_mode_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    anti_spam_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    profanity_filter_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    sticker_limit: Mapped[int] = mapped_column(Integer, default=0)  # 0 = disabled
-    forward_block_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    new_user_restriction_hours: Mapped[int] = mapped_column(Integer, default=24)
-    hard_captcha_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    gif_patrol_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # GIF moderation (work in progress)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
-
-
-class UserReputation(Base):
-    """User reputation score per chat (Requirement 4.1)."""
-    __tablename__ = "user_reputations"
-    
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    score: Mapped[int] = mapped_column(Integer, default=1000)
-    is_read_only: Mapped[bool] = mapped_column(Boolean, default=False)
-    last_change_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
-
-
-class ReputationHistory(Base):
-    """Reputation change history (Requirement 4.8)."""
-    __tablename__ = "reputation_history"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    change_amount: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
-
-
 class Tournament(Base):
     """Tournament tracking (Requirement 10.1)."""
     __tablename__ = "tournaments"
@@ -562,11 +441,6 @@ class NotificationConfig(Base):
     
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    raid_alert: Mapped[bool] = mapped_column(Boolean, default=True)
-    ban_notification: Mapped[bool] = mapped_column(Boolean, default=True)
-    toxicity_warning: Mapped[bool] = mapped_column(Boolean, default=True)
-    defcon_recommendation: Mapped[bool] = mapped_column(Boolean, default=True)
-    repeated_violator: Mapped[bool] = mapped_column(Boolean, default=True)
     daily_tips: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
@@ -594,15 +468,6 @@ class SecurityBlacklist(Base):
     reason: Mapped[str] = mapped_column(Text)
     blacklisted_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
-
-
-class RateLimit(Base):
-    """Rate limit tracking (fallback when Redis unavailable) (Requirement 17.2)."""
-    __tablename__ = "rate_limits"
-    
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    window_start: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
-    message_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class DailiesConfig(Base):
@@ -693,55 +558,6 @@ class ChatRateLimitConfig(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     llm_requests_per_minute: Mapped[int] = mapped_column(Integer, default=20)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
-
-
-class ProtectionProfileConfig(Base):
-    """
-    Protection profile configuration per chat (Requirements 10.1, 10.2, 10.3, 10.4).
-    
-    Stores the selected protection profile and custom settings.
-    Profiles: standard, strict, bunker, custom
-    """
-    __tablename__ = "protection_profile_config"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
-    profile: Mapped[str] = mapped_column(String(20), default="standard")  # standard, strict, bunker, custom
-    
-    # Custom settings (used when profile="custom" or to override defaults)
-    anti_spam_links: Mapped[bool] = mapped_column(Boolean, default=True)
-    captcha_type: Mapped[str] = mapped_column(String(10), default="button")  # button, hard
-    profanity_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
-    neural_ad_filter: Mapped[bool] = mapped_column(Boolean, default=False)
-    block_forwards: Mapped[bool] = mapped_column(Boolean, default=False)
-    sticker_limit: Mapped[int] = mapped_column(Integer, default=0)  # 0 = unlimited
-    mute_newcomers: Mapped[bool] = mapped_column(Boolean, default=False)
-    block_media_non_admin: Mapped[bool] = mapped_column(Boolean, default=False)
-    aggressive_profanity: Mapped[bool] = mapped_column(Boolean, default=False)
-    
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
-
-
-class SilentBan(Base):
-    """
-    Silent ban tracking for suspicious users (Requirements 9.4, 9.5).
-    
-    Users under silent ban have their messages deleted without notification.
-    They can be unbanned by passing a captcha challenge.
-    """
-    __tablename__ = "silent_bans"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    captcha_answer: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # Expected answer for unban
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    __table_args__ = (
-        UniqueConstraint('user_id', 'chat_id', name='uq_user_chat_silent_ban'),
-    )
 
 
 # ============================================================================

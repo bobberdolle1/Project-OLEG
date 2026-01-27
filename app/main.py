@@ -30,14 +30,12 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db, async_session
 from app.database.models import Chat
-from app.handlers import qna, games, moderation, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
+from app.handlers import qna, games, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, quotes, vision, random_responses, help
 from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
 from app.handlers.stickers import router as stickers_router
 from app.handlers.tournaments import router as tournaments_router
 from app.handlers.health import router as health_router
-from app.handlers.private_admin import router as private_admin_router
-from app.handlers.admin_dashboard import router as admin_dashboard_router
 from app.handlers.chat_join import router as chat_join_router
 from app.handlers.voice import router as voice_router
 from app.handlers.summarizer import router as summarizer_router
@@ -47,6 +45,7 @@ from app.handlers.tips import router as tips_router
 from app.handlers.blackjack import router as blackjack_router
 from app.handlers.broadcast import router as broadcast_router
 from app.handlers.owner_panel import router as owner_panel_router
+from app.handlers.admin_dashboard import router as admin_dashboard_router
 from app.handlers.mini_games import router as mini_games_router
 from app.handlers.shop import router as shop_router
 from app.handlers.inventory import router as inventory_router
@@ -54,13 +53,7 @@ from app.services.content_downloader import router as content_downloader_router
 from app.handlers.quotes import reactions_router
 from app.handlers.reactions import router as oleg_reactions_router
 from app.handlers.marriages import router as marriages_router
-from app.handlers import antiraid
 from app.middleware.logging import MessageLoggerMiddleware
-from app.middleware.spam_filter import SpamFilterMiddleware, load_spam_patterns
-from app.middleware.spam_control import SpamControlMiddleware
-from app.middleware.mode_filter import ModeFilterMiddleware
-from app.middleware.toxicity_analysis import ToxicityAnalysisMiddleware
-from app.middleware.blacklist_filter import BlacklistMiddleware
 from app.middleware.anti_click import AntiClickMiddleware
 from app.middleware.feature_toggle import FeatureToggleMiddleware
 from app.middleware.sdoc_filter import SDOCFilterMiddleware
@@ -129,14 +122,7 @@ async def on_startup(bot: Bot, dp: Dispatcher):
     await setup_scheduler(bot)
     logger.info("Планировщик запущен")
 
-    logger.info("Загрузка спам-паттернов...")
-    from app.middleware.spam_filter import load_spam_patterns, load_moderation_configs
-    await load_spam_patterns()
-    logger.info("Спам-паттерны загружены")
 
-    logger.info("Загрузка конфигураций модерации...")
-    await load_moderation_configs()
-    logger.info("Конфигурации модерации загружены")
 
     # Инициализация антиспама
     if settings.antispam_enabled:
@@ -318,11 +304,6 @@ def build_dp() -> Dispatcher:
         dp.message.outer_middleware(SDOCFilterMiddleware())
     
     dp.message.middleware(MessageLoggerMiddleware())
-    dp.message.middleware(BlacklistMiddleware())  # Middleware для проверки черного списка
-    dp.message.middleware(ModeFilterMiddleware())  # Middleware для режимов модерации
-    dp.message.middleware(SpamFilterMiddleware())
-    dp.message.middleware(SpamControlMiddleware())  # Middleware для защиты от "дрючки"
-    dp.message.middleware(ToxicityAnalysisMiddleware())
     dp.message.middleware(FeatureToggleMiddleware())  # Проверка включенных функций
     
     # Rate limiting (should be one of the first middlewares)
@@ -336,10 +317,9 @@ def build_dp() -> Dispatcher:
     dp.include_routers(
         health_router,  # Health check должен быть первым для быстрого ответа
         help.router,  # Help должен быть вторым для приоритета
-        private_admin_router,  # Роутер для админ-панели в ЛС (до qna!)
         owner_panel_router,  # Панель владельца бота /owner (до qna!)
+        admin_dashboard_router,  # Admin dashboard /admin (до qna!)
         broadcast_router,  # Broadcast wizard for admin announcements (Requirements 13.x)
-        admin_dashboard_router,  # Роутер для расширенной админ-панели владельца (Requirements 7.x)
         game_hub_router,  # Game Hub UI (Requirements 1.x) - before games for /games priority
         challenges_router,  # PvP challenges with consent (Requirements 8.x)
         blackjack_router,  # Blackjack game (Requirements 9.x)
@@ -348,8 +328,6 @@ def build_dp() -> Dispatcher:
         inventory_router,  # Unified inventory system v7.6 (Requirements 1.x)
         tournaments_router,  # Tournament standings (Requirements 10.5)
         games.router,
-        moderation.router,
-        antiraid.router,
         voice_router,  # Роутер для голосовых сообщений (до qna, чтобы перехватить voice)
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
         tips_router,  # Советы для админов

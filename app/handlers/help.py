@@ -89,35 +89,6 @@ HELP_GAMES = """
 /cockfight — 🐔 Петушиные бои
 """
 
-HELP_MODERATION = """
-🛡 <b>Модерация (для админов)</b>
-
-<b>Быстрые команды:</b>
-олег бан @user [время] [причина]
-олег мут @user [время] [причина]
-олег кик @user [причина]
-олег режим [light|normal|dictatorship]
-
-<b>Предупреждения:</b>
-/warn — Выдать предупреждение (реплай)
-/unwarn — Снять предупреждение
-/strikes @user — Посмотреть страйки
-
-<b>Режимы модерации:</b>
-• <b>light</b> — минимальная модерация
-• <b>normal</b> — стандартный режим
-• <b>dictatorship</b> — строгий режим
-
-<b>Настройка:</b>
-/admin — Админ-панель в ЛС
-
-<b>Автоматическая защита:</b>
-• Антираид (авто-бан при массовом вступлении)
-• Анализ токсичности
-• Спам-фильтр
-• GIF-патруль (NSFW детекция)
-"""
-
 HELP_QUOTES = """
 💬 <b>Цитаты</b>
 
@@ -226,7 +197,6 @@ def build_help_menu(is_private: bool = False) -> InlineKeyboardBuilder:
         kb.button(text="🧠 Возможности", callback_data="help_features")
         kb.button(text="🎮 Игры", callback_data="help_games")
         kb.button(text="👥 Социальное", callback_data="help_social")
-        kb.button(text="🛡 Модерация", callback_data="help_moderation")
         kb.button(text="💬 Цитаты", callback_data="help_quotes")
         kb.button(text="⚙️ Управление", callback_data="help_admin")
         kb.adjust(2, 2, 2)
@@ -271,7 +241,6 @@ async def cb_help_section(callback: CallbackQuery):
         "features": HELP_FEATURES,
         "games": HELP_GAMES,
         "social": HELP_SOCIAL,
-        "moderation": HELP_MODERATION,
         "quotes": HELP_QUOTES,
         "admin": HELP_ADMIN,
     }

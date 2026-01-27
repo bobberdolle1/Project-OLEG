@@ -275,16 +275,8 @@ async def get_current_chat_toxicity(chat_id: int) -> float:
     Returns:
         Уровень токсичности от 0 до 100
     """
-    # Временно возвращаем фиксированное значение
-    # В реальной реализации будет вызов функции анализа токсичности
-    from app.services.ollama_client import analyze_chat_toxicity
-
-    try:
-        toxicity_percentage, _ = await analyze_chat_toxicity(24)
-        return toxicity_percentage
-    except Exception as e:
-        logger.error(f"Ошибка при анализе токсичности: {e}")
-        return 0.0  # Возвращаем 0 при ошибке
+    # Функция токсичности удалена вместе с системой модерации
+    return 0.0
 
 
 async def adjust_toxicity_for_private_chat(user_id: int, text: str) -> float:

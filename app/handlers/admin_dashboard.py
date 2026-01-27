@@ -18,7 +18,7 @@ from sqlalchemy import select, func, desc
 
 from app.database.session import get_session
 from app.database.models import (
-    Chat, User, Blacklist, ToxicityLog, MessageLog
+    Chat, User, MessageLog
 )
 from app.config import settings
 from app.utils import utc_now
@@ -30,23 +30,15 @@ router = Router()
 
 class AdminStates(StatesGroup):
     """FSM states for admin dashboard."""
-    waiting_for_blacklist_user = State()
-    waiting_for_blacklist_reason = State()
+    pass
 
 
 class AdminDashboard:
     """
     Admin dashboard for bot owner management.
-    Provides inline button menu for managing chats, moderation, behavior, and statistics.
+    Provides inline button menu for managing chats, behavior, and statistics.
     Requirements: 7.1, 7.2
     """
-    
-    MODERATION_MODES = ["light", "normal", "toxic"]
-    MODE_NAMES = {
-        "light": "🟢 Лайт",
-        "normal": "🟡 Норма", 
-        "toxic": "🔴 Токсик"
-    }
     
     @staticmethod
     async def get_owner_chats(bot: Bot, user_id: int) -> List[Chat]:
@@ -98,34 +90,15 @@ class AdminDashboard:
         """
         keyboard = InlineKeyboardBuilder()
         
-        keyboard.button(text="🛡 Модерация", callback_data=f"adm_mod_{chat_id}")
         keyboard.button(text="⚙️ Поведение", callback_data=f"adm_beh_{chat_id}")
         keyboard.button(text="🎬 Действия", callback_data=f"adm_act_{chat_id}")
         keyboard.button(text="📊 Статистика", callback_data=f"adm_stats_{chat_id}")
         keyboard.button(text="🔙 Назад", callback_data="adm_back_main")
         
-        keyboard.adjust(2, 2, 1)
+        keyboard.adjust(3, 1)
         return keyboard
     
-    @staticmethod
-    async def build_moderation_menu(chat_id: int) -> InlineKeyboardBuilder:
-        """
-        Build moderation section menu.
-        Requirements: 7.3
-        """
-        async with get_session()() as session:
-            chat = await session.get(Chat, chat_id)
-            current_mode = chat.moderation_mode if chat else "normal"
-        
-        mode_display = AdminDashboard.MODE_NAMES.get(current_mode, current_mode)
-        
-        keyboard = InlineKeyboardBuilder()
-        keyboard.button(text=f"Режим: {mode_display}", callback_data=f"adm_mode_{chat_id}")
-        keyboard.button(text="🔨 Банхаммер", callback_data=f"adm_ban_{chat_id}")
-        keyboard.button(text="🔙 Назад", callback_data=f"adm_chat_{chat_id}")
-        
-        keyboard.adjust(1)
-        return keyboard
+
     
     @staticmethod
     async def build_behavior_menu(chat_id: int) -> InlineKeyboardBuilder:
@@ -182,21 +155,6 @@ class AdminDashboard:
             )
             message_count = msg_count_result.scalar() or 0
             
-            # Get top toxic users
-            toxic_result = await session.execute(
-                select(
-                    ToxicityLog.user_id,
-                    func.count(ToxicityLog.id).label('count'),
-                    func.avg(ToxicityLog.score).label('avg_score')
-                )
-                .where(ToxicityLog.chat_id == chat_id)
-                .where(ToxicityLog.created_at >= yesterday)
-                .group_by(ToxicityLog.user_id)
-                .order_by(desc('count'))
-                .limit(5)
-            )
-            top_toxic = toxic_result.all()
-            
             # Get active users count
             active_users_result = await session.execute(
                 select(func.count(func.distinct(MessageLog.user_id)))
@@ -207,8 +165,7 @@ class AdminDashboard:
             
         return {
             "message_count": message_count,
-            "active_users": active_users,
-            "top_toxic": top_toxic
+            "active_users": active_users
         }
     
     @staticmethod
@@ -360,261 +317,6 @@ async def cb_chat_menu(callback: CallbackQuery):
         reply_markup=keyboard.as_markup()
     )
     await callback.answer()
-
-
-# ============================================================================
-# Moderation Section - Requirements: 7.3
-# ============================================================================
-
-@router.callback_query(F.data.startswith("adm_mod_"))
-async def cb_moderation_menu(callback: CallbackQuery):
-    """Show moderation section. Requirements: 7.3"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    keyboard = await dashboard.build_moderation_menu(chat_id)
-    
-    await callback.message.edit_text(
-        "🛡 <b>Модерация</b>\n\n"
-        "Настройки модерации чата:",
-        reply_markup=keyboard.as_markup()
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("adm_mode_"))
-async def cb_cycle_mode(callback: CallbackQuery):
-    """Cycle moderation mode. Requirements: 7.3"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    
-    async with get_session()() as session:
-        chat = await session.get(Chat, chat_id)
-        if not chat:
-            await callback.answer("Чат не найден", show_alert=True)
-            return
-        
-        # Cycle through modes: light -> normal -> toxic -> light
-        current_idx = dashboard.MODERATION_MODES.index(chat.moderation_mode) \
-            if chat.moderation_mode in dashboard.MODERATION_MODES else 1
-        next_idx = (current_idx + 1) % len(dashboard.MODERATION_MODES)
-        new_mode = dashboard.MODERATION_MODES[next_idx]
-        
-        chat.moderation_mode = new_mode
-        await session.commit()
-    
-    mode_display = dashboard.MODE_NAMES.get(new_mode, new_mode)
-    await callback.answer(f"Режим изменён на: {mode_display}", show_alert=True)
-    
-    # Refresh menu
-    keyboard = await dashboard.build_moderation_menu(chat_id)
-    await callback.message.edit_reply_markup(reply_markup=keyboard.as_markup())
-
-
-@router.callback_query(F.data.startswith("adm_ban_"))
-async def cb_banhammer_menu(callback: CallbackQuery):
-    """Show banhammer menu. Requirements: 7.3"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    
-    # Get current blacklist
-    async with get_session()() as session:
-        result = await session.execute(
-            select(Blacklist)
-            .where(Blacklist.chat_id == chat_id)
-            .order_by(Blacklist.added_at.desc())
-            .limit(10)
-        )
-        blacklist = result.scalars().all()
-    
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="➕ Добавить в ЧС", callback_data=f"adm_ban_add_{chat_id}")
-    
-    for entry in blacklist:
-        name = entry.username or str(entry.user_id)
-        keyboard.button(
-            text=f"❌ {name[:20]}", 
-            callback_data=f"adm_ban_rm_{chat_id}_{entry.id}"
-        )
-    
-    keyboard.button(text="🔙 Назад", callback_data=f"adm_mod_{chat_id}")
-    keyboard.adjust(1)
-    
-    text = "🔨 <b>Банхаммер</b>\n\n"
-    if blacklist:
-        text += f"В чёрном списке: {len(blacklist)} чел.\n"
-        text += "Нажми на имя, чтобы удалить из ЧС."
-    else:
-        text += "Чёрный список пуст."
-    
-    await callback.message.edit_text(text, reply_markup=keyboard.as_markup())
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("adm_ban_add_"))
-async def cb_ban_add_start(callback: CallbackQuery, state: FSMContext):
-    """Start adding user to blacklist. Requirements: 7.3"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[3])
-    await state.set_state(AdminStates.waiting_for_blacklist_user)
-    await state.update_data(chat_id=chat_id)
-    
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="❌ Отмена", callback_data=f"adm_ban_{chat_id}")
-    
-    await callback.message.edit_text(
-        "Введи ID пользователя или @username для добавления в ЧС:",
-        reply_markup=keyboard.as_markup()
-    )
-    await callback.answer()
-
-
-@router.message(AdminStates.waiting_for_blacklist_user)
-async def handle_blacklist_user_input(msg: Message, state: FSMContext, bot: Bot):
-    """Handle user input for blacklist. Requirements: 7.3"""
-    if not is_owner(msg.from_user.id):
-        return
-    
-    data = await state.get_data()
-    chat_id = data.get('chat_id')
-    
-    user_input = msg.text.strip()
-    user_id = None
-    username = None
-    
-    # Parse user ID or username
-    if user_input.startswith('@'):
-        username = user_input[1:]
-        # Try to resolve username
-        try:
-            chat_member = await bot.get_chat(f"@{username}")
-            user_id = chat_member.id
-        except Exception:
-            pass
-    elif user_input.isdigit():
-        user_id = int(user_input)
-    
-    if not user_id:
-        await msg.reply("Не удалось найти пользователя. Введи корректный ID или @username.")
-        return
-    
-    await state.update_data(target_user_id=user_id, target_username=username)
-    await state.set_state(AdminStates.waiting_for_blacklist_reason)
-    
-    await msg.reply("Введи причину бана (или 'skip' чтобы пропустить):")
-
-
-@router.message(AdminStates.waiting_for_blacklist_reason)
-async def handle_blacklist_reason(msg: Message, state: FSMContext):
-    """Handle reason input for blacklist. Requirements: 7.3"""
-    if not is_owner(msg.from_user.id):
-        return
-    
-    data = await state.get_data()
-    chat_id = data.get('chat_id')
-    user_id = data.get('target_user_id')
-    username = data.get('target_username')
-    
-    reason = msg.text.strip()
-    if reason.lower() == 'skip':
-        reason = "Без причины"
-    
-    # Add to blacklist
-    async with get_session()() as session:
-        # Check if already exists
-        existing = await session.execute(
-            select(Blacklist)
-            .where(Blacklist.user_id == user_id)
-            .where(Blacklist.chat_id == chat_id)
-        )
-        if existing.scalar():
-            await msg.reply("Пользователь уже в чёрном списке.")
-            await state.clear()
-            return
-        
-        entry = Blacklist(
-            user_id=user_id,
-            username=username,
-            chat_id=chat_id,
-            reason=reason,
-            added_by_user_id=msg.from_user.id
-        )
-        session.add(entry)
-        await session.commit()
-    
-    await state.clear()
-    
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="🔙 К банхаммеру", callback_data=f"adm_ban_{chat_id}")
-    
-    await msg.reply(
-        f"✅ Пользователь {username or user_id} добавлен в ЧС.\n"
-        f"Причина: {reason}",
-        reply_markup=keyboard.as_markup()
-    )
-
-
-@router.callback_query(F.data.startswith("adm_ban_rm_"))
-async def cb_ban_remove(callback: CallbackQuery):
-    """Remove user from blacklist. Requirements: 7.3"""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    chat_id = int(parts[3])
-    entry_id = int(parts[4])
-    
-    async with get_session()() as session:
-        entry = await session.get(Blacklist, entry_id)
-        if entry:
-            await session.delete(entry)
-            await session.commit()
-            await callback.answer("Удалён из ЧС", show_alert=True)
-        else:
-            await callback.answer("Запись не найдена", show_alert=True)
-    
-    # Refresh banhammer menu
-    async with get_session()() as session:
-        result = await session.execute(
-            select(Blacklist)
-            .where(Blacklist.chat_id == chat_id)
-            .order_by(Blacklist.added_at.desc())
-            .limit(10)
-        )
-        blacklist = result.scalars().all()
-    
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="➕ Добавить в ЧС", callback_data=f"adm_ban_add_{chat_id}")
-    
-    for entry in blacklist:
-        name = entry.username or str(entry.user_id)
-        keyboard.button(
-            text=f"❌ {name[:20]}", 
-            callback_data=f"adm_ban_rm_{chat_id}_{entry.id}"
-        )
-    
-    keyboard.button(text="🔙 Назад", callback_data=f"adm_mod_{chat_id}")
-    keyboard.adjust(1)
-    
-    text = "🔨 <b>Банхаммер</b>\n\n"
-    if blacklist:
-        text += f"В чёрном списке: {len(blacklist)} чел."
-    else:
-        text += "Чёрный список пуст."
-    
-    await callback.message.edit_text(text, reply_markup=keyboard.as_markup())
 
 
 # ============================================================================
@@ -977,20 +679,7 @@ async def cb_statistics_menu(callback: CallbackQuery, bot: Bot):
         # Build statistics text
         text = f"📊 <b>Статистика: {chat_title}</b>\n\n"
         text += f"📨 Сообщений за 24ч: {stats['message_count']}\n"
-        text += f"👥 Активных юзеров: {stats['active_users']}\n\n"
-        
-        if stats['top_toxic']:
-            text += "🔥 <b>Топ токсиков:</b>\n"
-            for i, (user_id, count, avg_score) in enumerate(stats['top_toxic'], 1):
-                # Try to get username
-                try:
-                    member = await bot.get_chat_member(chat_id, user_id)
-                    name = member.user.username or member.user.first_name or str(user_id)
-                except Exception:
-                    name = str(user_id)
-                text += f"{i}. @{name}: {count} нарушений (avg: {avg_score:.0f}%)\n"
-        else:
-            text += "🔥 Токсиков не обнаружено 👼\n"
+        text += f"👥 Активных юзеров: {stats['active_users']}\n"
         
         keyboard = InlineKeyboardBuilder()
         keyboard.button(text="📈 График активности", callback_data=f"adm_graph_{chat_id}")

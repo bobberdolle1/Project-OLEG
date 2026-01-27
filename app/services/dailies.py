@@ -459,7 +459,7 @@ class DailiesService:
         Returns:
             DailySummary if there was activity, None otherwise
         """
-        from app.database.models import MessageLog, User, Warning, ToxicityLog
+        from app.database.models import MessageLog, User
         from app.database.session import get_session
         from app.utils import utc_now
         
@@ -526,26 +526,9 @@ class DailiesService:
             )
             moderation_actions = moderation_result.scalar() or 0
             
-            # ===== NEW: Toxicity thermometer =====
-            toxicity_result = await session.execute(
-                select(
-                    func.avg(ToxicityLog.score),
-                    func.count(ToxicityLog.id)
-                ).filter(
-                    ToxicityLog.chat_id == chat_id,
-                    ToxicityLog.created_at >= yesterday_start,
-                    ToxicityLog.created_at < yesterday_end
-                )
-            )
-            toxicity_row = toxicity_result.one()
-            toxicity_score = float(toxicity_row[0] or 0)
-            toxicity_incidents = toxicity_row[1] or 0
-            
-            # Fallback: calculate toxicity from messages if ToxicityLog is empty
-            if toxicity_score == 0 and toxicity_incidents == 0:
-                toxicity_score, toxicity_incidents = await self._calculate_toxicity_from_messages(
-                    chat_id, yesterday_start, yesterday_end, session
-                )
+            # ===== NEW: Toxicity thermometer (заглушка) =====
+            toxicity_score = 0.0
+            toxicity_incidents = 0
             
             # ===== NEW: Peak activity hour =====
             peak_hour_result = await session.execute(

@@ -252,17 +252,8 @@ async def is_gif_patrol_enabled(chat_id: int) -> bool:
     Returns:
         True если GIF patrol включен
     """
-    try:
-        from app.services.citadel import citadel_service
-        from app.database.session import get_session
-        
-        async with get_session()() as session:
-            config = await citadel_service.get_config(chat_id, session)
-            # По умолчанию отключено, если поле не существует
-            return getattr(config, 'gif_patrol_enabled', False)
-    except Exception as e:
-        logger.warning(f"Error checking gif_patrol_enabled for chat {chat_id}: {e}")
-        return False
+    # GIF patrol отключен после удаления системы модерации
+    return False
 
 
 @router.message(F.animation)

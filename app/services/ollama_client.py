@@ -2624,9 +2624,10 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                 seen_texts.add(f['text'])
                 kb_facts.append(f['text'])
         
-        # Семантический поиск по полному тексту
+        # Семантический поиск по полному тексту - ТОЛЬКО если есть технические термины
+        # Это предотвращает возврат нерелевантных результатов из default_knowledge
         semantic_query = full_text_for_terms.strip()
-        if semantic_query and semantic_query != search_query:
+        if semantic_query and semantic_query != search_query and tech_terms:
             logger.info(f"[KB SEARCH] Семантический: '{semantic_query[:50]}...'")
             semantic_results = vector_db.search_facts(
                 collection_name=default_collection,
@@ -2647,6 +2648,8 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                         logger.info(f"[KB OK] dist={distance:.3f}: {f['text'][:50]}...")
                 seen_texts.add(f['text'])
                 kb_facts.append(f['text'])
+        elif not tech_terms:
+            logger.info(f"[KB SEARCH] Пропущен семантический поиск - нет технических терминов")
         
         kb_facts = kb_facts[:max_results]  # Final limit
         if kb_facts:
@@ -3786,9 +3789,10 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
                 seen_texts.add(fact['text'])
                 all_kb_facts.append(fact)
         
-        # 2b. Семантический поиск по полному тексту (если отличается от терминов)
+        # 2b. Семантический поиск по полному тексту - ТОЛЬКО если есть технические термины
+        # Это предотвращает возврат нерелевантных результатов из default_knowledge
         semantic_query = full_text_for_terms.strip()
-        if semantic_query and semantic_query != kb_search_query:
+        if semantic_query and semantic_query != kb_search_query and tech_terms:
             logger.info(f"[KB SEARCH] Семантический: '{semantic_query[:50]}...'")
             semantic_facts = vector_db.search_facts(
                 collection_name=default_collection,
@@ -3809,6 +3813,8 @@ async def retrieve_context_for_query(query: str, chat_id: int, n_results: int = 
                         logger.info(f"[KB OK] dist={distance:.3f}: {fact['text'][:50]}...")
                 seen_texts.add(fact['text'])
                 all_kb_facts.append(fact)
+        elif not tech_terms:
+            logger.info(f"[KB SEARCH] Пропущен семантический поиск - нет технических терминов")
         
         if all_kb_facts:
             # Apply reranking to KB facts if enabled

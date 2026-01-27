@@ -19,12 +19,114 @@ class TopicListener:
     
     Обрабатывает сообщения из любого топика супергруппы и сохраняет
     их в RAG с привязкой к chat_id и topic_id для меж-топикового восприятия.
+    
+    Сохраняет только релевантные сообщения:
+    - Сообщения где бот упомянут
+    - Ответы бота
+    - Сообщения в активном диалоге с ботом
     """
     
     COLLECTION_NAME = "chat_messages"
     
+    # Время активного диалога после упоминания бота (секунды)
+    ACTIVE_DIALOG_TIMEOUT = 300  # 5 минут
+    
     def __init__(self):
         self._vector_db = vector_db
+        # Словарь активных диалогов: {chat_id: timestamp последнего упоминания бота}
+        self._active_dialogs: Dict[int, float] = {}
+    
+    async def is_message_relevant(self, message: Message) -> bool:
+        """
+        Проверяет, является ли сообщение релевантным для сохранения в RAG.
+        
+        Релевантные сообщения:
+        1. Сообщения от бота (его ответы)
+        2. Сообщения где бот упомянут (@username или "олег")
+        3. Сообщения в активном диалоге (в течение 5 минут после упоминания бота)
+        4. Реплаи на сообщения бота
+        
+        Args:
+            message: Сообщение Telegram
+            
+        Returns:
+            True если сообщение релевантно и должно быть сохранено
+        """
+        import time
+        import re
+        
+        # Сохраняем только сообщения из групп/супергрупп
+        if message.chat.type not in ("group", "supergroup"):
+            return False
+        
+        if not message.text:
+            return False
+        
+        chat_id = message.chat.id
+        current_time = time.time()
+        
+        # 1. Сообщения от бота всегда релевантны
+        if message.from_user and message.from_user.is_bot:
+            # Обновляем время активного диалога
+            self._active_dialogs[chat_id] = current_time
+            logger.debug(f"[RAG RELEVANCE] YES - bot message, chat={chat_id}")
+            return True
+        
+        # 2. Проверяем упоминание бота
+        text_lower = message.text.lower()
+        
+        # Проверка @username
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == "mention":
+                    mention_text = message.text[entity.offset:entity.offset + entity.length]
+                    # Получаем username бота
+                    bot_username = None
+                    try:
+                        bot_username = message.bot._me.username if message.bot._me else None
+                    except:
+                        pass
+                    
+                    if bot_username and mention_text.lower() == f"@{bot_username.lower()}":
+                        self._active_dialogs[chat_id] = current_time
+                        logger.debug(f"[RAG RELEVANCE] YES - bot mentioned @{bot_username}, chat={chat_id}")
+                        return True
+        
+        # Проверка "олег" в тексте
+        oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
+        for trigger in oleg_triggers:
+            if re.search(rf'\b{trigger}\b', text_lower):
+                self._active_dialogs[chat_id] = current_time
+                logger.debug(f"[RAG RELEVANCE] YES - trigger '{trigger}', chat={chat_id}")
+                return True
+        
+        # 3. Проверяем реплай на сообщение бота
+        if message.reply_to_message:
+            if message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
+                self._active_dialogs[chat_id] = current_time
+                logger.debug(f"[RAG RELEVANCE] YES - reply to bot, chat={chat_id}")
+                return True
+        
+        # 4. Проверяем активный диалог
+        last_mention_time = self._active_dialogs.get(chat_id)
+        if last_mention_time:
+            time_since_mention = current_time - last_mention_time
+            if time_since_mention <= self.ACTIVE_DIALOG_TIMEOUT:
+                logger.debug(
+                    f"[RAG RELEVANCE] YES - active dialog ({time_since_mention:.0f}s ago), "
+                    f"chat={chat_id}"
+                )
+                return True
+            else:
+                # Диалог неактивен, удаляем из словаря
+                del self._active_dialogs[chat_id]
+                logger.debug(
+                    f"[RAG RELEVANCE] NO - dialog expired ({time_since_mention:.0f}s ago), "
+                    f"chat={chat_id}"
+                )
+        
+        logger.debug(f"[RAG RELEVANCE] NO - not relevant, chat={chat_id}")
+        return False
     
     def extract_topic_id(self, message: Message) -> Optional[int]:
         """
@@ -145,15 +247,24 @@ async def handle_all_messages(message: Message):
     """
     Глобальный обработчик всех текстовых сообщений для RAG.
     
+    Сохраняет только релевантные сообщения:
+    - Сообщения где бот упомянут (@username, "олег")
+    - Ответы бота
+    - Сообщения в активном диалоге с ботом (в течение 5 минут после упоминания)
+    
     Этот обработчик должен быть зарегистрирован с низким приоритетом,
     чтобы не блокировать другие обработчики.
     """
     # Логируем все входящие сообщения для отладки топиков
     topic_id = getattr(message, 'message_thread_id', None)
-    logger.info(
+    logger.debug(
         f"[TOPIC LISTENER] Получено сообщение: chat_id={message.chat.id}, "
         f"topic_id={topic_id}, chat_type={message.chat.type}, "
         f"is_forum={message.chat.is_forum}, text={message.text[:50] if message.text else 'empty'}..."
     )
     
-    await topic_listener.on_message(message)
+    # Проверяем релевантность сообщения перед сохранением
+    if await topic_listener.is_message_relevant(message):
+        await topic_listener.on_message(message)
+    else:
+        logger.debug(f"[TOPIC LISTENER] Сообщение не релевантно, пропускаем сохранение в RAG")

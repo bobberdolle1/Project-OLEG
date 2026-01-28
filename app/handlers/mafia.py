@@ -79,16 +79,10 @@ async def cmd_mafia_start(message: Message, bot: Bot):
     async with async_session() as session:
         service = MafiaGameService(session)
         
-        # Check for existing game
-        existing_game = await service.get_active_game(message.chat.id)
-        if existing_game:
-            await message.answer("❌ В этом чате уже идёт игра в мафию!")
-            return
-        
-        # Create lobby
+        # Try to create lobby (will auto-cancel expired lobbies)
         game = await service.create_lobby(message.chat.id, message.from_user.id)
         if not game:
-            await message.answer("❌ Не удалось создать лобби.")
+            await message.answer("❌ В этом чате уже идёт игра в мафию!")
             return
         
         # Auto-join creator

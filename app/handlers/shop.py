@@ -103,6 +103,7 @@ def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
             item_type_str = item_type
             item = ITEM_CATALOG.get(item_type_str)
         else:
+            # Extract value from enum - ItemType is a str Enum, so .value gives the string
             item_type_str = item_type.value
             item = SHOP_ITEMS.get(item_type)
             if not item:

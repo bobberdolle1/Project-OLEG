@@ -1067,7 +1067,7 @@ async def get_cockfight_keyboard(user_id: int, chat_id: int) -> InlineKeyboardMa
     
     # If no roosters owned, show shop link
     if not buttons:
-        buttons.append([InlineKeyboardButton(text="🛒 Купить петуха", callback_data=f"shop:{user_id}:roosters")])
+        buttons.append([InlineKeyboardButton(text="🛒 Купить петуха", callback_data=f"shop:{user_id}:cat:roosters")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

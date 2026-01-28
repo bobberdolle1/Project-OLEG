@@ -5,6 +5,7 @@ Handles all mafia game commands and callbacks.
 """
 
 import asyncio
+import logging
 from datetime import timedelta
 from typing import Optional
 from aiogram import Router, F, Bot
@@ -16,7 +17,8 @@ from app.database.session import get_session
 from app.services.mafia_game import MafiaGameService, LOBBY_TIMEOUT, NIGHT_TIMEOUT, DAY_DISCUSSION_TIMEOUT, DAY_VOTING_TIMEOUT
 from app.services.economy import EconomyService
 from app.utils import utc_now
-from app.logger import logger
+
+logger = logging.getLogger(__name__)
 
 
 router = Router()

@@ -9,6 +9,7 @@ Manages mafia game logic including:
 - Win condition checking
 """
 
+import logging
 import random
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Tuple
@@ -19,7 +20,8 @@ from app.database.models import (
     MafiaGame, MafiaPlayer, MafiaNightAction, MafiaVote, MafiaStats, User
 )
 from app.utils import utc_now
-from app.logger import logger
+
+logger = logging.getLogger(__name__)
 
 
 # Game configuration

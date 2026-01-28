@@ -14,7 +14,7 @@ from app.config import settings
 from app.services.ollama_client import summarize_chat, generate_creative
 from app.services.tournaments import tournament_service, TournamentType, TournamentDiscipline
 from app.database.session import get_session
-from app.database.models import User, Wallet, GameStat, Auction, Bid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat, PendingVerification, Tournament
+from app.database.models import User, Wallet, GameStat, Auction, AuctionBid, Quest, UserQuest, TeamWar, TeamWarParticipant, GlobalStats, GuildMember, Chat, PendingVerification, Tournament
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)

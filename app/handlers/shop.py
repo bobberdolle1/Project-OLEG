@@ -21,11 +21,39 @@ SHOP_PREFIX = "shop:"
 
 # Shop categories
 CATEGORIES = {
-    "lootboxes": ("📦 Лутбоксы", [ItemType.LOOTBOX_COMMON, ItemType.LOOTBOX_RARE, ItemType.LOOTBOX_EPIC, ItemType.LOOTBOX_LEGENDARY]),
-    "fishing": ("🎣 Рыбалка", [ItemType.FISHING_ROD_BASIC, ItemType.FISHING_ROD_PRO, ItemType.FISHING_ROD_GOLDEN]),
-    "boosters": ("⚡ Бустеры", [ItemType.LUCKY_CHARM, ItemType.DOUBLE_XP, ItemType.SHIELD, ItemType.ENERGY_DRINK, ItemType.VIP_STATUS]),
-    "roosters": ("🐔 Петухи", [ItemType.ROOSTER_COMMON, ItemType.ROOSTER_RARE, ItemType.ROOSTER_EPIC]),
-    "pp_creams": ("🍆 Мази для роста", [ItemType.PP_CREAM_SMALL, ItemType.PP_CREAM_MEDIUM, ItemType.PP_CREAM_LARGE, ItemType.PP_CREAM_TITAN]),
+    "lootboxes": ("📦 Лутбоксы", [
+        ItemType.LOOTBOX_COMMON, 
+        ItemType.LOOTBOX_RARE, 
+        ItemType.LOOTBOX_EPIC, 
+        ItemType.LOOTBOX_LEGENDARY,
+        "lootbox_mega",
+        "lootbox_mystery"
+    ]),
+    "fishing": ("🎣 Рыбалка", [
+        ItemType.FISHING_ROD_BASIC, 
+        ItemType.FISHING_ROD_PRO, 
+        ItemType.FISHING_ROD_GOLDEN,
+        "diamond_rod",
+        "cosmic_rod"
+    ]),
+    "boosters": ("⚡ Бустеры", [
+        ItemType.LUCKY_CHARM, 
+        ItemType.DOUBLE_XP, 
+        ItemType.SHIELD, 
+        ItemType.ENERGY_DRINK, 
+        ItemType.VIP_STATUS
+    ]),
+    "roosters": ("🐔 Петухи", [
+        ItemType.ROOSTER_COMMON, 
+        ItemType.ROOSTER_RARE, 
+        ItemType.ROOSTER_EPIC
+    ]),
+    "pp_creams": ("🍆 Мази для роста", [
+        ItemType.PP_CREAM_SMALL, 
+        ItemType.PP_CREAM_MEDIUM, 
+        ItemType.PP_CREAM_LARGE, 
+        ItemType.PP_CREAM_TITAN
+    ]),
     "pp_protection": ("🔒 Защита PP", [ItemType.PP_CAGE]),
 }
 
@@ -58,15 +86,27 @@ def get_main_shop_keyboard(user_id: int) -> InlineKeyboardMarkup:
 
 def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
     """Create category items keyboard."""
+    from app.services.inventory import ITEM_CATALOG
+    
     _, items = CATEGORIES.get(category, ("", []))
     buttons = []
     
     for item_type in items:
-        item = SHOP_ITEMS.get(item_type)
+        # Handle both ItemType enum and string
+        if isinstance(item_type, str):
+            item_type_str = item_type
+            item = ITEM_CATALOG.get(item_type_str)
+        else:
+            item_type_str = item_type.value
+            item = SHOP_ITEMS.get(item_type)
+            if not item:
+                item = ITEM_CATALOG.get(item_type_str)
+        
         if item:
-            rarity_emoji = {"common": "", "uncommon": "⭐", "rare": "⭐⭐", "epic": "💜", "legendary": "🌟"}.get(item.rarity.value, "")
-            text = f"{item.emoji} {item.name} — {item.price}💰 {rarity_emoji}"
-            buttons.append([InlineKeyboardButton(text=text, callback_data=f"{SHOP_PREFIX}{user_id}:buy:{item_type.value}")])
+            rarity_emoji = {"common": "", "uncommon": "⭐", "rare": "⭐⭐", "epic": "💜", "legendary": "🌟"}.get(getattr(item, 'rarity', Rarity.COMMON).value if hasattr(item, 'rarity') else 'common', "")
+            price = item.price if hasattr(item, 'price') else 0
+            text = f"{item.emoji} {item.name} — {price}💰 {rarity_emoji}"
+            buttons.append([InlineKeyboardButton(text=text, callback_data=f"{SHOP_PREFIX}{user_id}:buy:{item_type_str}")])
     
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{SHOP_PREFIX}{user_id}:main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -138,13 +178,20 @@ async def callback_shop(callback: CallbackQuery):
         await callback.answer()
     
     elif action == "buy":
+        from app.services.inventory import ITEM_CATALOG
+        
         item_type_str = parts[3] if len(parts) > 3 else ""
+        
+        # Try to get from SHOP_ITEMS first, then ITEM_CATALOG
         try:
             item_type = ItemType(item_type_str)
+            item = SHOP_ITEMS.get(item_type)
         except ValueError:
-            return await callback.answer("Товар не найден", show_alert=True)
+            item = None
         
-        item = SHOP_ITEMS.get(item_type)
+        if not item:
+            item = ITEM_CATALOG.get(item_type_str)
+        
         if not item:
             return await callback.answer("Товар не найден", show_alert=True)
         
@@ -158,11 +205,13 @@ async def callback_shop(callback: CallbackQuery):
             Rarity.LEGENDARY: "Легендарный",
         }
         
+        rarity = getattr(item, 'rarity', Rarity.COMMON) if hasattr(item, 'rarity') else Rarity.COMMON
+        
         text = (
             f"🏪 <b>ПОКУПКА</b>\n\n"
             f"{item.emoji} <b>{item.name}</b>\n"
             f"📝 {item.description}\n"
-            f"⭐ Редкость: {rarity_names.get(item.rarity, item.rarity.value)}\n"
+            f"⭐ Редкость: {rarity_names.get(rarity, 'Обычный')}\n"
             f"💰 Цена: <b>{item.price}</b> монет\n\n"
             f"💰 Твой баланс: {balance} монет\n\n"
         )
@@ -176,13 +225,20 @@ async def callback_shop(callback: CallbackQuery):
         await callback.answer()
     
     elif action == "confirm":
+        from app.services.inventory import ITEM_CATALOG
+        
         item_type_str = parts[3] if len(parts) > 3 else ""
+        
+        # Try to get from SHOP_ITEMS first, then ITEM_CATALOG
         try:
             item_type = ItemType(item_type_str)
+            item = SHOP_ITEMS.get(item_type)
         except ValueError:
-            return await callback.answer("Товар не найден", show_alert=True)
+            item = None
         
-        item = SHOP_ITEMS.get(item_type)
+        if not item:
+            item = ITEM_CATALOG.get(item_type_str)
+        
         if not item:
             return await callback.answer("Товар не найден", show_alert=True)
         

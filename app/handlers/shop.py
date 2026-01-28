@@ -98,13 +98,16 @@ def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
     buttons = []
     
     for item_type in items:
+        logger.info(f"Category keyboard: item_type={item_type}, type={type(item_type)}, isinstance(str)={isinstance(item_type, str)}")
         # Handle both ItemType enum and string
         if isinstance(item_type, str):
             item_type_str = item_type
             item = ITEM_CATALOG.get(item_type_str)
+            logger.info(f"Category keyboard: STRING path, item_type_str='{item_type_str}'")
         else:
             # Extract value from enum - ItemType is a str Enum, so .value gives the string
-            item_type_str = str(item_type.value)  # Explicit string conversion
+            logger.info(f"Category keyboard: ENUM path, item_type.value={item_type.value}")
+            item_type_str = item_type.value
             logger.info(f"Category keyboard: enum {item_type} -> value '{item_type_str}'")
             item = SHOP_ITEMS.get(item_type)
             if not item:

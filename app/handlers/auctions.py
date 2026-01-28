@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database.session import get_session
-from app.database.models import User, Wallet, GameStat, Auction, Bid
+from app.database.models import User, Wallet, GameStat, Auction, AuctionBid
 from app.handlers.games import ensure_user # Reusing ensure_user from games handler
 from app.utils import utc_now
 
@@ -86,7 +86,7 @@ async def cmd_list_auctions(msg: Message):
         active_auctions_res = await session.execute(
             select(Auction)
             .filter(Auction.status == "active", Auction.ends_at > utc_now())
-            .options(joinedload(Auction.seller), joinedload(Auction.current_highest_bid).joinedload(Bid.bidder))
+            .options(joinedload(Auction.seller), joinedload(Auction.current_highest_bid).joinedload(AuctionBid.bidder))
             .limit(10)
         )
         active_auctions = active_auctions_res.scalars().all()
@@ -171,7 +171,7 @@ async def cmd_bid(msg: Message):
                 # Log this action or notify the user
 
         # Create new bid
-        new_bid = Bid(
+        new_bid = AuctionBid(
             auction_id=auction.id,
             bidder_user_id=bidder_user.id,
             amount=amount

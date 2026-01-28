@@ -28,6 +28,56 @@ logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
 _scheduler: AsyncIOScheduler | None = None
 
 
+async def job_regenerate_rooster_hp(bot: Bot):
+    """
+    Regenerate HP for all roosters every hour.
+    Roosters regenerate 5 HP per hour up to max HP.
+    """
+    from app.services.rooster_hp import HP_REGEN_PER_HOUR, MAX_HP
+    from app.database.models import UserInventory
+    import json
+    
+    async_session = get_session()
+    async with async_session() as session:
+        # Get all roosters
+        result = await session.execute(
+            select(UserInventory).where(
+                UserInventory.item_type.in_(['rooster_common', 'rooster_rare', 'rooster_epic'])
+            )
+        )
+        roosters = result.scalars().all()
+        
+        regenerated_count = 0
+        for rooster in roosters:
+            try:
+                # Parse metadata
+                metadata = {}
+                if rooster.item_data:
+                    try:
+                        metadata = json.loads(rooster.item_data)
+                    except json.JSONDecodeError:
+                        continue
+                
+                current_hp = metadata.get("hp", MAX_HP)
+                max_hp = metadata.get("max_hp", MAX_HP)
+                
+                # Regenerate if not at max
+                if current_hp < max_hp:
+                    new_hp = min(max_hp, current_hp + HP_REGEN_PER_HOUR)
+                    metadata["hp"] = new_hp
+                    metadata["last_regen"] = datetime.now(pytz.UTC).isoformat()
+                    rooster.item_data = json.dumps(metadata)
+                    regenerated_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Error regenerating HP for rooster {rooster.id}: {e}")
+                continue
+        
+        if regenerated_count > 0:
+            await session.commit()
+            logger.info(f"Regenerated HP for {regenerated_count} roosters")
+
+
 async def job_check_pending_verifications(bot: Bot):
     """
     Проверяет истекшие верификации и кикает пользователей, которые не нажали кнопку.
@@ -737,6 +787,14 @@ async def setup_scheduler(bot: Bot):
     _scheduler.add_job(job_check_pending_verifications, IntervalTrigger(minutes=1), args=[bot], id="check_pending_verifications")
     # Trading v9.5: expire trades and complete auctions every minute
     _scheduler.add_job(job_expire_trades_and_auctions, IntervalTrigger(minutes=1), args=[bot], id="expire_trades_and_auctions")
+    
+    # Rooster HP regeneration: every hour
+    _scheduler.add_job(
+        job_regenerate_rooster_hp,
+        IntervalTrigger(hours=1),
+        args=[bot],
+        id="regenerate_rooster_hp"
+    )
     
     # SDOC: синхронизация админов группы каждые 6 часов
     if settings.sdoc_exclusive_mode and settings.sdoc_chat_id:

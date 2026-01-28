@@ -43,6 +43,13 @@ class ItemType(str, Enum):
     PP_CREAM_TITAN = "pp_cream_titan"  # +10-20 см (редкий)
     # PP Protection
     PP_CAGE = "pp_cage"  # Защита PP, блокирует рост
+    # New boosters
+    DAMAGE_BOOST = "damage_boost"  # +20% урона в боях
+    HEAL_POTION = "heal_potion"  # Восстанавливает HP петуху
+    CRITICAL_BOOST = "critical_boost"  # +15% шанс крита
+    COIN_MAGNET = "coin_magnet"  # +25% монет из игр
+    FISHING_BAIT = "fishing_bait"  # +30% редкой рыбы
+    GROW_ACCELERATOR = "grow_accelerator"  # -6 часов кулдауна /grow
 
 
 class Rarity(str, Enum):

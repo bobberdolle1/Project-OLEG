@@ -188,6 +188,8 @@ async def callback_shop(callback: CallbackQuery):
         
         item_type_str = parts[3] if len(parts) > 3 else ""
         
+        logger.info(f"Shop buy: user={user_id}, item_type_str='{item_type_str}'")
+        
         # Try multiple lookup strategies
         item = None
         
@@ -195,18 +197,23 @@ async def callback_shop(callback: CallbackQuery):
         try:
             item_type_enum = ItemType(item_type_str)
             item = SHOP_ITEMS.get(item_type_enum)
-        except (ValueError, KeyError):
-            pass
+            logger.info(f"Shop buy: enum lookup result: {item is not None}")
+        except (ValueError, KeyError) as e:
+            logger.info(f"Shop buy: enum lookup failed: {e}")
         
         # 2. Try as string key in SHOP_ITEMS (for diamond_rod, cosmic_rod, etc)
         if not item:
             item = SHOP_ITEMS.get(item_type_str)
+            logger.info(f"Shop buy: string lookup in SHOP_ITEMS result: {item is not None}")
         
         # 3. Fallback to ITEM_CATALOG
         if not item:
             item = ITEM_CATALOG.get(item_type_str)
+            logger.info(f"Shop buy: ITEM_CATALOG lookup result: {item is not None}")
         
         if not item:
+            logger.error(f"Shop buy: item not found for '{item_type_str}'")
+            logger.error(f"Available SHOP_ITEMS keys: {list(SHOP_ITEMS.keys())[:10]}")
             return await callback.answer("Товар не найден", show_alert=True)
         
         balance = await get_user_balance(user_id, chat_id)

@@ -439,6 +439,11 @@ async def _process_single_image(msg: Message, is_auto_reply: bool) -> None:
     """
     text = msg.caption if msg.caption else ""
     
+    # Skip animated stickers silently (they can't be processed)
+    if msg.sticker and msg.sticker.is_animated:
+        logger.debug(f"Skipping animated sticker in message {msg.message_id}")
+        return
+    
     # Проверяем, есть ли изображение
     image_bytes = await extract_image_bytes(msg)
     if not image_bytes:

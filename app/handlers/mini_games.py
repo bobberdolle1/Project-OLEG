@@ -2055,15 +2055,18 @@ async def pp_callback(callback: CallbackQuery):
         target_id = challenge.get("target_id", 0)
         target_username = challenge.get("target_username")
         
-        if target_id and target_id != 0 and user_id != target_id:
-            # Вызов адресован конкретному человеку
-            return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
-        
-        # Если вызов по @username — проверяем username (case-insensitive)
-        if (not target_id or target_id == 0) and target_username:
+        # Если вызов по @username — проверяем username (case-insensitive) ПРИОРИТЕТНО
+        if target_username:
             user_tg_username = callback.from_user.username or ""
+            if not user_tg_username:
+                return await callback.answer(f"❌ Этот вызов для @{target_username}! У тебя нет username.", show_alert=True)
             if user_tg_username.lower() != target_username.lower():
                 return await callback.answer(f"❌ Этот вызов для @{target_username}!", show_alert=True)
+        
+        # Если вызов по user_id (через reply) — проверяем user_id
+        elif target_id and target_id != 0 and user_id != target_id:
+            # Вызов адресован конкретному человеку
+            return await callback.answer("❌ Этот вызов не для тебя!", show_alert=True)
         
         # Проверяем что у цели хватает см для ставки
         target_size, _, _ = await get_or_create_game_stat(user_id)

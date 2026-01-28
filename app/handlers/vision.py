@@ -173,17 +173,17 @@ async def extract_image_bytes(message: Message) -> Optional[bytes]:
             # Обрабатываем стикер как изображение
             sticker = message.sticker
             
+            # Если это анимированный стикер (.tgs) или видео - пропускаем
+            if sticker.is_animated or sticker.is_video:
+                logger.debug(f"Skipping animated/video sticker (animated={sticker.is_animated}, video={sticker.is_video})")
+                return None
+            
             # Получаем file_info для загрузки
             file_info = await message.bot.get_file(sticker.file_id)
             
-            # Загружаем стикер (может быть .webp или .tgs для анимированных)
+            # Загружаем стикер (обычно .webp)
             file_bytes_io = await message.bot.download_file(file_info.file_path)
             sticker_bytes = file_bytes_io.read()
-            
-            # Если это анимированный стикер (.tgs) - пропускаем
-            if sticker.is_animated or sticker.is_video:
-                logger.debug(f"Skipping animated/video sticker")
-                return None
             
             # Конвертируем .webp в PNG для лучшей совместимости
             try:

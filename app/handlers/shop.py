@@ -104,7 +104,8 @@ def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
             item = ITEM_CATALOG.get(item_type_str)
         else:
             # Extract value from enum - ItemType is a str Enum, so .value gives the string
-            item_type_str = item_type.value
+            item_type_str = str(item_type.value)  # Explicit string conversion
+            logger.info(f"Category keyboard: enum {item_type} -> value '{item_type_str}'")
             item = SHOP_ITEMS.get(item_type)
             if not item:
                 item = ITEM_CATALOG.get(item_type_str)
@@ -113,7 +114,9 @@ def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
             rarity_emoji = {"common": "", "uncommon": "⭐", "rare": "⭐⭐", "epic": "💜", "legendary": "🌟"}.get(getattr(item, 'rarity', Rarity.COMMON).value if hasattr(item, 'rarity') else 'common', "")
             price = item.price if hasattr(item, 'price') else 0
             text = f"{item.emoji} {item.name} — {price}💰 {rarity_emoji}"
-            buttons.append([InlineKeyboardButton(text=text, callback_data=f"{SHOP_PREFIX}{user_id}:buy:{item_type_str}")])
+            callback_data = f"{SHOP_PREFIX}{user_id}:buy:{item_type_str}"
+            logger.info(f"Category keyboard: creating button with callback_data='{callback_data}'")
+            buttons.append([InlineKeyboardButton(text=text, callback_data=callback_data)])
     
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{SHOP_PREFIX}{user_id}:main")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -61,6 +61,7 @@ class GameHubUI:
         ("📦 Лутбоксы", "game:loot"),
         ("🐔 Петухи", "game:cockfight"),
         ("🍆 Битва ПП", "game:pp"),
+        ("🎭 Мафия", "game:mafia"),
         ("🏪 Магазин", "game:shop"),
         ("📊 Топ", "game:top"),
         ("💰 Баланс", "game:balance"),
@@ -174,6 +175,7 @@ class GameHubUI:
             "loot": "/loot",
             "cockfight": "/cockfight",
             "pp": "/pp",
+            "mafia": "/mafia",
             "shop": "/shop",
             "inventory": "/inventory",
             "top": "/top",
@@ -243,6 +245,21 @@ class GameHubUI:
                     "• /ppo — бой с Олегом 🤖\n"
                     "• /ppstats — твоя статистика\n\n"
                     "🧴 <b>Мази для роста:</b> /shop",
+                    parse_mode="HTML"
+                )
+            elif game_type == "mafia":
+                await callback.message.answer(
+                    "🎭 <b>Мафия</b>\n\n"
+                    "Кооперативная игра для 4-12 игроков.\n\n"
+                    "⚔️ <b>Команды:</b>\n"
+                    "• /mafia — создать лобби\n"
+                    "• /mafia_stats — твоя статистика\n\n"
+                    "🎮 <b>Роли:</b>\n"
+                    "🧑‍🌾 Мирные — вычисляют мафию\n"
+                    "🔪 Мафия — убивают по ночам\n"
+                    "💉 Доктор — защищает от убийства\n"
+                    "🔍 Комиссар — проверяет игроков\n\n"
+                    "💰 Награды: 50-300 монет",
                     parse_mode="HTML"
                 )
             elif game_type == "shop":

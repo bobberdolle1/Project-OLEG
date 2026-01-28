@@ -1114,13 +1114,13 @@ async def build_inventory_keyboard(user_id: int, chat_id: int) -> InlineKeyboard
             from app.services.rooster_hp import get_rooster_hp
             current_hp, max_hp = await get_rooster_hp(user_id, chat_id, item_type)
             btn_text = f"{item_info.emoji} {item_info.name} (x{item.quantity}) ❤️ {current_hp}/{max_hp}"
-            callback_data = None  # No action, just display
+            callback_data = f"{INV_PREFIX}{user_id}:rooster:{item_type}"  # Dummy callback for display
         else:
             # Use button for consumables (creams, boosters)
             btn_text = f"✨ Использовать {item_info.name}"
             callback_data = f"{INV_PREFIX}{user_id}:use:{item_type}"
         
-        # Skip items without callback (already equipped rods)
+        # Add button (skip only equipped rods)
         if callback_data is None:
             continue
         
@@ -1271,6 +1271,19 @@ async def callback_inventory(callback: CallbackQuery):
         else:
             # Unknown consumable type
             await callback.answer(f"❌ Неизвестный тип предмета: {item_type}")
+    
+    elif action == "rooster" and item_type:
+        # Roosters are display-only, show info
+        item_info = ITEM_CATALOG.get(item_type)
+        if item_info:
+            from app.services.rooster_hp import get_rooster_hp
+            current_hp, max_hp = await get_rooster_hp(user_id, chat_id, item_type)
+            await callback.answer(
+                f"{item_info.emoji} {item_info.name}\n❤️ HP: {current_hp}/{max_hp}\n\nИспользуй /cockfight для боя!",
+                show_alert=True
+            )
+        else:
+            await callback.answer("Информация о петухе")
     
     else:
         logger.warning(f"Unknown inventory action: {action}, item_type: {item_type}")

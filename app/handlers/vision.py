@@ -173,11 +173,53 @@ async def extract_image_bytes(message: Message) -> Optional[bytes]:
             # Обрабатываем стикер как изображение
             sticker = message.sticker
             
-            # Если это анимированный стикер (.tgs) или видео - пропускаем
-            if sticker.is_animated or sticker.is_video:
-                logger.debug(f"Skipping animated/video sticker (animated={sticker.is_animated}, video={sticker.is_video})")
+            # Если это анимированный стикер (.tgs - Lottie JSON) - пропускаем
+            # .tgs требует специальной обработки через lottie/rlottie
+            if sticker.is_animated:
+                logger.debug(f"Skipping animated .tgs sticker (requires lottie rendering)")
                 return None
             
+            # Если это видео-стикер (.webm) - извлекаем первый кадр
+            if sticker.is_video:
+                try:
+                    # Получаем file_info для загрузки
+                    file_info = await message.bot.get_file(sticker.file_id)
+                    
+                    # Загружаем видео-стикер
+                    file_bytes_io = await message.bot.download_file(file_info.file_path)
+                    video_bytes = file_bytes_io.read()
+                    
+                    # Извлекаем первый кадр через imageio
+                    try:
+                        import imageio.v3 as iio
+                        import io
+                        
+                        # Читаем первый кадр
+                        frames = iio.imiter(io.BytesIO(video_bytes), plugin='pyav')
+                        first_frame = next(frames)
+                        
+                        # Конвертируем в PIL Image
+                        from PIL import Image
+                        img = Image.fromarray(first_frame)
+                        
+                        # Сохраняем как PNG
+                        output = io.BytesIO()
+                        img.save(output, format='PNG')
+                        logger.info(f"Extracted first frame from video sticker")
+                        return output.getvalue()
+                        
+                    except ImportError:
+                        logger.warning("imageio[pyav] not available for video sticker processing")
+                        return None
+                    except Exception as e:
+                        logger.warning(f"Failed to extract frame from video sticker: {e}")
+                        return None
+                        
+                except Exception as e:
+                    logger.error(f"Error processing video sticker: {e}")
+                    return None
+            
+            # Обычный статичный стикер (.webp)
             # Получаем file_info для загрузки
             file_info = await message.bot.get_file(sticker.file_id)
             

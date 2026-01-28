@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_session
 from app.database.models import Auction, AuctionBid
 from app.services.inventory import inventory_service, ITEM_CATALOG
-from app.services.wallet import wallet_service
+from app.services import wallet_service
 from app.utils import utc_now
 
 logger = logging.getLogger(__name__)

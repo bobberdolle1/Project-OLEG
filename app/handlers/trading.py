@@ -18,7 +18,7 @@ from app.services.trade_service import trade_service
 from app.services.market_service import market_service
 from app.services.auction_service import auction_service
 from app.services.inventory import inventory_service, ITEM_CATALOG
-from app.services.wallet import wallet_service
+from app.services import wallet_service
 
 logger = logging.getLogger(__name__)
 

@@ -1,197 +1,604 @@
+"""Trading Handlers - P2P trades, marketplace, and auctions.
+
+v9.5 - Complete trading system implementation.
+"""
+
+import json
 import logging
+from datetime import datetime
+from typing import Optional
+
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
-from app.database.session import get_session
-from app.database.models import User, Wallet, GameStat, TradeOffer
-from app.handlers.games import ensure_user # Reusing ensure_user from games handler
+from app.services.trade_service import trade_service
+from app.services.market_service import market_service
+from app.services.auction_service import auction_service
+from app.services.inventory import inventory_service, ITEM_CATALOG
+from app.services.wallet import wallet_service
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-@router.message(Command("sell"))
-async def cmd_sell(msg: Message):
-    """
-    Handles the /sell command to create a trade offer.
-    Usage: /sell <item_type> <quantity> <price>
-    Example: /sell size_cm 10 100 (sells 10 cm for 100 coins)
-    """
-    async_session = get_session()
-    seller_user = await ensure_user(msg.from_user)
+# ============================================================================
+# FSM States
+# ============================================================================
 
-    parts = (msg.text or "").split()
-    if len(parts) != 4:
-        return await msg.reply("Использование: /sell <тип_предмета> <количество> <цена>")
 
-    item_type = parts[1]
+class TradeStates(StatesGroup):
+    """States for trade creation."""
+    selecting_offer_items = State()
+    entering_offer_coins = State()
+    selecting_request_items = State()
+    entering_request_coins = State()
+    confirming = State()
+
+
+class MarketStates(StatesGroup):
+    """States for market listing creation."""
+    selecting_item = State()
+    entering_price = State()
+
+
+class AuctionStates(StatesGroup):
+    """States for auction creation."""
+    selecting_item = State()
+    entering_start_price = State()
+    entering_duration = State()
+
+
+# ============================================================================
+# TRADES - P2P Exchange
+# ============================================================================
+
+
+@router.message(Command("trade"))
+async def cmd_trade(message: Message, state: FSMContext):
+    """Start P2P trade with another user."""
+    if not message.reply_to_message:
+        await message.answer("❌ Ответь на сообщение пользователя, с которым хочешь обменяться!")
+        return
+    
+    target_user_id = message.reply_to_message.from_user.id
+    if target_user_id == message.from_user.id:
+        await message.answer("❌ Нельзя обмениваться с самим собой!")
+        return
+    
+    # Get user's inventory
+    inventory = await inventory_service.get_inventory(message.from_user.id, message.chat.id)
+    if not inventory:
+        await message.answer("❌ У тебя нет предметов для обмена!")
+        return
+    
+    # Store trade context
+    await state.update_data(
+        target_user_id=target_user_id,
+        target_username=message.reply_to_message.from_user.username or message.reply_to_message.from_user.first_name,
+        offer_items=[],
+        offer_coins=0,
+        request_items=[],
+        request_coins=0
+    )
+    
+    # Show inventory selection
+    keyboard = []
+    for item in inventory[:10]:  # Show first 10 items
+        item_info = ITEM_CATALOG.get(item.item_type)
+        if item_info:
+            keyboard.append([InlineKeyboardButton(
+                text=f"{item_info.emoji} {item_info.name} x{item.quantity}",
+                callback_data=f"trade_offer_item:{item.item_type}"
+            )])
+    
+    keyboard.append([InlineKeyboardButton(text="💰 Предложить монеты", callback_data="trade_offer_coins")])
+    keyboard.append([InlineKeyboardButton(text="➡️ Далее (запросить предметы)", callback_data="trade_next_request")])
+    
+    await message.answer(
+        f"🔄 Обмен с @{message.reply_to_message.from_user.username or 'пользователем'}\n\n"
+        "Выбери предметы, которые хочешь предложить:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(TradeStates.selecting_offer_items)
+
+
+@router.callback_query(F.data.startswith("trade_offer_item:"))
+async def trade_offer_item_callback(callback: CallbackQuery, state: FSMContext):
+    """Add item to trade offer."""
+    item_type = callback.data.split(":")[1]
+    data = await state.get_data()
+    
+    offer_items = data.get("offer_items", [])
+    offer_items.append({"item_type": item_type, "quantity": 1})
+    await state.update_data(offer_items=offer_items)
+    
+    item_info = ITEM_CATALOG[item_type]
+    await callback.answer(f"✅ Добавлено: {item_info.emoji} {item_info.name}")
+
+
+@router.callback_query(F.data == "trade_offer_coins")
+async def trade_offer_coins_callback(callback: CallbackQuery, state: FSMContext):
+    """Prompt for coin amount."""
+    await callback.message.answer("💰 Сколько монет хочешь предложить? (введи число)")
+    await state.set_state(TradeStates.entering_offer_coins)
+    await callback.answer()
+
+
+@router.message(TradeStates.entering_offer_coins)
+async def trade_enter_offer_coins(message: Message, state: FSMContext):
+    """Enter offered coin amount."""
     try:
-        quantity = int(parts[2])
-        price = int(parts[3])
-    except ValueError:
-        return await msg.reply("Количество и цена должны быть числами.")
-
-    if quantity <= 0 or price <= 0:
-        return await msg.reply("Количество и цена должны быть положительными числами.")
-
-    async with async_session() as session:
-        # Check if seller has the item
-        if item_type == "size_cm":
-            game_stat_res = await session.execute(select(GameStat).filter_by(user_id=seller_user.id))
-            game_stat = game_stat_res.scalars().first()
-            if not game_stat or game_stat.size_cm < quantity:
-                return await msg.reply(f"У вас недостаточно {item_type}.")
-        elif item_type == "balance": # Selling coins is also possible
-            wallet_res = await session.execute(select(Wallet).filter_by(user_id=seller_user.id))
-            wallet = wallet_res.scalars().first()
-            if not wallet or wallet.balance < quantity:
-                return await msg.reply(f"У вас недостаточно {item_type}.")
-        else:
-            return await msg.reply(f"Неизвестный тип предмета: {item_type}.")
+        amount = int(message.text)
+        if amount <= 0:
+            await message.answer("❌ Сумма должна быть больше 0!")
+            return
         
-        # Create trade offer
-        trade_offer = TradeOffer(
-            seller_user_id=seller_user.id,
-            item_type=item_type,
-            item_quantity=quantity,
-            price=price,
-            status="active"
+        balance = await wallet_service.get_balance(message.from_user.id)
+        if amount > balance:
+            await message.answer(f"❌ У тебя недостаточно монет! (есть {balance})")
+            return
+        
+        await state.update_data(offer_coins=amount)
+        await message.answer(f"✅ Предложено: {amount} 🪙")
+        await state.set_state(TradeStates.selecting_offer_items)
+    except ValueError:
+        await message.answer("❌ Введи корректное число!")
+
+
+@router.callback_query(F.data == "trade_next_request")
+async def trade_next_request_callback(callback: CallbackQuery, state: FSMContext):
+    """Move to requesting items."""
+    await callback.message.answer(
+        "📥 Теперь укажи, что хочешь получить взамен:\n\n"
+        "Введи тип предмета и количество через пробел, например:\n"
+        "`fishing_rod_golden 1`\n\n"
+        "Или введи `/coins <сумма>` для запроса монет\n"
+        "Или `/done` для завершения",
+        parse_mode="Markdown"
+    )
+    await state.set_state(TradeStates.selecting_request_items)
+    await callback.answer()
+
+
+@router.message(TradeStates.selecting_request_items, Command("coins"))
+async def trade_request_coins(message: Message, state: FSMContext):
+    """Request coins in trade."""
+    try:
+        amount = int(message.text.split()[1])
+        if amount <= 0:
+            await message.answer("❌ Сумма должна быть больше 0!")
+            return
+        
+        await state.update_data(request_coins=amount)
+        await message.answer(f"✅ Запрошено: {amount} 🪙")
+    except (IndexError, ValueError):
+        await message.answer("❌ Используй: /coins <сумма>")
+
+
+@router.message(TradeStates.selecting_request_items, Command("done"))
+async def trade_done(message: Message, state: FSMContext):
+    """Finalize and send trade offer."""
+    data = await state.get_data()
+    
+    offer_items = data.get("offer_items", [])
+    offer_coins = data.get("offer_coins", 0)
+    request_items = data.get("request_items", [])
+    request_coins = data.get("request_coins", 0)
+    target_user_id = data["target_user_id"]
+    
+    # Create trade
+    result = await trade_service.create_trade(
+        from_user_id=message.from_user.id,
+        to_user_id=target_user_id,
+        chat_id=message.chat.id,
+        offer_items=offer_items,
+        offer_coins=offer_coins,
+        request_items=request_items,
+        request_coins=request_coins
+    )
+    
+    if result.success:
+        # Notify target user
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Принять", callback_data=f"trade_accept:{result.trade_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"trade_reject:{result.trade_id}")
+            ]
+        ])
+        
+        await message.answer(
+            f"🔄 Предложение обмена отправлено @{data['target_username']}!\n"
+            f"ID обмена: #{result.trade_id}",
+            reply_markup=keyboard
         )
-        session.add(trade_offer)
-        await session.commit()
-        await msg.reply(
-            f"Выставили на продажу: {quantity} {item_type} за {price} монет. (ID: {trade_offer.id})"
-        )
+    else:
+        await message.answer(result.message)
+    
+    await state.clear()
+
+
+@router.callback_query(F.data.startswith("trade_accept:"))
+async def trade_accept_callback(callback: CallbackQuery):
+    """Accept trade offer."""
+    trade_id = int(callback.data.split(":")[1])
+    result = await trade_service.accept_trade(trade_id, callback.from_user.id)
+    await callback.message.edit_text(result.message)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("trade_reject:"))
+async def trade_reject_callback(callback: CallbackQuery):
+    """Reject trade offer."""
+    trade_id = int(callback.data.split(":")[1])
+    result = await trade_service.reject_trade(trade_id, callback.from_user.id)
+    await callback.message.edit_text(result.message)
+    await callback.answer()
 
 
 @router.message(Command("trades"))
-async def cmd_trades(msg: Message):
-    """
-    Handles the /trades command to list all active trade offers.
-    """
-    async_session = get_session()
-    async with async_session() as session:
-        active_trades_res = await session.execute(
-            select(TradeOffer).filter_by(status="active").limit(10)
-        )
-        active_trades = active_trades_res.scalars().all()
-
-        if not active_trades:
-            return await msg.reply("Активных предложений на продажу нет.")
-
-        trade_list = ["Активные предложения:"]
-        for trade in active_trades:
-            seller_user_res = await session.execute(select(User).filter_by(id=trade.seller_user_id))
-            seller_user = seller_user_res.scalars().first()
-            seller_name = seller_user.username or str(seller_user.tg_user_id)
-            trade_list.append(
-                f"ID: {trade.id} | Продавец: {seller_name} | "
-                f"Предмет: {trade.item_quantity} {trade.item_type} | Цена: {trade.price}"
-            )
-        await msg.reply("\n".join(trade_list))
-
-
-@router.message(Command("buy"))
-async def cmd_buy(msg: Message):
-    """
-    Handles the /buy command to purchase a trade offer.
-    Usage: /buy <trade_id>
-    """
-    async_session = get_session()
-    buyer_user = await ensure_user(msg.from_user)
-
-    parts = (msg.text or "").split()
-    if len(parts) != 2:
-        return await msg.reply("Использование: /buy <ID_предложения>")
+async def cmd_trades(message: Message):
+    """List pending trades."""
+    trades = await trade_service.get_pending_trades(message.from_user.id, message.chat.id)
     
-    try:
-        trade_id = int(parts[1])
-    except ValueError:
-        return await msg.reply("ID предложения должен быть числом.")
-
-    async with async_session() as session:
-        trade_offer_res = await session.execute(select(TradeOffer).filter_by(id=trade_id, status="active"))
-        trade_offer = trade_offer_res.scalars().first()
-
-        if not trade_offer:
-            return await msg.reply("Предложение не найдено или уже неактивно.")
+    if not trades:
+        await message.answer("📭 У тебя нет активных обменов")
+        return
+    
+    text = "🔄 Твои активные обмены:\n\n"
+    for trade in trades:
+        offer_items = json.loads(trade.offer_items) if trade.offer_items else []
+        request_items = json.loads(trade.request_items) if trade.request_items else []
         
-        if trade_offer.seller_user_id == buyer_user.id:
-            return await msg.reply("Нельзя купить собственное предложение.")
-
-        # Load buyer's wallet
-        buyer_wallet_res = await session.execute(select(Wallet).filter_by(user_id=buyer_user.id))
-        buyer_wallet = buyer_wallet_res.scalars().first()
-        if not buyer_wallet or buyer_wallet.balance < trade_offer.price:
-            return await msg.reply("Недостаточно средств для покупки.")
-        
-        # Load seller's wallet
-        seller_wallet_res = await session.execute(select(Wallet).filter_by(user_id=trade_offer.seller_user_id))
-        seller_wallet = seller_wallet_res.scalars().first()
-        if not seller_wallet: # This should not happen if ensure_user is used correctly for seller
-            return await msg.reply("Ошибка продавца: кошелек не найден.")
-        
-        # Perform transaction
-        buyer_wallet.balance -= trade_offer.price
-        seller_wallet.balance += trade_offer.price
-        
-        # Transfer item
-        if trade_offer.item_type == "size_cm":
-            buyer_game_stat_res = await session.execute(select(GameStat).filter_by(user_id=buyer_user.id))
-            buyer_game_stat = buyer_game_stat_res.scalars().first()
-            if not buyer_game_stat:
-                return await msg.reply("Ошибка покупателя: GameStat не найден.")
-            buyer_game_stat.size_cm += trade_offer.item_quantity
-
-            seller_game_stat_res = await session.execute(select(GameStat).filter_by(user_id=trade_offer.seller_user_id))
-            seller_game_stat = seller_game_stat_res.scalars().first()
-            if not seller_game_stat or seller_game_stat.size_cm < trade_offer.item_quantity:
-                # This should ideally be checked at sell time, but good to re-verify
-                return await msg.reply("У продавца недостаточно предмета для завершения сделки.")
-            seller_game_stat.size_cm -= trade_offer.item_quantity
-        elif trade_offer.item_type == "balance":
-            # This is handled by wallet transfer already
-            pass
+        text += f"#{trade.id} "
+        if trade.from_user_id == message.from_user.id:
+            text += "(ты предлагаешь)\n"
         else:
-            return await msg.reply("Неизвестный тип предмета для передачи.")
+            text += "(тебе предлагают)\n"
         
-        trade_offer.status = "completed"
-        await session.commit()
-        await msg.reply(f"Вы успешно купили {trade_offer.item_quantity} {trade_offer.item_type} за {trade_offer.price} монет!")
+        text += f"Предложение: "
+        if offer_items:
+            text += ", ".join([f"{ITEM_CATALOG[i['item_type']].emoji} x{i['quantity']}" for i in offer_items])
+        if trade.offer_coins > 0:
+            text += f" + {trade.offer_coins} 🪙"
+        text += "\n"
+        
+        text += f"Запрос: "
+        if request_items:
+            text += ", ".join([f"{ITEM_CATALOG[i['item_type']].emoji} x{i['quantity']}" for i in request_items])
+        if trade.request_coins > 0:
+            text += f" + {trade.request_coins} 🪙"
+        text += "\n\n"
+    
+    await message.answer(text)
 
 
-@router.message(Command("cancel"))
-async def cmd_cancel(msg: Message):
-    """
-    Handles the /cancel command to cancel an active trade offer.
-    Usage: /cancel <trade_id>
-    """
-    async_session = get_session()
-    user = await ensure_user(msg.from_user)
+# ============================================================================
+# MARKET - Direct Sales
+# ============================================================================
 
-    parts = (msg.text or "").split()
-    if len(parts) != 2:
-        return await msg.reply("Использование: /cancel <ID_предложения>")
+
+@router.message(Command("sell"))
+async def cmd_sell(message: Message, state: FSMContext):
+    """List item for sale on marketplace."""
+    inventory = await inventory_service.get_inventory(message.from_user.id, message.chat.id)
+    if not inventory:
+        await message.answer("❌ У тебя нет предметов для продажи!")
+        return
+    
+    keyboard = []
+    for item in inventory[:15]:
+        item_info = ITEM_CATALOG.get(item.item_type)
+        if item_info:
+            keyboard.append([InlineKeyboardButton(
+                text=f"{item_info.emoji} {item_info.name} x{item.quantity}",
+                callback_data=f"sell_item:{item.item_type}"
+            )])
+    
+    await message.answer(
+        "🏪 Выбери предмет для продажи:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(MarketStates.selecting_item)
+
+
+@router.callback_query(F.data.startswith("sell_item:"), MarketStates.selecting_item)
+async def sell_item_callback(callback: CallbackQuery, state: FSMContext):
+    """Select item to sell."""
+    item_type = callback.data.split(":")[1]
+    await state.update_data(item_type=item_type, quantity=1)
+    
+    item_info = ITEM_CATALOG[item_type]
+    await callback.message.answer(
+        f"💰 Установи цену для {item_info.emoji} {item_info.name}:\n"
+        "(введи число)"
+    )
+    await state.set_state(MarketStates.entering_price)
+    await callback.answer()
+
+
+@router.message(MarketStates.entering_price)
+async def sell_enter_price(message: Message, state: FSMContext):
+    """Enter sale price."""
+    try:
+        price = int(message.text)
+        if price <= 0:
+            await message.answer("❌ Цена должна быть больше 0!")
+            return
+        
+        data = await state.get_data()
+        result = await market_service.create_listing(
+            seller_user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            item_type=data["item_type"],
+            quantity=data["quantity"],
+            price=price
+        )
+        
+        await message.answer(result.message)
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Введи корректное число!")
+
+
+@router.message(Command("market"))
+async def cmd_market(message: Message):
+    """Show marketplace listings."""
+    listings = await market_service.get_active_listings(message.chat.id, limit=10)
+    
+    if not listings:
+        await message.answer("🏪 Маркет пуст. Используй /sell чтобы выставить предмет!")
+        return
+    
+    text = "🏪 Маркет:\n\n"
+    keyboard = []
+    
+    for listing in listings:
+        item_data = json.loads(listing.item_data)
+        item_info = ITEM_CATALOG[item_data["item_type"]]
+        
+        text += f"#{listing.id} {item_info.emoji} {item_info.name} x{item_data['quantity']} — {listing.price} 🪙\n"
+        keyboard.append([InlineKeyboardButton(
+            text=f"Купить #{listing.id}",
+            callback_data=f"buy:{listing.id}"
+        )])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+
+@router.callback_query(F.data.startswith("buy:"))
+async def buy_callback(callback: CallbackQuery):
+    """Purchase marketplace listing."""
+    listing_id = int(callback.data.split(":")[1])
+    result = await market_service.buy_listing(listing_id, callback.from_user.id)
+    await callback.answer(result.message, show_alert=True)
+    
+    if result.success:
+        await callback.message.edit_text(callback.message.text + f"\n\n✅ Продано!")
+
+
+@router.message(Command("mylistings"))
+async def cmd_mylistings(message: Message):
+    """Show user's active listings."""
+    listings = await market_service.get_user_listings(message.from_user.id, message.chat.id)
+    
+    if not listings:
+        await message.answer("📭 У тебя нет активных объявлений")
+        return
+    
+    text = "🏪 Твои объявления:\n\n"
+    keyboard = []
+    
+    for listing in listings:
+        item_data = json.loads(listing.item_data)
+        item_info = ITEM_CATALOG[item_data["item_type"]]
+        
+        text += f"#{listing.id} {item_info.emoji} {item_info.name} x{item_data['quantity']} — {listing.price} 🪙\n"
+        keyboard.append([InlineKeyboardButton(
+            text=f"Отменить #{listing.id}",
+            callback_data=f"cancel_listing:{listing.id}"
+        )])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+
+@router.callback_query(F.data.startswith("cancel_listing:"))
+async def cancel_listing_callback(callback: CallbackQuery):
+    """Cancel marketplace listing."""
+    listing_id = int(callback.data.split(":")[1])
+    result = await market_service.cancel_listing(listing_id, callback.from_user.id)
+    await callback.answer(result.message, show_alert=True)
+    
+    if result.success:
+        await callback.message.edit_text(callback.message.text + f"\n\n🚫 Отменено!")
+
+
+# ============================================================================
+# AUCTIONS - Bidding System
+# ============================================================================
+
+
+@router.message(Command("auction"))
+async def cmd_auction(message: Message, state: FSMContext):
+    """Create auction."""
+    inventory = await inventory_service.get_inventory(message.from_user.id, message.chat.id)
+    if not inventory:
+        await message.answer("❌ У тебя нет предметов для аукциона!")
+        return
+    
+    keyboard = []
+    for item in inventory[:15]:
+        item_info = ITEM_CATALOG.get(item.item_type)
+        if item_info:
+            keyboard.append([InlineKeyboardButton(
+                text=f"{item_info.emoji} {item_info.name} x{item.quantity}",
+                callback_data=f"auction_item:{item.item_type}"
+            )])
+    
+    await message.answer(
+        "🎯 Выбери предмет для аукциона:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(AuctionStates.selecting_item)
+
+
+@router.callback_query(F.data.startswith("auction_item:"), AuctionStates.selecting_item)
+async def auction_item_callback(callback: CallbackQuery, state: FSMContext):
+    """Select item for auction."""
+    item_type = callback.data.split(":")[1]
+    await state.update_data(item_type=item_type, quantity=1)
+    
+    item_info = ITEM_CATALOG[item_type]
+    await callback.message.answer(
+        f"💰 Установи стартовую цену для {item_info.emoji} {item_info.name}:\n"
+        "(введи число)"
+    )
+    await state.set_state(AuctionStates.entering_start_price)
+    await callback.answer()
+
+
+@router.message(AuctionStates.entering_start_price)
+async def auction_enter_start_price(message: Message, state: FSMContext):
+    """Enter auction start price."""
+    try:
+        start_price = int(message.text)
+        if start_price <= 0:
+            await message.answer("❌ Цена должна быть больше 0!")
+            return
+        
+        await state.update_data(start_price=start_price)
+        await message.answer("⏱ Длительность аукциона в часах (1-72):")
+        await state.set_state(AuctionStates.entering_duration)
+    except ValueError:
+        await message.answer("❌ Введи корректное число!")
+
+
+@router.message(AuctionStates.entering_duration)
+async def auction_enter_duration(message: Message, state: FSMContext):
+    """Enter auction duration."""
+    try:
+        duration = int(message.text)
+        if duration < 1 or duration > 72:
+            await message.answer("❌ Длительность должна быть от 1 до 72 часов!")
+            return
+        
+        data = await state.get_data()
+        result = await auction_service.create_auction(
+            seller_user_id=message.from_user.id,
+            chat_id=message.chat.id,
+            item_type=data["item_type"],
+            quantity=data["quantity"],
+            start_price=data["start_price"],
+            duration_hours=duration
+        )
+        
+        await message.answer(result.message)
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Введи корректное число!")
+
+
+@router.message(Command("auctions"))
+async def cmd_auctions(message: Message):
+    """Show active auctions."""
+    auctions = await auction_service.get_active_auctions(message.chat.id, limit=10)
+    
+    if not auctions:
+        await message.answer("🎯 Нет активных аукционов. Используй /auction чтобы создать!")
+        return
+    
+    text = "🎯 Активные аукционы:\n\n"
+    keyboard = []
+    
+    for auction in auctions:
+        item_data = json.loads(auction.item_data)
+        item_info = ITEM_CATALOG[item_data["item_type"]]
+        
+        time_left = auction.ends_at - datetime.now(auction.ends_at.tzinfo)
+        hours_left = int(time_left.total_seconds() // 3600)
+        
+        text += f"#{auction.id} {item_info.emoji} {item_info.name} x{item_data['quantity']}\n"
+        text += f"Текущая ставка: {auction.current_price} 🪙\n"
+        text += f"Осталось: {hours_left}ч\n\n"
+        
+        keyboard.append([InlineKeyboardButton(
+            text=f"Ставка на #{auction.id}",
+            callback_data=f"bid_prompt:{auction.id}"
+        )])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+
+@router.callback_query(F.data.startswith("bid_prompt:"))
+async def bid_prompt_callback(callback: CallbackQuery, state: FSMContext):
+    """Prompt for bid amount."""
+    auction_id = int(callback.data.split(":")[1])
+    await state.update_data(auction_id=auction_id)
+    await callback.message.answer("💰 Введи сумму ставки:")
+    await callback.answer()
+
+
+@router.message(F.text.isdigit())
+async def bid_enter_amount(message: Message, state: FSMContext):
+    """Enter bid amount (catches numeric input when auction_id is set)."""
+    data = await state.get_data()
+    auction_id = data.get("auction_id")
+    
+    if not auction_id:
+        return  # Not in bidding flow
     
     try:
-        trade_id = int(parts[1])
+        amount = int(message.text)
+        result = await auction_service.place_bid(auction_id, message.from_user.id, amount)
+        await message.answer(result.message)
+        await state.clear()
     except ValueError:
-        return await msg.reply("ID предложения должен быть числом.")
+        await message.answer("❌ Введи корректное число!")
 
-    async with async_session() as session:
-        trade_offer_res = await session.execute(
-            select(TradeOffer)
-            .filter_by(id=trade_id, seller_user_id=user.id, status="active")
-        )
-        trade_offer = trade_offer_res.scalars().first()
 
-        if not trade_offer:
-            return await msg.reply("Предложение не найдено или вы не являетесь его продавцом, или оно уже неактивно.")
+@router.message(Command("myauctions"))
+async def cmd_myauctions(message: Message):
+    """Show user's active auctions."""
+    auctions = await auction_service.get_user_auctions(message.from_user.id, message.chat.id)
+    
+    if not auctions:
+        await message.answer("📭 У тебя нет активных аукционов")
+        return
+    
+    text = "🎯 Твои аукционы:\n\n"
+    keyboard = []
+    
+    for auction in auctions:
+        item_data = json.loads(auction.item_data)
+        item_info = ITEM_CATALOG[item_data["item_type"]]
         
-        trade_offer.status = "cancelled"
-        await session.commit()
-        await msg.reply(f"Предложение {trade_id} отменено.")
+        time_left = auction.ends_at - datetime.now(auction.ends_at.tzinfo)
+        hours_left = int(time_left.total_seconds() // 3600)
+        
+        text += f"#{auction.id} {item_info.emoji} {item_info.name} x{item_data['quantity']}\n"
+        text += f"Текущая ставка: {auction.current_price} 🪙\n"
+        text += f"Осталось: {hours_left}ч\n\n"
+        
+        # Can only cancel if no bids
+        bids = await auction_service.get_auction_bids(auction.id)
+        if not bids:
+            keyboard.append([InlineKeyboardButton(
+                text=f"Отменить #{auction.id}",
+                callback_data=f"cancel_auction:{auction.id}"
+            )])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None)
+
+
+@router.callback_query(F.data.startswith("cancel_auction:"))
+async def cancel_auction_callback(callback: CallbackQuery):
+    """Cancel auction."""
+    auction_id = int(callback.data.split(":")[1])
+    result = await auction_service.cancel_auction(auction_id, callback.from_user.id)
+    await callback.answer(result.message, show_alert=True)
+    
+    if result.success:
+        await callback.message.edit_text(callback.message.text + f"\n\n🚫 Отменено!")

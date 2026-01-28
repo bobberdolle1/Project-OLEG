@@ -30,7 +30,8 @@ from app.config import settings
 from app.logger import setup_logging
 from app.database.session import init_db, async_session
 from app.database.models import Chat
-from app.handlers import qna, games, achievements, trading, auctions, quests, guilds, team_wars, duos, statistics, vision, random_responses, help
+from app.handlers import qna, games, achievements, auctions, quests, guilds, team_wars, duos, statistics, vision, random_responses, help
+from app.handlers.trading import router as trading_router
 from app.handlers.game_hub import router as game_hub_router
 from app.handlers.gif_patrol import router as gif_patrol_router
 from app.handlers.tournaments import router as tournaments_router
@@ -332,7 +333,7 @@ def build_dp() -> Dispatcher:
         marriages_router,  # Роутер для системы браков (до qna!)
         qna.router,
         achievements.router,  # Достижения
-        trading.router,
+        trading_router,  # Trading system v9.5 (trades, market, auctions)
         auctions.router,
         quests.router,  # Ежедневные квесты
         guilds.router,  # Гильдии

@@ -138,72 +138,27 @@ async def job_creative(bot: Bot):
                 await asyncio.sleep(1)
 
 
-async def job_close_auctions(bot: Bot):
+async def job_expire_trades_and_auctions(bot: Bot):
     """
-    Closes expired auctions, transfers items and funds, and notifies participants.
+    Expire old trades and complete finished auctions (v9.5).
+    Runs every minute.
     """
-    async_session = get_session()
-    async with async_session() as session:
-        expired_auctions_res = await session.execute(
-            select(Auction)
-            .filter(
-                Auction.ends_at <= utc_now(),
-                Auction.status == "active"
-            )
-            .options(
-                joinedload(Auction.seller),
-                joinedload(Auction.current_highest_bid).joinedload(Bid.bidder)
-            )
-        )
-        expired_auctions = expired_auctions_res.scalars().all()
-
-        for auction in expired_auctions:
-            if auction.current_highest_bid:
-                # Auction has a winner
-                winner_bid = auction.current_highest_bid
-                winner_user = winner_bid.bidder
-                seller_user = auction.seller
-
-                # Transfer item from seller to winner
-                if auction.item_type == "size_cm":
-                    seller_game_stat_res = await session.execute(select(GameStat).filter_by(user_id=seller_user.id))
-                    seller_game_stat = seller_game_stat_res.scalars().first()
-                    seller_game_stat.size_cm -= auction.item_quantity
-
-                    winner_game_stat_res = await session.execute(select(GameStat).filter_by(user_id=winner_user.id))
-                    winner_game_stat = winner_game_stat_res.scalars().first()
-                    winner_game_stat.size_cm += auction.item_quantity
-                elif auction.item_type == "balance":
-                    # This case is less likely for auctions but for completeness
-                    pass
-                
-                # Transfer funds from winner to seller
-                winner_wallet_res = await session.execute(select(Wallet).filter_by(user_id=winner_user.id))
-                winner_wallet = winner_wallet_res.scalars().first()
-                # Deduct bid amount from winner (already done when bid was placed)
-                # Here we just ensure the seller gets the money
-                
-                seller_wallet_res = await session.execute(select(Wallet).filter_by(user_id=seller_user.id))
-                seller_wallet = seller_wallet_res.scalars().first()
-                seller_wallet.balance += winner_bid.amount
-
-                auction.status = "completed"
-                await bot.send_message(
-                    chat_id=seller_user.tg_user_id,
-                    text=f"Ваш аукцион ID:{auction.id} завершен! {winner_user.username} купил {auction.item_quantity} {auction.item_type} за {winner_bid.amount} монет."
-                )
-                await bot.send_message(
-                    chat_id=winner_user.tg_user_id,
-                    text=f"Вы выиграли аукцион ID:{auction.id} и получили {auction.item_quantity} {auction.item_type} за {winner_bid.amount} монет!"
-                )
-            else:
-                # No bids, auction expired
-                auction.status = "expired"
-                await bot.send_message(
-                    chat_id=auction.seller.tg_user_id,
-                    text=f"Ваш аукцион ID:{auction.id} завершился без ставок и был отменен."
-                )
-            await session.commit()
+    from app.services.trade_service import trade_service
+    from app.services.auction_service import auction_service
+    
+    try:
+        # Expire old trades
+        expired_count = await trade_service.expire_old_trades()
+        if expired_count > 0:
+            logger.info(f"Expired {expired_count} old trades")
+        
+        # Complete finished auctions
+        completed_count = await auction_service.complete_expired_auctions()
+        if completed_count > 0:
+            logger.info(f"Completed {completed_count} expired auctions")
+            
+    except Exception as e:
+        logger.error(f"Error in expire_trades_and_auctions job: {e}")
 
 
 async def job_assign_daily_quests(bot: Bot):
@@ -774,13 +729,14 @@ async def setup_scheduler(bot: Bot):
     _scheduler = AsyncIOScheduler(timezone=tz)
     _scheduler.add_job(job_daily_summary, CronTrigger(hour=8, minute=0), args=[bot], id="daily_summary")
     _scheduler.add_job(job_creative, CronTrigger(hour=20, minute=0), args=[bot], id="creative")
-    _scheduler.add_job(job_close_auctions, CronTrigger(minute="*/1"), args=[bot], id="close_auctions")
     _scheduler.add_job(job_assign_daily_quests, CronTrigger(hour=0, minute=0), args=[bot], id="assign_daily_quests")
     _scheduler.add_job(job_update_team_wars, CronTrigger(minute="*/1"), args=[bot], id="update_team_wars")
     _scheduler.add_job(job_aggregate_daily_stats, CronTrigger(hour=23, minute=59), args=[bot], id="aggregate_daily_stats")
     _scheduler.add_job(job_sync_chat_members, CronTrigger(hour=3, minute=0), args=[bot], id="sync_chat_members")
     # Welcome 2.0: проверка истекших верификаций каждую минуту
     _scheduler.add_job(job_check_pending_verifications, IntervalTrigger(minutes=1), args=[bot], id="check_pending_verifications")
+    # Trading v9.5: expire trades and complete auctions every minute
+    _scheduler.add_job(job_expire_trades_and_auctions, IntervalTrigger(minutes=1), args=[bot], id="expire_trades_and_auctions")
     
     # SDOC: синхронизация админов группы каждые 6 часов
     if settings.sdoc_exclusive_mode and settings.sdoc_chat_id:

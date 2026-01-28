@@ -40,6 +40,16 @@ GROUP_COMMANDS = [
     BotCommand(command="inventory", description="🎒 Инвентарь"),
     BotCommand(command="transfer", description="💸 Перевести монеты"),
     
+    # === Трейдинг v9.5 ===
+    BotCommand(command="trade", description="🔄 Обмен с игроком (реплай)"),
+    BotCommand(command="trades", description="📋 Активные обмены"),
+    BotCommand(command="sell", description="🏪 Выставить на продажу"),
+    BotCommand(command="market", description="🛒 Маркетплейс"),
+    BotCommand(command="mylistings", description="📦 Мои объявления"),
+    BotCommand(command="auction", description="🎯 Создать аукцион"),
+    BotCommand(command="auctions", description="⚖️ Активные аукционы"),
+    BotCommand(command="myauctions", description="🔨 Мои аукционы"),
+    
     # === Социальное ===
     BotCommand(command="quests", description="📜 Ежедневные квесты"),
     BotCommand(command="achievements", description="🏆 Все достижения"),

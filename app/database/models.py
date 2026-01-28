@@ -96,46 +96,105 @@ class UserAchievement(Base):
     achievement: Mapped["Achievement"] = relationship(back_populates="users")
 
 
-class TradeOffer(Base):
-    __tablename__ = "trade_offers"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    seller_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    item_type: Mapped[str] = mapped_column(String(64))
-    item_quantity: Mapped[int] = mapped_column(Integer)
-    price: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(64), default="active")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+# ============================================================================
+# TRADING SYSTEM v9.5 - Trades, Market, Auctions
+# ============================================================================
 
-    seller: Mapped["User"] = relationship(foreign_keys=[seller_user_id])
+
+class Trade(Base):
+    """
+    P2P trade between two users (v9.5).
+    
+    Allows exchanging items and coins between players.
+    Expires after 5 minutes if not accepted.
+    """
+    __tablename__ = "trades"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    from_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    to_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    
+    # What the initiator offers
+    offer_items: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: [{"item_type": "...", "quantity": 1, "item_data": "..."}]
+    offer_coins: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # What the initiator requests
+    request_items: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+    request_coins: Mapped[int] = mapped_column(Integer, default=0)
+    
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending, accepted, rejected, cancelled, expired
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class MarketListing(Base):
+    """
+    Market listing for direct item sales (v9.5).
+    
+    Users can list items for sale at fixed prices.
+    Anyone can purchase instantly.
+    """
+    __tablename__ = "market_listings"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    seller_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    
+    # Item data (full item info as JSON)
+    item_data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: {"item_type": "...", "quantity": 1, "item_name": "...", "item_data": "..."}
+    price: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active, sold, cancelled
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
+    sold_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    buyer_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
 
 class Auction(Base):
+    """
+    Auction for bidding on items (v9.5).
+    
+    Users create auctions with start price and duration.
+    Highest bidder wins when auction ends.
+    """
     __tablename__ = "auctions"
+    
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    seller_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    item_type: Mapped[str] = mapped_column(String(64))
-    item_quantity: Mapped[int] = mapped_column(Integer)
-    start_price: Mapped[int] = mapped_column(Integer)
-    ends_at: Mapped[datetime] = mapped_column(DateTime)
-    status: Mapped[str] = mapped_column(String(64), default="active")
-    current_highest_bid_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bids.id"), nullable=True)
+    seller_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    
+    # Item data (full item info as JSON)
+    item_data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
+    start_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_price: Mapped[int] = mapped_column(Integer, nullable=False)  # Current highest bid
+    
+    ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active, completed, cancelled
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    winner_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    
+    bids: Mapped[list["AuctionBid"]] = relationship(back_populates="auction", cascade="all, delete-orphan")
 
-    seller: Mapped["User"] = relationship(foreign_keys=[seller_user_id])
-    bids: Mapped[list["Bid"]] = relationship(back_populates="auction", foreign_keys="[Bid.auction_id]")
-    current_highest_bid: Mapped[Optional["Bid"]] = relationship(foreign_keys=[current_highest_bid_id], post_update=True)
 
-
-class Bid(Base):
-    __tablename__ = "bids"
+class AuctionBid(Base):
+    """
+    Bid on an auction (v9.5).
+    
+    Tracks all bids made on auctions.
+    """
+    __tablename__ = "auction_bids"
+    
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    auction_id: Mapped[int] = mapped_column(ForeignKey("auctions.id"))
-    bidder_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    amount: Mapped[int] = mapped_column(Integer)
+    auction_id: Mapped[int] = mapped_column(ForeignKey("auctions.id", ondelete="CASCADE"), nullable=False, index=True)
+    bidder_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-
-    auction: Mapped["Auction"] = relationship(back_populates="bids", foreign_keys=[auction_id])
-    bidder: Mapped["User"] = relationship(foreign_keys=[bidder_user_id])
+    
+    auction: Mapped["Auction"] = relationship(back_populates="bids")
 
 
 class Quest(Base):

@@ -46,8 +46,24 @@ async def get_user_balance(user_id: int, chat_id: int) -> int:
     return await wallet_service.get_balance(user_id)
 
 
-async def update_user_balance(user_id: int, chat_id: int, change: int) -> int:
-    """Update user balance and return new value."""
+async def update_user_balance(user_id: int, chat_id: int, change: int, apply_coin_magnet: bool = True) -> int:
+    """Update user balance and return new value.
+    
+    Args:
+        user_id: User ID
+        chat_id: Chat ID
+        change: Amount to change (positive for add, negative for deduct)
+        apply_coin_magnet: Whether to apply coin magnet bonus (default True)
+    """
+    # Apply coin magnet bonus if enabled and change is positive
+    if apply_coin_magnet and change > 0:
+        from app.handlers.inventory import get_booster_effect
+        coin_magnet_data = await get_booster_effect(user_id, chat_id, "coin_magnet")
+        if coin_magnet_data:
+            coin_bonus = coin_magnet_data.get("coin_bonus", 0.25)
+            bonus_amount = int(change * coin_bonus)
+            change += bonus_amount
+    
     if change > 0:
         result = await wallet_service.add_balance(user_id, change, "mini_game win")
     elif change < 0:
@@ -191,7 +207,23 @@ async def callback_fishing(callback: CallbackQuery):
                 logger.warning(f"Failed to get equipped rod for user {user_id}: {rod_error}")
                 rod_bonus = 0.0
             
-            result = fishing_game.cast(user_id, rod_bonus)
+            # Check for fishing bait booster
+            from app.handlers.inventory import get_booster_effect, consume_booster_effect
+            fishing_bait_data = await get_booster_effect(user_id, chat_id, "fishing_bait")
+            fishing_bonus = 0.0
+            if fishing_bait_data:
+                fishing_bonus = fishing_bait_data.get("fishing_bonus", 0.3)
+                # Decrement uses
+                uses = fishing_bait_data.get("uses", 5)
+                if uses > 1:
+                    fishing_bait_data["uses"] = uses - 1
+                    from app.handlers.inventory import _set_booster_effect
+                    await _set_booster_effect(user_id, chat_id, "fishing_bait", fishing_bait_data)
+                else:
+                    # Last use - consume it
+                    await consume_booster_effect(user_id, chat_id, "fishing_bait")
+            
+            result = fishing_game.cast(user_id, rod_bonus, fishing_bonus)
             
             if not result.success:
                 return await callback.answer(result.message, show_alert=True)
@@ -1229,8 +1261,23 @@ async def callback_cockfight(callback: CallbackQuery):
         tier_map = {"common": RoosterTier.COMMON, "rare": RoosterTier.RARE, "epic": RoosterTier.EPIC}
         rooster_tier = tier_map.get(tier, RoosterTier.COMMON)
         
-        # Play game with luck bonus
-        result = cockfight_game.fight(user_id, bet, rooster_tier, luck_bonus)
+        # Check for boosters
+        from app.handlers.inventory import consume_booster_effect, get_booster_effect
+        damage_bonus = 0.0
+        crit_bonus = 0.0
+        
+        # Check damage boost (steroids)
+        damage_boost_data = await get_booster_effect(user_id, chat_id, "damage_boost")
+        if damage_boost_data:
+            damage_bonus = damage_boost_data.get("damage_bonus", 0.2)
+        
+        # Check critical boost (adrenaline) - one-time use
+        crit_boost_data = await consume_booster_effect(user_id, chat_id, "critical_boost")
+        if crit_boost_data:
+            crit_bonus = crit_boost_data.get("crit_chance", 0.15)
+        
+        # Play game with all bonuses
+        result = cockfight_game.fight(user_id, bet, rooster_tier, luck_bonus, damage_bonus, crit_bonus)
         
         # Apply HP damage to rooster after fight
         hp_loss = random.randint(FIGHT_HP_LOSS_MIN, FIGHT_HP_LOSS_MAX)

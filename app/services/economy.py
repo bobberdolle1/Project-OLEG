@@ -25,6 +25,8 @@ class ItemType(str, Enum):
     LOOTBOX_RARE = "lootbox_rare"
     LOOTBOX_EPIC = "lootbox_epic"
     LOOTBOX_LEGENDARY = "lootbox_legendary"
+    LOOTBOX_MEGA = "lootbox_mega"
+    LOOTBOX_MYSTERY = "lootbox_mystery"
     FISHING_ROD_BASIC = "fishing_rod_basic"
     FISHING_ROD_PRO = "fishing_rod_pro"
     FISHING_ROD_GOLDEN = "fishing_rod_golden"
@@ -90,6 +92,14 @@ SHOP_ITEMS: Dict[ItemType, ShopItem] = {
     ItemType.LOOTBOX_LEGENDARY: ShopItem(
         ItemType.LOOTBOX_LEGENDARY, "Легендарный лутбокс", "Шанс на легендарку!",
         1500, "📦", Rarity.LEGENDARY
+    ),
+    ItemType.LOOTBOX_MEGA: ShopItem(
+        ItemType.LOOTBOX_MEGA, "Мега лутбокс", "Гарантированная легендарка + бонусы!",
+        2500, "🎁", Rarity.LEGENDARY
+    ),
+    ItemType.LOOTBOX_MYSTERY: ShopItem(
+        ItemType.LOOTBOX_MYSTERY, "Мистический лутбокс", "Неизвестное содержимое...",
+        500, "🔮", Rarity.RARE
     ),
     ItemType.FISHING_ROD_BASIC: ShopItem(
         ItemType.FISHING_ROD_BASIC, "Удочка новичка", "Базовая удочка для рыбалки",

@@ -965,6 +965,18 @@ async def cmd_grow(msg: Message):
         cooldown_hours = random.randint(
             GROW_COOLDOWN_MIN_HOURS, GROW_COOLDOWN_MAX_HOURS
         )
+        
+        # Check for grow accelerator (reduces cooldown by 6 hours)
+        try:
+            from app.handlers.inventory import consume_booster_effect
+            grow_accel = await consume_booster_effect(user_id, chat_id, "grow_accelerator")
+            if grow_accel:
+                cooldown_reduction = grow_accel.get("cooldown_reduction_hours", 6)
+                cooldown_hours = max(1, cooldown_hours - cooldown_reduction)
+                logger.info(f"User {user_id} used grow accelerator: cooldown reduced by {cooldown_reduction}h")
+        except Exception as e:
+            logger.debug(f"No grow accelerator check: {e}")
+        
         gs.size_cm += gain
         gs.grow_count += 1
         gs.next_grow_at = now + timedelta(hours=cooldown_hours)

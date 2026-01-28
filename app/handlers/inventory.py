@@ -52,7 +52,8 @@ INV_PREFIX = "inv:"
 INVENTORY_CATEGORIES = {
     "rods": ("🎣 Удочки", [
         ItemType.BASIC_ROD, ItemType.SILVER_ROD, ItemType.GOLDEN_ROD, ItemType.LEGENDARY_ROD,
-        ItemType.FISHING_ROD_BASIC, ItemType.FISHING_ROD_PRO, ItemType.FISHING_ROD_GOLDEN
+        ItemType.FISHING_ROD_BASIC, ItemType.FISHING_ROD_PRO, ItemType.FISHING_ROD_GOLDEN,
+        "diamond_rod", "cosmic_rod"
     ]),
     "pp_items": ("🍆 PP предметы", [
         ItemType.PP_CREAM_SMALL, ItemType.PP_CREAM_MEDIUM, 
@@ -61,11 +62,14 @@ INVENTORY_CATEGORIES = {
     ]),
     "boosters": ("⚡ Бустеры", [
         ItemType.ENERGY_DRINK, ItemType.LUCKY_CHARM, ItemType.SHIELD, 
-        ItemType.VIP_STATUS, ItemType.DOUBLE_XP
+        ItemType.VIP_STATUS, ItemType.DOUBLE_XP, ItemType.DAMAGE_BOOST,
+        ItemType.HEAL_POTION, ItemType.CRITICAL_BOOST, ItemType.COIN_MAGNET,
+        ItemType.FISHING_BAIT, ItemType.GROW_ACCELERATOR
     ]),
     "lootboxes": ("📦 Лутбоксы", [
         ItemType.LOOTBOX_COMMON, ItemType.LOOTBOX_RARE, 
-        ItemType.LOOTBOX_EPIC, ItemType.LOOTBOX_LEGENDARY
+        ItemType.LOOTBOX_EPIC, ItemType.LOOTBOX_LEGENDARY,
+        ItemType.LOOTBOX_MEGA, ItemType.LOOTBOX_MYSTERY
     ]),
     "roosters": ("🐔 Петухи", [
         ItemType.ROOSTER_COMMON, ItemType.ROOSTER_RARE, ItemType.ROOSTER_EPIC

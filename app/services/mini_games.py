@@ -116,15 +116,23 @@ class FishingGame:
         if user_id in self._cooldowns:
             del self._cooldowns[user_id]
     
-    def _select_rarity(self, rod_bonus: float = 0.0) -> FishRarity:
-        """Select fish rarity based on probabilities."""
+    def _select_rarity(self, rod_bonus: float = 0.0, fishing_bonus: float = 0.0) -> FishRarity:
+        """Select fish rarity based on probabilities.
+        
+        Args:
+            rod_bonus: Bonus from equipped rod
+            fishing_bonus: Bonus from premium bait
+        """
         roll = self._random()
         cumulative = 0.0
         
-        # Adjust probabilities with rod bonus (increases rare+ chances)
+        # Combine bonuses
+        total_bonus = rod_bonus + fishing_bonus
+        
+        # Adjust probabilities with combined bonus (increases rare+ chances)
         probs = FISH_PROBABILITIES.copy()
-        if rod_bonus > 0:
-            bonus_pool = probs[FishRarity.TRASH] * rod_bonus
+        if total_bonus > 0:
+            bonus_pool = probs[FishRarity.TRASH] * total_bonus
             probs[FishRarity.TRASH] -= bonus_pool
             probs[FishRarity.RARE] += bonus_pool * 0.5
             probs[FishRarity.EPIC] += bonus_pool * 0.3
@@ -136,8 +144,14 @@ class FishingGame:
                 return rarity
         return FishRarity.COMMON
     
-    def cast(self, user_id: int, rod_bonus: float = 0.0) -> FishingResult:
-        """Cast the fishing rod."""
+    def cast(self, user_id: int, rod_bonus: float = 0.0, fishing_bonus: float = 0.0) -> FishingResult:
+        """Cast the fishing rod.
+        
+        Args:
+            user_id: User ID
+            rod_bonus: Bonus from equipped rod
+            fishing_bonus: Bonus from premium bait
+        """
         # Check cooldown
         now = utc_now()
         if user_id in self._cooldowns:
@@ -152,7 +166,7 @@ class FishingGame:
         self._cooldowns[user_id] = now + timedelta(seconds=self.COOLDOWN_SECONDS)
         
         # Select rarity and fish
-        rarity = self._select_rarity(rod_bonus)
+        rarity = self._select_rarity(rod_bonus, fishing_bonus)
         fish_list = FISH_CATALOG[rarity]
         fish = random.choice(fish_list)
         
@@ -909,8 +923,17 @@ class CockfightGame:
         
         return random.choice(ROOSTERS[tier])
     
-    def fight(self, user_id: int, bet: int, rooster_tier: RoosterTier = RoosterTier.COMMON, luck_bonus: float = 0.0) -> CockfightResult:
-        """Start a cockfight with dynamic events."""
+    def fight(self, user_id: int, bet: int, rooster_tier: RoosterTier = RoosterTier.COMMON, luck_bonus: float = 0.0, damage_bonus: float = 0.0, crit_bonus: float = 0.0) -> CockfightResult:
+        """Start a cockfight with dynamic events.
+        
+        Args:
+            user_id: User ID
+            bet: Bet amount
+            rooster_tier: Rooster tier
+            luck_bonus: Luck bonus from lucky charm (affects close fights)
+            damage_bonus: Damage bonus from steroids (increases base power)
+            crit_bonus: Critical hit chance bonus from adrenaline
+        """
         if bet <= 0:
             return CockfightResult(False, "Ставка должна быть положительной", error_code="INVALID_BET")
         
@@ -918,8 +941,10 @@ class CockfightGame:
         player_rooster = random.choice(ROOSTERS[rooster_tier])
         opponent_rooster = self._select_opponent_rooster(rooster_tier)
         
-        # Calculate base power
+        # Calculate base power with damage bonus
         player_power = player_rooster.get_power()
+        if damage_bonus > 0:
+            player_power = int(player_power * (1 + damage_bonus))
         opponent_power = opponent_rooster.get_power()
         
         # Build fight narrative with events
@@ -932,7 +957,7 @@ class CockfightGame:
         events = []
         
         # Player attack with events
-        player_crit = self._random() < (0.15 + luck_bonus)  # 15% base + luck bonus
+        player_crit = self._random() < (0.15 + luck_bonus + crit_bonus)  # 15% base + luck + crit bonus
         player_miss = self._random() < 0.10  # 10% miss chance
         
         if player_miss:
@@ -969,10 +994,18 @@ class CockfightGame:
         
         # Determine winner with luck bonus affecting close fights
         power_diff = abs(player_power - opponent_power)
+        booster_msgs = []
         if power_diff <= 5 and luck_bonus > 0:
             # Close fight - luck bonus tips the scale
             player_power += int(player_power * luck_bonus)
-            msg += f"🍀 Удача на твоей стороне! (+{int(luck_bonus * 100)}%)\n\n"
+            booster_msgs.append(f"🍀 Удача на твоей стороне! (+{int(luck_bonus * 100)}%)")
+        if damage_bonus > 0:
+            booster_msgs.append(f"💪 Стероиды активны! (+{int(damage_bonus * 100)}% урона)")
+        if crit_bonus > 0:
+            booster_msgs.append(f"⚡ Адреналин активен! (+{int(crit_bonus * 100)}% крита)")
+        
+        if booster_msgs:
+            msg += "\n".join(booster_msgs) + "\n\n"
         
         if player_power > opponent_power:
             # Reduced multipliers: x1.3 -> x1.2, x1.6 -> x1.4, x2.0 -> x1.7

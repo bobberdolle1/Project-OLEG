@@ -56,7 +56,7 @@ class MafiaGameService:
         
         Returns None if there's already an active game in this chat.
         """
-        # Check for existing active game
+        # Check for existing active game (only non-finished games)
         result = await self.session.execute(
             select(MafiaGame).where(
                 and_(
@@ -68,6 +68,7 @@ class MafiaGameService:
         existing_game = result.scalar_one_or_none()
         
         if existing_game:
+            logger.warning(f"Cannot create lobby in chat {chat_id}: game {existing_game.id} is {existing_game.status}")
             return None
         
         # Create new game

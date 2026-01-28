@@ -341,6 +341,44 @@ async def cmd_mafia_cancel(message: Message):
         await message.answer("✅ Игра отменена администратором.")
 
 
+@router.message(Command("mafia_debug"))
+async def cmd_mafia_debug(message: Message):
+    """Debug command to check game state."""
+    if message.chat.type == "private":
+        return
+    
+    from app.database.models import MafiaGame
+    from sqlalchemy import select, desc
+    
+    async_session = get_session()
+    async with async_session() as session:
+        # Get last 3 games in this chat
+        result = await session.execute(
+            select(MafiaGame)
+            .where(MafiaGame.chat_id == message.chat.id)
+            .order_by(desc(MafiaGame.created_at))
+            .limit(3)
+        )
+        games = list(result.scalars().all())
+        
+        if not games:
+            await message.answer("🔍 В этом чате не было игр в мафию.")
+            return
+        
+        text = "🔍 <b>Последние игры:</b>\n\n"
+        for game in games:
+            text += (
+                f"ID: {game.id}\n"
+                f"Статус: {game.status}\n"
+                f"Создана: {game.created_at.strftime('%H:%M:%S')}\n"
+            )
+            if game.finished_at:
+                text += f"Завершена: {game.finished_at.strftime('%H:%M:%S')}\n"
+            text += "\n"
+        
+        await message.answer(text, parse_mode="HTML")
+
+
 @router.message(Command("mafia_stats"))
 async def cmd_mafia_stats(message: Message):
     """Show player's mafia statistics."""
@@ -547,12 +585,23 @@ async def schedule_lobby_timeout(bot: Bot, game_id: int, chat_id: int):
         
         # Check if game is still in lobby
         game = await session.get(MafiaGame, game_id)
-        if not game or game.status != "lobby":
-            # Game already started or cancelled
+        if not game:
+            logger.warning(f"Lobby timeout: game {game_id} not found")
             return
         
+        if game.status != "lobby":
+            # Game already started or cancelled
+            logger.info(f"Lobby timeout: game {game_id} already in status {game.status}")
+            return
+        
+        logger.info(f"Lobby timeout: cancelling game {game_id} in chat {chat_id}")
+        
         # Cancel the game
-        await service.cancel_game(game_id)
+        success = await service.cancel_game(game_id)
+        
+        if not success:
+            logger.error(f"Failed to cancel game {game_id}")
+            return
         
         try:
             await bot.send_message(

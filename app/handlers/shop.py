@@ -41,7 +41,13 @@ CATEGORIES = {
         ItemType.DOUBLE_XP, 
         ItemType.SHIELD, 
         ItemType.ENERGY_DRINK, 
-        ItemType.VIP_STATUS
+        ItemType.VIP_STATUS,
+        ItemType.DAMAGE_BOOST,
+        ItemType.HEAL_POTION,
+        ItemType.CRITICAL_BOOST,
+        ItemType.COIN_MAGNET,
+        ItemType.FISHING_BAIT,
+        ItemType.GROW_ACCELERATOR
     ]),
     "roosters": ("🐔 Петухи", [
         ItemType.ROOSTER_COMMON, 

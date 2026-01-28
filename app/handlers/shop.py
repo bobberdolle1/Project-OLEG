@@ -188,13 +188,21 @@ async def callback_shop(callback: CallbackQuery):
         
         item_type_str = parts[3] if len(parts) > 3 else ""
         
-        # Try to get from SHOP_ITEMS first, then ITEM_CATALOG
-        try:
-            item_type = ItemType(item_type_str)
-            item = SHOP_ITEMS.get(item_type)
-        except ValueError:
-            item = None
+        # Try multiple lookup strategies
+        item = None
         
+        # 1. Try as ItemType enum in SHOP_ITEMS
+        try:
+            item_type_enum = ItemType(item_type_str)
+            item = SHOP_ITEMS.get(item_type_enum)
+        except (ValueError, KeyError):
+            pass
+        
+        # 2. Try as string key in SHOP_ITEMS (for diamond_rod, cosmic_rod, etc)
+        if not item:
+            item = SHOP_ITEMS.get(item_type_str)
+        
+        # 3. Fallback to ITEM_CATALOG
         if not item:
             item = ITEM_CATALOG.get(item_type_str)
         
@@ -235,13 +243,21 @@ async def callback_shop(callback: CallbackQuery):
         
         item_type_str = parts[3] if len(parts) > 3 else ""
         
-        # Try to get from SHOP_ITEMS first, then ITEM_CATALOG
-        try:
-            item_type = ItemType(item_type_str)
-            item = SHOP_ITEMS.get(item_type)
-        except ValueError:
-            item = None
+        # Try multiple lookup strategies
+        item = None
         
+        # 1. Try as ItemType enum in SHOP_ITEMS
+        try:
+            item_type_enum = ItemType(item_type_str)
+            item = SHOP_ITEMS.get(item_type_enum)
+        except (ValueError, KeyError):
+            pass
+        
+        # 2. Try as string key in SHOP_ITEMS (for diamond_rod, cosmic_rod, etc)
+        if not item:
+            item = SHOP_ITEMS.get(item_type_str)
+        
+        # 3. Fallback to ITEM_CATALOG
         if not item:
             item = ITEM_CATALOG.get(item_type_str)
         

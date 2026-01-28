@@ -1082,15 +1082,111 @@ def get_special_title(rank: int, total: int, is_largest: bool = False, is_smalle
     return ""
 
 
-@router.message(F.text.startswith("/top"))
-async def cmd_top(msg: Message):
+def get_diverse_title(rank: int, player: GameStat, smallest_id: int, top10: list) -> str:
     """
-    Команда /top — показать топ-10 игроков по размеру.
+    Generate diverse special titles based on rank, stats, and characteristics.
     
-    Includes special titles:
-    - "Гигант мысли" for the largest (Requirements 7.2)
-    - "Нано-технолог" for the smallest (Requirements 7.3)
+    Args:
+        rank: Player's rank (1-based)
+        player: GameStat object
+        smallest_id: ID of the smallest player
+        top10: List of top 10 players
+        
+    Returns:
+        Special title string
     """
+    # Primary titles for top positions
+    if rank == 1:
+        return f" {TITLE_LARGEST}"
+    
+    if player.tg_user_id == smallest_id and player.size_cm > 0:
+        return f" {TITLE_SMALLEST}"
+    
+    # Diverse titles based on characteristics
+    if rank == 2:
+        # Check if close to leader
+        leader_size = top10[0].size_cm
+        if player.size_cm >= leader_size * 0.95:
+            return " 👑 Претендент на трон"
+        return " 🥈 Серебряный гигант"
+    
+    if rank == 3:
+        return " 🥉 Бронзовый титан"
+    
+    # PvP-based titles
+    if player.pvp_wins > 50:
+        return " ⚔️ Боевой ветеран"
+    elif player.pvp_wins > 20:
+        return " 🗡️ Дуэлянт"
+    
+    # Growth-based titles
+    if player.grow_count > 100:
+        return " 🌟 Мастер роста"
+    elif player.grow_count > 50:
+        return " 🌱 Упорный садовник"
+    
+    # Casino-based titles
+    if player.casino_jackpots > 10:
+        return " 🎰 Везунчик казино"
+    elif player.casino_jackpots > 5:
+        return " 🍀 Счастливчик"
+    
+    # League-based titles
+    if player.league == "elite":
+        return " 💎 Элитный боец"
+    elif player.league == "quantum":
+        return " ⚡ Квантовый воин"
+    
+    # ELO-based titles
+    if player.elo_rating > 1500:
+        return " 🏅 Высокий рейтинг"
+    elif player.elo_rating > 1200:
+        return " 📊 Опытный игрок"
+    
+    # Reputation-based titles
+    if player.reputation > 100:
+        return " ⭐ Уважаемый"
+    elif player.reputation < -50:
+        return " 💀 Изгой"
+    
+    # Growth history analysis
+    if player.grow_history and len(player.grow_history) >= 5:
+        recent_changes = [entry.get("change", 0) for entry in player.grow_history[-5:]]
+        total_change = sum(recent_changes)
+        if total_change > 20:
+            return " 🚀 Стремительный рост"
+        elif total_change < -20:
+            return " 📉 В упадке"
+    
+    # Default titles by rank
+    rank_titles = {
+        4: " 🎯 Меткий стрелок",
+        5: " 🔥 Огненный дух",
+        6: " ⚡ Электрический разряд",
+        7: " 🌊 Морская волна",
+        8: " 🌪️ Вихрь хаоса",
+        9: " 🎭 Театральный",
+        10: " 🎪 Цирковой артист"
+    }
+    
+    return rank_titles.get(rank, "")
+
+
+@router.message(F.text.startswith("/top"))
+async def cmd_top(msg: Message, bot: Bot):
+    """
+    Команда /top — показать топ-10 игроков с общим графиком роста и расширенной статистикой.
+    
+    Features:
+    - Multi-line growth chart with all top 10 players (different colors)
+    - Diverse special titles based on rank and characteristics
+    - Overall statistics: average size, total growth, trend analysis
+    - Visual indicators and medals
+    
+    Requirements: 7.1, 7.2, 7.3, 7.4
+    """
+    from app.services.top_chart import top_chart_generator
+    
     async_session = get_session()
     async with async_session() as session:
         # Get top 10 by size (descending)
@@ -1099,37 +1195,111 @@ async def cmd_top(msg: Message):
         if not top10:
             return await msg.reply("Пусто. Никто не растил свою гордость.")
         
-        # Get the smallest player for "Нано-технолог" title (Requirements 7.3)
+        # Get the smallest player for special title
         res_smallest = await session.execute(
             select(GameStat).where(GameStat.size_cm > 0).order_by(GameStat.size_cm.asc()).limit(1)
         )
         smallest = res_smallest.scalars().first()
         smallest_id = smallest.tg_user_id if smallest else None
         
-        lines = []
+        # Calculate overall statistics
+        total_size = sum(s.size_cm for s in top10)
+        avg_size = total_size // len(top10)
+        total_grows = sum(s.grow_count for s in top10)
+        max_size = top10[0].size_cm
+        min_size_in_top = top10[-1].size_cm
+        
+        # Analyze growth trends
+        positive_trends = 0
+        negative_trends = 0
+        stable_trends = 0
+        for s in top10:
+            if s.grow_history and len(s.grow_history) >= 2:
+                recent_change = sum(entry.get("change", 0) for entry in s.grow_history[-3:])
+                if recent_change > 0:
+                    positive_trends += 1
+                elif recent_change < 0:
+                    negative_trends += 1
+                else:
+                    stable_trends += 1
+        
+        # Build top 10 list with diverse titles
+        lines = ["🏆 ТОП-10 ГИГАНТОВ МЫСЛИ\n"]
+        
         for i, s in enumerate(top10, start=1):
             name = s.username or str(s.tg_user_id)
             size_rank = get_rank_by_size(s.size_cm)
             
-            # Add special titles (Requirements 7.2, 7.3)
-            special_title = ""
-            if i == 1:  # Largest player gets "Гигант мысли"
-                special_title = get_special_title(i, len(top10), is_largest=True)
-            elif s.tg_user_id == smallest_id and s.size_cm > 0:  # Smallest gets "Нано-технолог"
-                special_title = get_special_title(i, len(top10), is_smallest=True)
+            # Generate diverse special titles
+            special_title = get_diverse_title(i, s, smallest_id, top10)
             
-            lines.append(f"{i}. {name}: {s.size_cm} см ({size_rank}){special_title}")
+            # Generate trend indicator from history
+            trend = ""
+            if s.grow_history and len(s.grow_history) >= 2:
+                recent_changes = [entry.get("change", 0) for entry in s.grow_history[-3:]]
+                avg_change = sum(recent_changes) / len(recent_changes)
+                if avg_change > 2:
+                    trend = " 📈"
+                elif avg_change < -2:
+                    trend = " 📉"
+                elif avg_change > 0:
+                    trend = " ↗️"
+                elif avg_change < 0:
+                    trend = " ↘️"
+                else:
+                    trend = " ➡️"
+            
+            # Format line with medal emojis for top 3
+            medal = ""
+            if i == 1:
+                medal = "🥇 "
+            elif i == 2:
+                medal = "🥈 "
+            elif i == 3:
+                medal = "🥉 "
+            else:
+                medal = f"{i}. "
+            
+            lines.append(
+                f"{medal}{name}: {s.size_cm} см{trend}\n"
+                f"   └ {size_rank}{special_title}"
+            )
         
-        # Add smallest player info if not in top 10 (Requirements 7.3)
+        # Add overall statistics section
+        stats_section = (
+            f"\n\n📊 ОБЩАЯ СТАТИСТИКА\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 Игроков в топе: {len(top10)}\n"
+            f"📏 Средний размер: {avg_size} см\n"
+            f"📐 Диапазон: {min_size_in_top}-{max_size} см\n"
+            f"🌱 Всего ростов: {total_grows}\n"
+            f"📈 Растут: {positive_trends} | ➡️ Стабильно: {stable_trends} | 📉 Падают: {negative_trends}\n"
+        )
+        
+        # Add smallest player info if not in top 10
         smallest_line = ""
         if smallest and smallest.tg_user_id not in [s.tg_user_id for s in top10]:
             smallest_name = smallest.username or str(smallest.tg_user_id)
-            smallest_line = f"\n\n{TITLE_SMALLEST}: {smallest_name} ({smallest.size_cm} см)"
+            smallest_line = f"\n🔬 Нано-технолог: {smallest_name} ({smallest.size_cm} см)"
         
-        await msg.reply(
-            "🏆 Топ-10:\n" + "\n".join(lines) + smallest_line +
-            "\n📋 /games"
-        )
+        text = "\n".join(lines) + stats_section + smallest_line + "\n\n📋 /games"
+        
+        # Generate multi-line chart for all top 10 players
+        try:
+            chart_bytes = top_chart_generator.generate_top10_chart(top10)
+            if chart_bytes:
+                photo = BufferedInputFile(chart_bytes, filename="top10_chart.png")
+                await bot.send_photo(
+                    chat_id=msg.chat.id,
+                    photo=photo,
+                    caption=text
+                )
+                return
+        except Exception as e:
+            logger.warning(f"Failed to generate top10 chart: {e}")
+        
+        # Fallback: send text only
+        await msg.reply(text)
 
 
 @router.message(F.text.startswith("/top_rep"))
@@ -1148,6 +1318,118 @@ async def cmd_top_rep(msg: Message):
             "⭐ Топ-10 по репутации:\n" + "\n".join(lines) +
             "\n📋 /games"
         )
+
+
+@router.message(F.text.startswith("/top_grow"))
+async def cmd_top_grow(msg: Message, bot: Bot):
+    """
+    Команда /top_grow — топ-10 игроков по количеству ростов с графиками.
+    
+    Features:
+    - Top 10 players by grow_count (most active growers)
+    - Multi-line growth chart showing activity
+    - Statistics: total grows, average per player
+    - Special titles for most active players
+    """
+    from app.services.top_chart import top_chart_generator
+    
+    async_session = get_session()
+    async with async_session() as session:
+        # Get top 10 by grow_count (descending)
+        res = await session.execute(
+            select(GameStat).order_by(GameStat.grow_count.desc()).limit(10)
+        )
+        top10 = res.scalars().all()
+        if not top10:
+            return await msg.reply("Пусто. Никто не растил свою гордость.")
+        
+        # Calculate statistics
+        total_grows = sum(s.grow_count for s in top10)
+        avg_grows = total_grows // len(top10)
+        max_grows = top10[0].grow_count
+        
+        # Calculate total size for comparison
+        total_size = sum(s.size_cm for s in top10)
+        avg_size = total_size // len(top10)
+        
+        # Build top 10 list
+        lines = ["🌱 ТОП-10 ПО КОЛИЧЕСТВУ РОСТОВ\n"]
+        
+        for i, s in enumerate(top10, start=1):
+            name = s.username or str(s.tg_user_id)
+            size_rank = get_rank_by_size(s.size_cm)
+            
+            # Special titles for grow leaders
+            special_title = ""
+            if i == 1:
+                special_title = " 👑 Король роста"
+            elif i == 2:
+                special_title = " 🥈 Мастер культивации"
+            elif i == 3:
+                special_title = " 🥉 Опытный садовник"
+            elif s.grow_count > 200:
+                special_title = " 🌟 Легенда роста"
+            elif s.grow_count > 100:
+                special_title = " ⭐ Профессионал"
+            elif s.grow_count > 50:
+                special_title = " 🌿 Энтузиаст"
+            
+            # Efficiency indicator (size per grow)
+            efficiency = s.size_cm / s.grow_count if s.grow_count > 0 else 0
+            efficiency_icon = ""
+            if efficiency > 2.0:
+                efficiency_icon = " 💎"  # High efficiency
+            elif efficiency > 1.5:
+                efficiency_icon = " ⚡"  # Good efficiency
+            elif efficiency < 0.5:
+                efficiency_icon = " 🐌"  # Low efficiency
+            
+            # Medal for top 3
+            medal = ""
+            if i == 1:
+                medal = "🥇 "
+            elif i == 2:
+                medal = "🥈 "
+            elif i == 3:
+                medal = "🥉 "
+            else:
+                medal = f"{i}. "
+            
+            lines.append(
+                f"{medal}{name}: {s.grow_count} ростов{efficiency_icon}\n"
+                f"   └ Размер: {s.size_cm} см ({size_rank}){special_title}"
+            )
+        
+        # Add statistics section
+        stats_section = (
+            f"\n\n📊 СТАТИСТИКА АКТИВНОСТИ\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 Игроков в топе: {len(top10)}\n"
+            f"🌱 Всего ростов: {total_grows}\n"
+            f"📊 Средне на игрока: {avg_grows} ростов\n"
+            f"📏 Средний размер: {avg_size} см\n"
+            f"🏆 Рекорд: {max_grows} ростов\n"
+            f"\n💎 = высокая эффективность | ⚡ = хорошая | 🐌 = низкая"
+        )
+        
+        text = "\n".join(lines) + stats_section + "\n\n📋 /games"
+        
+        # Generate multi-line chart for top growers
+        try:
+            chart_bytes = top_chart_generator.generate_top10_chart(top10)
+            if chart_bytes:
+                photo = BufferedInputFile(chart_bytes, filename="top_grow_chart.png")
+                await bot.send_photo(
+                    chat_id=msg.chat.id,
+                    photo=photo,
+                    caption=text
+                )
+                return
+        except Exception as e:
+            logger.warning(f"Failed to generate top_grow chart: {e}")
+        
+        # Fallback: send text only
+        await msg.reply(text)
 
 
 @router.message(F.text.startswith("/profile"))

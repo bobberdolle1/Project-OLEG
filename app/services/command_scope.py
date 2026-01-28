@@ -19,7 +19,8 @@ GROUP_COMMANDS = [
     # === Игры ===
     BotCommand(command="games", description="🎮 Игровой хаб с кнопками"),
     BotCommand(command="grow", description="🌱 Увеличить размер"),
-    BotCommand(command="top", description="🏆 Топ-10 по размеру"),
+    BotCommand(command="top", description="🏆 Топ-10 с графиками роста"),
+    BotCommand(command="top_grow", description="🌱 Топ-10 по количеству ростов"),
     BotCommand(command="challenge", description="⚔️ PvP дуэль"),
     BotCommand(command="casino", description="🎰 Слоты"),
     BotCommand(command="roulette", description="🔫 Русская рулетка"),

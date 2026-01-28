@@ -55,6 +55,7 @@ class MafiaGameService:
         Create a new mafia game lobby.
         
         Returns None if there's already an active game in this chat.
+        Automatically cancels old lobbies that exceeded timeout.
         """
         # Check for existing active game (only non-finished games)
         result = await self.session.execute(
@@ -68,8 +69,23 @@ class MafiaGameService:
         existing_game = result.scalar_one_or_none()
         
         if existing_game:
-            logger.warning(f"Cannot create lobby in chat {chat_id}: game {existing_game.id} is {existing_game.status}")
-            return None
+            # Check if it's an old lobby that should be cancelled
+            if existing_game.status == "lobby":
+                time_since_creation = (utc_now() - existing_game.created_at).total_seconds()
+                if time_since_creation > LOBBY_TIMEOUT:
+                    # Auto-cancel expired lobby
+                    logger.info(f"Auto-cancelling expired lobby {existing_game.id} (age: {time_since_creation}s)")
+                    existing_game.status = "finished"
+                    existing_game.finished_at = utc_now()
+                    await self.session.commit()
+                    # Continue to create new lobby
+                else:
+                    logger.warning(f"Cannot create lobby in chat {chat_id}: game {existing_game.id} is {existing_game.status}")
+                    return None
+            else:
+                # Game is in progress
+                logger.warning(f"Cannot create lobby in chat {chat_id}: game {existing_game.id} is {existing_game.status}")
+                return None
         
         # Create new game
         game = MafiaGame(

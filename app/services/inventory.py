@@ -635,8 +635,18 @@ class InventoryService:
         # Default to basic rod
         return ITEM_CATALOG[ItemType.BASIC_ROD]
     
-    async def has_item(self, user_id: int, chat_id: int, item_type: str) -> bool:
-        """Check if user has an item."""
+    async def has_item(self, user_id: int, chat_id: int, item_type) -> bool:
+        """Check if user has an item.
+        
+        Args:
+            user_id: User ID
+            chat_id: Chat ID
+            item_type: Item type (can be string or ItemType enum)
+        """
+        # Convert enum to string if needed
+        if hasattr(item_type, 'value'):
+            item_type = item_type.value
+        
         item = await self.get_item(user_id, chat_id, item_type)
         return item is not None and item.quantity > 0
     

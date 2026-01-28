@@ -101,6 +101,15 @@ SHOP_ITEMS: Dict[ItemType, ShopItem] = {
         ItemType.LOOTBOX_MYSTERY, "Мистический лутбокс", "Неизвестное содержимое...",
         500, "🔮", Rarity.RARE
     ),
+    # Note: lootbox_mega and lootbox_mystery are also stored as strings in some places
+    "lootbox_mega": ShopItem(
+        "lootbox_mega", "Мега лутбокс", "Гарантированная легендарка + бонусы!",
+        2500, "🎁", Rarity.LEGENDARY
+    ),
+    "lootbox_mystery": ShopItem(
+        "lootbox_mystery", "Мистический лутбокс", "Неизвестное содержимое...",
+        500, "🔮", Rarity.RARE
+    ),
     ItemType.FISHING_ROD_BASIC: ShopItem(
         ItemType.FISHING_ROD_BASIC, "Удочка новичка", "Базовая удочка для рыбалки",
         150, "🎣", Rarity.COMMON
@@ -112,6 +121,15 @@ SHOP_ITEMS: Dict[ItemType, ShopItem] = {
     ItemType.FISHING_ROD_GOLDEN: ShopItem(
         ItemType.FISHING_ROD_GOLDEN, "Золотая удочка", "+50% к редкой рыбе",
         3000, "🎣", Rarity.EPIC
+    ),
+    # New advanced rods (not in ItemType enum, stored as strings)
+    "diamond_rod": ShopItem(
+        "diamond_rod", "Алмазная удочка", "+75% к редкой рыбе",
+        25000, "💎", Rarity.LEGENDARY
+    ),
+    "cosmic_rod": ShopItem(
+        "cosmic_rod", "Космическая удочка", "+100% к редкой рыбе",
+        50000, "🌌", Rarity.LEGENDARY
     ),
     ItemType.LUCKY_CHARM: ShopItem(
         ItemType.LUCKY_CHARM, "Талисман удачи", "+5% к выигрышам на 1 час",

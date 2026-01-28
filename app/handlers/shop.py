@@ -98,27 +98,25 @@ def get_category_keyboard(user_id: int, category: str) -> InlineKeyboardMarkup:
     buttons = []
     
     for item_type in items:
-        logger.info(f"Category keyboard: item_type={item_type}, type={type(item_type)}, isinstance(str)={isinstance(item_type, str)}")
-        # Handle both ItemType enum and string
-        if isinstance(item_type, str):
-            item_type_str = item_type
-            item = ITEM_CATALOG.get(item_type_str)
-            logger.info(f"Category keyboard: STRING path, item_type_str='{item_type_str}'")
-        else:
-            # Extract value from enum - ItemType is a str Enum, so .value gives the string
-            logger.info(f"Category keyboard: ENUM path, item_type.value={item_type.value}")
+        # Check for enum FIRST (before str check) because ItemType inherits from str
+        if isinstance(item_type, ItemType):
+            # It's an enum - extract the value
             item_type_str = item_type.value
-            logger.info(f"Category keyboard: enum {item_type} -> value '{item_type_str}'")
             item = SHOP_ITEMS.get(item_type)
             if not item:
                 item = ITEM_CATALOG.get(item_type_str)
+        elif isinstance(item_type, str):
+            # It's a plain string (like "diamond_rod")
+            item_type_str = item_type
+            item = ITEM_CATALOG.get(item_type_str)
+        else:
+            continue
         
         if item:
             rarity_emoji = {"common": "", "uncommon": "⭐", "rare": "⭐⭐", "epic": "💜", "legendary": "🌟"}.get(getattr(item, 'rarity', Rarity.COMMON).value if hasattr(item, 'rarity') else 'common', "")
             price = item.price if hasattr(item, 'price') else 0
             text = f"{item.emoji} {item.name} — {price}💰 {rarity_emoji}"
             callback_data = f"{SHOP_PREFIX}{user_id}:buy:{item_type_str}"
-            logger.info(f"Category keyboard: creating button with callback_data='{callback_data}'")
             buttons.append([InlineKeyboardButton(text=text, callback_data=callback_data)])
     
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{SHOP_PREFIX}{user_id}:main")])

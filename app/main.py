@@ -52,6 +52,7 @@ from app.handlers.inventory import router as inventory_router
 from app.services.content_downloader import router as content_downloader_router
 from app.handlers.reactions import router as oleg_reactions_router
 from app.handlers.marriages import router as marriages_router
+from app.handlers.mafia import router as mafia_router
 from app.middleware.logging import MessageLoggerMiddleware
 from app.middleware.anti_click import AntiClickMiddleware
 from app.middleware.feature_toggle import FeatureToggleMiddleware
@@ -331,6 +332,7 @@ def build_dp() -> Dispatcher:
         summarizer_router,  # Роутер для пересказа контента (/tldr, /summary)
         tips_router,  # Советы для админов
         marriages_router,  # Роутер для системы браков (до qna!)
+        mafia_router,  # Mafia game v9.5.0 (cooperative social deduction)
         qna.router,
         achievements.router,  # Достижения
         trading_router,  # Trading system v9.5 (trades, market, auctions)

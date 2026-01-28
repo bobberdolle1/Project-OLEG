@@ -646,7 +646,7 @@ class LootboxReward:
     item_type: Optional[str] = None
 
 
-# Lootbox contents by type
+# Lootbox contents by type - expanded with new tiers
 LOOTBOX_CONTENTS: Dict[str, Dict[LootboxRarity, List[LootboxReward]]] = {
     "common": {
         LootboxRarity.COMMON: [
@@ -711,14 +711,51 @@ LOOTBOX_CONTENTS: Dict[str, Dict[LootboxRarity, List[LootboxReward]]] = {
             LootboxReward("Золотая удочка", "🎣", LootboxRarity.LEGENDARY, item_type="fishing_rod_golden"),
         ],
     },
+    "mega": {
+        LootboxRarity.COMMON: [
+            LootboxReward("Куча монет", "💰", LootboxRarity.COMMON, coins=500),
+        ],
+        LootboxRarity.RARE: [
+            LootboxReward("Огромный куш", "💵", LootboxRarity.RARE, coins=1000),
+        ],
+        LootboxRarity.EPIC: [
+            LootboxReward("Эпическое богатство", "💎", LootboxRarity.EPIC, coins=2500),
+            LootboxReward("Редкий петух", "🐓", LootboxRarity.EPIC, item_type="rooster_rare"),
+        ],
+        LootboxRarity.LEGENDARY: [
+            LootboxReward("КОСМИЧЕСКИЙ ДЖЕКПОТ!", "🌌", LootboxRarity.LEGENDARY, coins=10000),
+            LootboxReward("Алмазная удочка", "💎", LootboxRarity.LEGENDARY, item_type="diamond_rod"),
+            LootboxReward("Эпический петух", "🦃", LootboxRarity.LEGENDARY, item_type="rooster_epic"),
+        ],
+    },
+    "mystery": {
+        LootboxRarity.COMMON: [
+            LootboxReward("Пустота", "❓", LootboxRarity.COMMON, coins=0),
+            LootboxReward("Немного монет", "💰", LootboxRarity.COMMON, coins=50),
+        ],
+        LootboxRarity.RARE: [
+            LootboxReward("Сюрприз!", "🎁", LootboxRarity.RARE, coins=200),
+            LootboxReward("Случайный бустер", "⚡", LootboxRarity.RARE, item_type="energy_drink"),
+        ],
+        LootboxRarity.EPIC: [
+            LootboxReward("Большой сюрприз!", "🎉", LootboxRarity.EPIC, coins=800),
+            LootboxReward("Талисман удачи", "🍀", LootboxRarity.EPIC, item_type="lucky_charm"),
+        ],
+        LootboxRarity.LEGENDARY: [
+            LootboxReward("НЕВЕРОЯТНАЯ УДАЧА!", "✨", LootboxRarity.LEGENDARY, coins=3000),
+            LootboxReward("Космическая удочка", "🌌", LootboxRarity.LEGENDARY, item_type="cosmic_rod"),
+        ],
+    },
 }
 
-# Probabilities by lootbox type
+# Probabilities by lootbox type - expanded
 LOOTBOX_PROBABILITIES: Dict[str, Dict[LootboxRarity, float]] = {
     "common": {LootboxRarity.COMMON: 0.70, LootboxRarity.RARE: 0.20, LootboxRarity.EPIC: 0.08, LootboxRarity.LEGENDARY: 0.02},
     "rare": {LootboxRarity.COMMON: 0.50, LootboxRarity.RARE: 0.30, LootboxRarity.EPIC: 0.15, LootboxRarity.LEGENDARY: 0.05},
     "epic": {LootboxRarity.COMMON: 0.30, LootboxRarity.RARE: 0.35, LootboxRarity.EPIC: 0.25, LootboxRarity.LEGENDARY: 0.10},
     "legendary": {LootboxRarity.COMMON: 0.15, LootboxRarity.RARE: 0.30, LootboxRarity.EPIC: 0.35, LootboxRarity.LEGENDARY: 0.20},
+    "mega": {LootboxRarity.COMMON: 0.05, LootboxRarity.RARE: 0.20, LootboxRarity.EPIC: 0.40, LootboxRarity.LEGENDARY: 0.35},
+    "mystery": {LootboxRarity.COMMON: 0.40, LootboxRarity.RARE: 0.30, LootboxRarity.EPIC: 0.20, LootboxRarity.LEGENDARY: 0.10},
 }
 
 
@@ -810,22 +847,31 @@ class Rooster:
         return max(1, self.base_power + variance)
 
 
-# Rooster catalog
+# Rooster catalog - expanded with more variety
 ROOSTERS: Dict[RoosterTier, List[Rooster]] = {
     RoosterTier.COMMON: [
         Rooster("Петька", "🐔", RoosterTier.COMMON, 50, "Клевок"),
         Rooster("Кукарек", "🐔", RoosterTier.COMMON, 45, "Крыло"),
         Rooster("Рыжик", "🐔", RoosterTier.COMMON, 55, "Шпора"),
+        Rooster("Цыпа", "🐔", RoosterTier.COMMON, 48, "Быстрый удар"),
+        Rooster("Пёстрый", "🐔", RoosterTier.COMMON, 52, "Двойной клюв"),
+        Rooster("Боря", "🐔", RoosterTier.COMMON, 47, "Прыжок"),
     ],
     RoosterTier.RARE: [
         Rooster("Громобой", "🐓", RoosterTier.RARE, 70, "Удар грома"),
         Rooster("Огненный", "🐓", RoosterTier.RARE, 75, "Огненный клюв"),
         Rooster("Стальной", "🐓", RoosterTier.RARE, 80, "Стальные когти"),
+        Rooster("Вихрь", "🐓", RoosterTier.RARE, 72, "Ураганный удар"),
+        Rooster("Молния", "🐓", RoosterTier.RARE, 78, "Электрошок"),
+        Rooster("Титан", "🐓", RoosterTier.RARE, 76, "Сокрушающий удар"),
     ],
     RoosterTier.EPIC: [
         Rooster("Феникс", "🦃", RoosterTier.EPIC, 100, "Возрождение"),
         Rooster("Дракон", "🦃", RoosterTier.EPIC, 110, "Драконий рёв"),
         Rooster("Легенда", "🦃", RoosterTier.EPIC, 95, "Легендарный удар"),
+        Rooster("Кракен", "🦃", RoosterTier.EPIC, 105, "Щупальца хаоса"),
+        Rooster("Годзилла", "🦃", RoosterTier.EPIC, 115, "Атомное дыхание"),
+        Rooster("Валькирия", "🦃", RoosterTier.EPIC, 98, "Небесный меч"),
     ],
 }
 
@@ -863,8 +909,8 @@ class CockfightGame:
         
         return random.choice(ROOSTERS[tier])
     
-    def fight(self, user_id: int, bet: int, rooster_tier: RoosterTier = RoosterTier.COMMON) -> CockfightResult:
-        """Start a cockfight."""
+    def fight(self, user_id: int, bet: int, rooster_tier: RoosterTier = RoosterTier.COMMON, luck_bonus: float = 0.0) -> CockfightResult:
+        """Start a cockfight with dynamic events."""
         if bet <= 0:
             return CockfightResult(False, "Ставка должна быть положительной", error_code="INVALID_BET")
         
@@ -872,18 +918,61 @@ class CockfightGame:
         player_rooster = random.choice(ROOSTERS[rooster_tier])
         opponent_rooster = self._select_opponent_rooster(rooster_tier)
         
-        # Calculate power
+        # Calculate base power
         player_power = player_rooster.get_power()
         opponent_power = opponent_rooster.get_power()
         
-        # Build fight narrative
+        # Build fight narrative with events
         msg = f"🐔 <b>ПЕТУШИНЫЕ БОИ</b> 🐔\n\n"
         msg += f"Твой боец: {player_rooster.emoji} {player_rooster.name}\n"
         msg += f"Противник: {opponent_rooster.emoji} {opponent_rooster.name}\n\n"
         msg += f"━━━━━━━━━━━━━━━\n"
         msg += f"⚔️ БОЙ!\n\n"
-        msg += f"{player_rooster.name} использует {player_rooster.special_move}! (💪 {player_power})\n"
-        msg += f"{opponent_rooster.name} отвечает {opponent_rooster.special_move}! (💪 {opponent_power})\n\n"
+        
+        events = []
+        
+        # Player attack with events
+        player_crit = self._random() < (0.15 + luck_bonus)  # 15% base + luck bonus
+        player_miss = self._random() < 0.10  # 10% miss chance
+        
+        if player_miss:
+            events.append(f"💨 {player_rooster.name} промахнулся!")
+            player_power = int(player_power * 0.5)
+        elif player_crit:
+            events.append(f"💥 КРИТИЧЕСКИЙ УДАР! {player_rooster.name} использует {player_rooster.special_move}!")
+            player_power = int(player_power * 1.5)
+        else:
+            events.append(f"{player_rooster.name} использует {player_rooster.special_move}!")
+        
+        events.append(f"💪 Урон: {player_power}")
+        
+        # Opponent attack with events
+        opponent_crit = self._random() < 0.15
+        opponent_miss = self._random() < 0.10
+        opponent_counter = self._random() < 0.12  # 12% counter chance
+        
+        if opponent_miss:
+            events.append(f"\n💨 {opponent_rooster.name} промахнулся!")
+            opponent_power = int(opponent_power * 0.5)
+        elif opponent_counter:
+            events.append(f"\n🛡️ КОНТРАТАКА! {opponent_rooster.name} блокирует и наносит {opponent_rooster.special_move}!")
+            opponent_power = int(opponent_power * 1.3)
+        elif opponent_crit:
+            events.append(f"\n💥 КРИТИЧЕСКИЙ УДАР! {opponent_rooster.name} использует {opponent_rooster.special_move}!")
+            opponent_power = int(opponent_power * 1.5)
+        else:
+            events.append(f"\n{opponent_rooster.name} отвечает {opponent_rooster.special_move}!")
+        
+        events.append(f"💪 Урон: {opponent_power}")
+        
+        msg += "\n".join(events) + "\n\n"
+        
+        # Determine winner with luck bonus affecting close fights
+        power_diff = abs(player_power - opponent_power)
+        if power_diff <= 5 and luck_bonus > 0:
+            # Close fight - luck bonus tips the scale
+            player_power += int(player_power * luck_bonus)
+            msg += f"🍀 Удача на твоей стороне! (+{int(luck_bonus * 100)}%)\n\n"
         
         if player_power > opponent_power:
             # Reduced multipliers: x1.3 -> x1.2, x1.6 -> x1.4, x2.0 -> x1.7

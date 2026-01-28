@@ -608,11 +608,23 @@ async def callback_dice(callback: CallbackQuery):
     if balance < bet:
         return await callback.answer(f"Недостаточно монет! У тебя {balance}", show_alert=True)
     
+    # Check for luck bonus
+    from app.handlers.inventory import consume_booster_effect
+    luck_bonus = await consume_booster_effect(user_id, chat_id, "luck_bonus") or 0.0
+    
     # Deduct bet first
     await update_user_balance(user_id, chat_id, -bet)
     
     # Play game
     result = dice_game.play_vs_bot(user_id, bet)
+    
+    # Apply luck bonus to close games (within 2 points)
+    if luck_bonus > 0 and abs(result.player_roll - result.opponent_roll) <= 2:
+        if result.player_roll >= result.opponent_roll - 1:
+            # Luck tips the scale!
+            result.won = True
+            result.winnings = bet * 2
+            result.message += f"\n\n🍀 Удача на твоей стороне! (+{int(luck_bonus * 100)}%)"
     
     # Add winnings (includes bet back if won/draw)
     new_balance = await update_user_balance(user_id, chat_id, result.winnings)
@@ -819,11 +831,21 @@ async def callback_war(callback: CallbackQuery):
     if balance < bet:
         return await callback.answer(f"Недостаточно монет! У тебя {balance}", show_alert=True)
     
+    # Check for luck bonus
+    from app.handlers.inventory import consume_booster_effect
+    luck_bonus = await consume_booster_effect(user_id, chat_id, "luck_bonus") or 0.0
+    
     # Deduct bet first
     await update_user_balance(user_id, chat_id, -bet)
     
     # Play game
     result = war_game.play(user_id, bet)
+    
+    # Apply luck bonus to ties - player wins on tie with luck
+    if luck_bonus > 0 and result.is_war:
+        result.won = True
+        result.winnings = bet * 2
+        result.message += f"\n\n🍀 Удача решила исход! Ты побеждаешь!"
     
     # Add winnings (includes bet back if won/draw)
     new_balance = await update_user_balance(user_id, chat_id, result.winnings)
@@ -895,11 +917,21 @@ async def callback_wheel(callback: CallbackQuery):
     if balance < bet:
         return await callback.answer(f"Недостаточно монет! У тебя {balance}", show_alert=True)
     
+    # Check for luck bonus
+    from app.handlers.inventory import consume_booster_effect
+    luck_bonus = await consume_booster_effect(user_id, chat_id, "luck_bonus") or 0.0
+    
     # Deduct bet first
     await update_user_balance(user_id, chat_id, -bet)
     
     # Play game
     result = wheel_game.spin(user_id, bet)
+    
+    # Apply luck bonus - increase winnings by luck_bonus %
+    if luck_bonus > 0 and result.winnings > bet:
+        bonus_amount = int((result.winnings - bet) * luck_bonus)
+        result.winnings += bonus_amount
+        result.message += f"\n\n🍀 Бонус удачи: +{bonus_amount} монет!"
     
     # Add winnings (includes bet back based on multiplier)
     new_balance = await update_user_balance(user_id, chat_id, result.winnings)
@@ -924,6 +956,10 @@ def get_lootbox_keyboard(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📦 Эпик (400)", callback_data=f"{LOOT_PREFIX}{user_id}:epic"),
             InlineKeyboardButton(text="📦 Легенда (1000)", callback_data=f"{LOOT_PREFIX}{user_id}:legendary"),
         ],
+        [
+            InlineKeyboardButton(text="🎁 Мега (2500)", callback_data=f"{LOOT_PREFIX}{user_id}:mega"),
+            InlineKeyboardButton(text="🔮 Мистика (500)", callback_data=f"{LOOT_PREFIX}{user_id}:mystery"),
+        ],
     ])
 
 
@@ -932,6 +968,8 @@ LOOTBOX_PRICES = {
     "rare": 150,
     "epic": 400,
     "legendary": 1000,
+    "mega": 2500,
+    "mystery": 500,
 }
 
 
@@ -948,7 +986,9 @@ async def cmd_loot(message: Message):
         "📦 <b>Обычный</b> (50) — базовые награды\n"
         "📦 <b>Редкий</b> (150) — лучше шансы\n"
         "📦 <b>Эпический</b> (400) — гарантированный эпик+\n"
-        "📦 <b>Легендарный</b> (1000) — шанс на легендарку!\n\n"
+        "📦 <b>Легендарный</b> (1000) — шанс на легендарку!\n"
+        "🎁 <b>Мега</b> (2500) — гарантированная легенда!\n"
+        "🔮 <b>Мистический</b> (500) — всё или ничего!\n\n"
         f"💰 Баланс: {balance} монет\n\n"
         "Выбери лутбокс:"
     )
@@ -1135,9 +1175,13 @@ async def callback_cockfight(callback: CallbackQuery):
         from app.database.session import get_session
         from sqlalchemy import select
         from app.services.inventory import inventory_service, ItemType
+        from app.handlers.inventory import consume_booster_effect
         
         tier = parts[3] if len(parts) > 3 else "common"
         bet = int(parts[4]) if len(parts) > 4 else 25
+        
+        # Check for luck bonus
+        luck_bonus = await consume_booster_effect(user_id, chat_id, "luck_bonus") or 0.0
         
         # Verify rooster ownership before fight
         tier_to_item = {
@@ -1185,8 +1229,8 @@ async def callback_cockfight(callback: CallbackQuery):
         tier_map = {"common": RoosterTier.COMMON, "rare": RoosterTier.RARE, "epic": RoosterTier.EPIC}
         rooster_tier = tier_map.get(tier, RoosterTier.COMMON)
         
-        # Play game
-        result = cockfight_game.fight(user_id, bet, rooster_tier)
+        # Play game with luck bonus
+        result = cockfight_game.fight(user_id, bet, rooster_tier, luck_bonus)
         
         # Apply HP damage to rooster after fight
         hp_loss = random.randint(FIGHT_HP_LOSS_MIN, FIGHT_HP_LOSS_MAX)

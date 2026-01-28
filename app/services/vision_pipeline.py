@@ -335,7 +335,7 @@ Describe factually without opinions.""",
                 "stream": False,
                 "options": {
                     "temperature": 0.3,
-                    "num_ctx": 4096,
+                    "num_ctx": 8192,  # Increased from default 4096 to 8192 (2x)
                     "num_predict": 1024  # Увеличиваем лимит токенов
                 }
             }
@@ -508,7 +508,7 @@ Describe factually without opinions.""",
                 "stream": False,
                 "options": {
                     "temperature": 0.85,  # Больше креативности и живости
-                    "num_ctx": 4096,
+                    "num_ctx": 8192,  # Increased from default 4096 to 8192 (2x)
                     "num_predict": 1024  # Увеличено для полных ответов
                 }
             }

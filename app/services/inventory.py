@@ -54,6 +54,8 @@ class ItemType(str, Enum):
     LOOTBOX_RARE = "lootbox_rare"
     LOOTBOX_EPIC = "lootbox_epic"
     LOOTBOX_LEGENDARY = "lootbox_legendary"
+    LOOTBOX_MEGA = "lootbox_mega"
+    LOOTBOX_MYSTERY = "lootbox_mystery"
     
     # Roosters
     ROOSTER_COMMON = "rooster_common"
@@ -121,6 +123,26 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         description="Легендарная удочка мастера. +50% к редким рыбам!",
         price=10000,
         effect={"rod_bonus": 0.5},
+        stackable=False,
+    ),
+    
+    # New advanced rods
+    "diamond_rod": ItemInfo(
+        item_type="diamond_rod",
+        name="Алмазная удочка",
+        emoji="💎",
+        description="Удочка из чистого алмаза. +75% к редким рыбам!",
+        price=25000,
+        effect={"rod_bonus": 0.75},
+        stackable=False,
+    ),
+    "cosmic_rod": ItemInfo(
+        item_type="cosmic_rod",
+        name="Космическая удочка",
+        emoji="🌌",
+        description="Удочка из космического материала. +100% к редким рыбам!",
+        price=50000,
+        effect={"rod_bonus": 1.0},
         stackable=False,
     ),
     
@@ -297,6 +319,24 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         description="Шанс на легендарку!",
         price=1000,
         effect={"lootbox_tier": "legendary"},
+        stackable=True,
+    ),
+    ItemType.LOOTBOX_MEGA: ItemInfo(
+        item_type=ItemType.LOOTBOX_MEGA,
+        name="Мега лутбокс",
+        emoji="🎁",
+        description="Гарантированная легендарка + бонусы!",
+        price=2500,
+        effect={"lootbox_tier": "mega"},
+        stackable=True,
+    ),
+    ItemType.LOOTBOX_MYSTERY: ItemInfo(
+        item_type=ItemType.LOOTBOX_MYSTERY,
+        name="Мистический лутбокс",
+        emoji="🔮",
+        description="Неизвестное содержимое... Может быть всё что угодно!",
+        price=500,
+        effect={"lootbox_tier": "mystery"},
         stackable=True,
     ),
     

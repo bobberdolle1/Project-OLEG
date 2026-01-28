@@ -1526,6 +1526,7 @@ async def _ollama_chat(
         "stream": False,
         "options": {
             "temperature": temperature,
+            "num_ctx": 8192,  # Increased from default 2048 to 8192 (2x)
         },
     }
     
@@ -1726,6 +1727,7 @@ async def _ollama_chat_json(
         "format": "json",  # Native JSON mode - guarantees valid JSON output
         "options": {
             "temperature": temperature,
+            "num_ctx": 8192,  # Increased from default 2048 to 8192 (2x)
         },
     }
     
@@ -1807,6 +1809,7 @@ def build_json_payload(
         "format": "json",
         "options": {
             "temperature": temperature,
+            "num_ctx": 8192,  # Increased from default 2048 to 8192 (2x)
         },
     }
 
@@ -2297,7 +2300,11 @@ async def _check_injection_with_translation(text: str) -> bool:
                         "model": settings.ollama_base_model,
                         "prompt": translation_prompt,
                         "stream": False,
-                        "options": {"temperature": 0.1, "num_predict": 200}
+                        "options": {
+                            "temperature": 0.1,
+                            "num_predict": 200,
+                            "num_ctx": 8192  # Increased from default 2048 to 8192 (2x)
+                        }
                     }
                 )
                 if response.status_code == 200:

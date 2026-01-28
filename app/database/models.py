@@ -814,3 +814,138 @@ class MarriageProposal(Base):
     __table_args__ = (
         UniqueConstraint('from_user_id', 'to_user_id', 'chat_id', 'status', name='uq_proposal_pending'),
     )
+
+
+# ============================================================================
+# MAFIA GAME v9.5.0 - Cooperative Social Deduction Game
+# ============================================================================
+
+
+class MafiaGame(Base):
+    """
+    Mafia game session (v9.5.0).
+    
+    Tracks the state of an active or completed mafia game.
+    Phases: lobby -> night -> day_discussion -> day_voting -> (repeat) -> finished
+    """
+    __tablename__ = "mafia_games"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="lobby", index=True)  # lobby, night, day_discussion, day_voting, finished
+    phase_number: Mapped[int] = mapped_column(Integer, default=0)  # Current round number
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    winner: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # mafia, citizens, None
+    phase_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # When current phase started
+    
+    players: Mapped[list["MafiaPlayer"]] = relationship(back_populates="game", cascade="all, delete-orphan")
+    night_actions: Mapped[list["MafiaNightAction"]] = relationship(back_populates="game", cascade="all, delete-orphan")
+    votes: Mapped[list["MafiaVote"]] = relationship(back_populates="game", cascade="all, delete-orphan")
+
+
+class MafiaPlayer(Base):
+    """
+    Player in a mafia game (v9.5.0).
+    
+    Stores role, alive status, and death information.
+    """
+    __tablename__ = "mafia_players"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("mafia_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # citizen, mafia, doctor, detective, don
+    is_alive: Mapped[bool] = mapped_column(Boolean, default=True)
+    death_phase: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Phase number when died
+    death_reason: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # killed, lynched
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    game: Mapped["MafiaGame"] = relationship(back_populates="players")
+    
+    __table_args__ = (
+        UniqueConstraint('game_id', 'user_id', name='uq_mafia_game_user'),
+    )
+
+
+class MafiaNightAction(Base):
+    """
+    Night action in mafia game (v9.5.0).
+    
+    Tracks actions taken during night phase (kill, heal, check).
+    """
+    __tablename__ = "mafia_night_actions"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("mafia_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    phase_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)  # Who performs action
+    action_type: Mapped[str] = mapped_column(String(20), nullable=False)  # kill, heal, check
+    target_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)  # Target of action
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    game: Mapped["MafiaGame"] = relationship(back_populates="night_actions")
+    
+    __table_args__ = (
+        UniqueConstraint('game_id', 'phase_number', 'user_id', name='uq_mafia_night_action'),
+    )
+
+
+class MafiaVote(Base):
+    """
+    Day voting in mafia game (v9.5.0).
+    
+    Tracks votes during day phase for lynching suspects.
+    """
+    __tablename__ = "mafia_votes"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("mafia_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    phase_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    voter_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    
+    game: Mapped["MafiaGame"] = relationship(back_populates="votes")
+    
+    __table_args__ = (
+        UniqueConstraint('game_id', 'phase_number', 'voter_id', name='uq_mafia_vote'),
+    )
+
+
+class MafiaStats(Base):
+    """
+    Mafia game statistics per user (v9.5.0).
+    
+    Tracks wins, losses, and role-specific stats.
+    """
+    __tablename__ = "mafia_stats"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    
+    # Overall stats
+    games_played: Mapped[int] = mapped_column(Integer, default=0)
+    games_won: Mapped[int] = mapped_column(Integer, default=0)
+    games_survived: Mapped[int] = mapped_column(Integer, default=0)  # Survived to end
+    
+    # Role-specific stats
+    mafia_wins: Mapped[int] = mapped_column(Integer, default=0)
+    mafia_games: Mapped[int] = mapped_column(Integer, default=0)
+    citizen_wins: Mapped[int] = mapped_column(Integer, default=0)
+    citizen_games: Mapped[int] = mapped_column(Integer, default=0)
+    detective_checks: Mapped[int] = mapped_column(Integer, default=0)  # Successful mafia detections
+    detective_games: Mapped[int] = mapped_column(Integer, default=0)
+    doctor_saves: Mapped[int] = mapped_column(Integer, default=0)  # Successful saves
+    doctor_games: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Voting accuracy
+    correct_votes: Mapped[int] = mapped_column(Integer, default=0)  # Voted for mafia
+    total_votes: Mapped[int] = mapped_column(Integer, default=0)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'chat_id', name='uq_mafia_user_chat_stats'),
+    )

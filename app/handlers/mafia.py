@@ -14,6 +14,7 @@ from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_session
+from app.database.models import MafiaGame
 from app.services.mafia_game import MafiaGameService, LOBBY_TIMEOUT, NIGHT_TIMEOUT, DAY_DISCUSSION_TIMEOUT, DAY_VOTING_TIMEOUT
 from app.services.economy import EconomyService
 from app.utils import utc_now
@@ -68,7 +69,7 @@ def get_voting_keyboard(game_id: int, players: list) -> InlineKeyboardMarkup:
 
 
 @router.message(Command("mafia"))
-async def cmd_mafia_start(message: Message):
+async def cmd_mafia_start(message: Message, bot: Bot):
     """Create mafia game lobby."""
     if message.chat.type == "private":
         await message.answer("❌ Мафия играется только в группах!")
@@ -102,6 +103,9 @@ async def cmd_mafia_start(message: Message):
             reply_markup=get_lobby_keyboard(game.id),
             parse_mode="HTML"
         )
+        
+        # Schedule lobby timeout
+        asyncio.create_task(schedule_lobby_timeout(bot, game.id, message.chat.id))
 
 
 @router.callback_query(F.data.startswith("mafia_join:"))
@@ -532,6 +536,34 @@ async def process_voting_task(bot, game_id: int, chat_id: int):
 
 
 # Scheduling functions for phase transitions
+
+async def schedule_lobby_timeout(bot: Bot, game_id: int, chat_id: int):
+    """Cancel lobby if not started within timeout."""
+    await asyncio.sleep(LOBBY_TIMEOUT)
+    
+    async_session = get_session()
+    async with async_session() as session:
+        service = MafiaGameService(session)
+        
+        # Check if game is still in lobby
+        game = await session.get(MafiaGame, game_id)
+        if not game or game.status != "lobby":
+            # Game already started or cancelled
+            return
+        
+        # Cancel the game
+        await service.cancel_game(game_id)
+        
+        try:
+            await bot.send_message(
+                chat_id,
+                f"⏱ <b>Лобби #{game_id} закрыто</b>\n\n"
+                f"Время ожидания истекло. Игра отменена.",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send lobby timeout message: {e}")
+
 
 async def send_night_actions(bot: Bot, game_id: int):
     """Send night action keyboards to active roles."""

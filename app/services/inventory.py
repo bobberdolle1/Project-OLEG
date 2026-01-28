@@ -35,6 +35,14 @@ class ItemType(str, Enum):
     ENERGY_DRINK = "energy_drink"
     DOUBLE_XP = "double_xp"
     
+    # New boosters
+    DAMAGE_BOOST = "damage_boost"
+    HEAL_POTION = "heal_potion"
+    CRITICAL_BOOST = "critical_boost"
+    COIN_MAGNET = "coin_magnet"
+    FISHING_BAIT = "fishing_bait"
+    GROW_ACCELERATOR = "grow_accelerator"
+    
     # Protection
     SHIELD = "shield"
     
@@ -130,7 +138,7 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         item_type=ItemType.ENERGY_DRINK,
         name="Энергетик",
         emoji="🥤",
-        description="Сбрасывает кулдаун рыбалки.",
+        description="Сбрасывает кулдаун рыбалки (/fish).",
         price=50,
         effect={"reset_fishing_cooldown": True, "uses": 1},
         stackable=True,
@@ -195,6 +203,62 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         description="Двойной опыт на 1 час.",
         price=300,
         effect={"xp_bonus": 2.0, "duration_hours": 1},
+        stackable=True,
+    ),
+    
+    # New boosters
+    ItemType.DAMAGE_BOOST: ItemInfo(
+        item_type=ItemType.DAMAGE_BOOST,
+        name="Стероиды",
+        emoji="💪",
+        description="+20% урона в боях на 30 минут.",
+        price=250,
+        effect={"damage_bonus": 0.2, "duration_minutes": 30},
+        stackable=True,
+    ),
+    ItemType.HEAL_POTION: ItemInfo(
+        item_type=ItemType.HEAL_POTION,
+        name="Зелье лечения",
+        emoji="🧪",
+        description="Восстанавливает 50 HP петуху.",
+        price=150,
+        effect={"heal_amount": 50},
+        stackable=True,
+    ),
+    ItemType.CRITICAL_BOOST: ItemInfo(
+        item_type=ItemType.CRITICAL_BOOST,
+        name="Адреналин",
+        emoji="⚡",
+        description="+15% шанс крита в следующем бою.",
+        price=200,
+        effect={"crit_chance": 0.15, "uses": 1},
+        stackable=True,
+    ),
+    ItemType.COIN_MAGNET: ItemInfo(
+        item_type=ItemType.COIN_MAGNET,
+        name="Магнит монет",
+        emoji="🧲",
+        description="+25% монет из игр на 1 час.",
+        price=350,
+        effect={"coin_bonus": 0.25, "duration_hours": 1},
+        stackable=True,
+    ),
+    ItemType.FISHING_BAIT: ItemInfo(
+        item_type=ItemType.FISHING_BAIT,
+        name="Премиум наживка",
+        emoji="🪱",
+        description="+30% шанс редкой рыбы на 5 использований.",
+        price=180,
+        effect={"fishing_bonus": 0.3, "uses": 5},
+        stackable=True,
+    ),
+    ItemType.GROW_ACCELERATOR: ItemInfo(
+        item_type=ItemType.GROW_ACCELERATOR,
+        name="Ускоритель роста",
+        emoji="🚀",
+        description="Уменьшает кулдаун /grow на 6 часов.",
+        price=400,
+        effect={"cooldown_reduction_hours": 6},
         stackable=True,
     ),
     
@@ -270,45 +334,45 @@ ITEM_CATALOG: Dict[str, ItemInfo] = {
         item_type=ItemType.PP_CREAM_SMALL,
         name="Мазь 'Подрастай'",
         emoji="🧴",
-        description="+1-3 см к размеру пиписьки.",
+        description="+1-3% размера (мин 1 см, макс 30 см).",
         price=100,
-        effect={"pp_boost_min": 1, "pp_boost_max": 3},
+        effect={"pp_boost_min": 1, "pp_boost_max": 3, "min_cm": 1, "max_cm": 30},
         stackable=True,
     ),
     ItemType.PP_CREAM_MEDIUM: ItemInfo(
         item_type=ItemType.PP_CREAM_MEDIUM,
         name="Крем 'Титан'",
         emoji="🧴",
-        description="+2-5 см к размеру пиписьки.",
+        description="+2-5% размера (мин 2 см, макс 50 см).",
         price=300,
-        effect={"pp_boost_min": 2, "pp_boost_max": 5},
+        effect={"pp_boost_min": 2, "pp_boost_max": 5, "min_cm": 2, "max_cm": 50},
         stackable=True,
     ),
     ItemType.PP_CREAM_LARGE: ItemInfo(
         item_type=ItemType.PP_CREAM_LARGE,
         name="Гель 'Мегамен'",
         emoji="🧴",
-        description="+5-10 см к размеру пиписьки.",
+        description="+5-10% размера (мин 5 см, макс 100 см).",
         price=800,
-        effect={"pp_boost_min": 5, "pp_boost_max": 10},
+        effect={"pp_boost_min": 5, "pp_boost_max": 10, "min_cm": 5, "max_cm": 100},
         stackable=True,
     ),
     ItemType.PP_CREAM_TITAN: ItemInfo(
         item_type=ItemType.PP_CREAM_TITAN,
         name="Эликсир 'Годзилла'",
         emoji="🧪",
-        description="+10-20 см к размеру пиписьки!",
+        description="+10-20% размера (мин 10 см, макс 200 см)!",
         price=2000,
-        effect={"pp_boost_min": 10, "pp_boost_max": 20},
+        effect={"pp_boost_min": 10, "pp_boost_max": 20, "min_cm": 10, "max_cm": 200},
         stackable=True,
     ),
     ItemType.PP_CREAM_OMEGA: ItemInfo(
         item_type=ItemType.PP_CREAM_OMEGA,
         name="Сыворотка 'Омега'",
         emoji="💉",
-        description="+25-50 см + буст x2 к следующему /grow!",
+        description="+25-50% размера (мин 25 см, макс 500 см) + буст x2 к /grow!",
         price=5000,
-        effect={"pp_boost_min": 25, "pp_boost_max": 50, "grow_boost": 2.0, "grow_boost_duration": 1},
+        effect={"pp_boost_min": 25, "pp_boost_max": 50, "min_cm": 25, "max_cm": 500, "grow_boost": 2.0, "grow_boost_duration": 1},
         stackable=True,
     ),
     

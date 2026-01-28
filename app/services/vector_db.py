@@ -112,9 +112,8 @@ class OllamaEmbeddingFunction(EmbeddingFunction):
         
         try:
             # Ollama поддерживает batch embeddings — отправляем все тексты за один запрос
-            # Таймаут 15 секунд - если Ollama не отвечает, лучше использовать fallback
-            # чем блокировать event loop надолго
-            with httpx.Client(timeout=15) as client:
+            # Увеличенный таймаут до 60 секунд для стабильности
+            with httpx.Client(timeout=60) as client:
                 response = client.post(
                     f"{self.base_url}/api/embed",
                     json={"model": self.model, "input": input}  # Передаём список текстов

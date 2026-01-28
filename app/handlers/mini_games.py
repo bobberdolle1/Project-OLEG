@@ -1009,13 +1009,27 @@ async def callback_lootbox(callback: CallbackQuery):
 # COCKFIGHT GAME
 # ============================================================================
 
-def get_cockfight_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Create cockfight keyboard."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🐔 Обычный петух", callback_data=f"{COCK_PREFIX}{user_id}:select:common")],
-        [InlineKeyboardButton(text="🐓 Редкий петух", callback_data=f"{COCK_PREFIX}{user_id}:select:rare")],
-        [InlineKeyboardButton(text="🦃 Эпический петух", callback_data=f"{COCK_PREFIX}{user_id}:select:epic")],
-    ])
+async def get_cockfight_keyboard(user_id: int, chat_id: int) -> InlineKeyboardMarkup:
+    """Create cockfight keyboard with only owned roosters."""
+    from app.services.inventory import inventory_service, ItemType
+    
+    buttons = []
+    
+    # Check ownership for each rooster tier
+    if await inventory_service.has_item(user_id, chat_id, ItemType.ROOSTER_COMMON):
+        buttons.append([InlineKeyboardButton(text="🐔 Обычный петух", callback_data=f"{COCK_PREFIX}{user_id}:select:common")])
+    
+    if await inventory_service.has_item(user_id, chat_id, ItemType.ROOSTER_RARE):
+        buttons.append([InlineKeyboardButton(text="🐓 Редкий петух", callback_data=f"{COCK_PREFIX}{user_id}:select:rare")])
+    
+    if await inventory_service.has_item(user_id, chat_id, ItemType.ROOSTER_EPIC):
+        buttons.append([InlineKeyboardButton(text="🦃 Эпический петух", callback_data=f"{COCK_PREFIX}{user_id}:select:epic")])
+    
+    # If no roosters owned, show shop link
+    if not buttons:
+        buttons.append([InlineKeyboardButton(text="🛒 Купить петуха", callback_data=f"shop:{user_id}:roosters")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_cockfight_bet_keyboard(user_id: int, tier: str) -> InlineKeyboardMarkup:
@@ -1060,7 +1074,7 @@ async def cmd_cockfight(message: Message):
             else:
                 last_fight = game_stat.last_cockfight
             
-            cooldown_seconds = 60  # 1 minute
+            cooldown_seconds = 300  # 5 minutes
             elapsed = (now - last_fight).total_seconds()
             
             if elapsed < cooldown_seconds:
@@ -1076,14 +1090,17 @@ async def cmd_cockfight(message: Message):
     text = (
         "🐔 <b>ПЕТУШИНЫЕ БОИ</b> 🐔\n\n"
         "Выбери своего бойца и сделай ставку!\n\n"
-        "🐔 <b>Обычный</b> — базовая сила, x1.5 выигрыш\n"
-        "🐓 <b>Редкий</b> — сильнее, x2 выигрыш\n"
-        "🦃 <b>Эпический</b> — элита, x2.5 выигрыш\n\n"
+        "🐔 <b>Обычный</b> — базовая сила, x1.2 выигрыш\n"
+        "🐓 <b>Редкий</b> — сильнее, x1.4 выигрыш\n"
+        "🦃 <b>Эпический</b> — элита, x1.7 выигрыш\n\n"
+        "⚠️ Стоимость боя: ставка + 10% на корм\n"
+        "⏱️ Кулдаун: 5 минут\n\n"
         f"💰 Баланс: {balance} монет\n\n"
         "Выбери петуха:"
     )
     
-    await message.reply(text, reply_markup=get_cockfight_keyboard(user_id), parse_mode="HTML")
+    keyboard = await get_cockfight_keyboard(user_id, chat_id)
+    await message.reply(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith(COCK_PREFIX))
@@ -1117,13 +1134,37 @@ async def callback_cockfight(callback: CallbackQuery):
         from app.database.models import GameStat
         from app.database.session import get_session
         from sqlalchemy import select
+        from app.services.inventory import inventory_service, ItemType
         
         tier = parts[3] if len(parts) > 3 else "common"
         bet = int(parts[4]) if len(parts) > 4 else 25
         
+        # Verify rooster ownership before fight
+        tier_to_item = {
+            "common": ItemType.ROOSTER_COMMON,
+            "rare": ItemType.ROOSTER_RARE,
+            "epic": ItemType.ROOSTER_EPIC
+        }
+        required_item = tier_to_item.get(tier, ItemType.ROOSTER_COMMON)
+        
+        if not await inventory_service.has_item(user_id, chat_id, required_item):
+            return await callback.answer("❌ У тебя нет этого петуха! Купи в /shop", show_alert=True)
+        
+        # Check rooster HP
+        from app.services.rooster_hp import can_fight, damage_rooster, FIGHT_HP_LOSS_MIN, FIGHT_HP_LOSS_MAX
+        import random
+        
+        can_fight_result, reason = await can_fight(user_id, chat_id, required_item)
+        if not can_fight_result:
+            return await callback.answer(reason, show_alert=True)
+        
+        # Calculate entry fee (10% of bet for rooster food)
+        entry_fee = max(5, int(bet * 0.1))
+        total_cost = bet + entry_fee
+        
         balance = await get_user_balance(user_id, chat_id)
-        if balance < bet:
-            return await callback.answer(f"Недостаточно монет! У тебя {balance}", show_alert=True)
+        if balance < total_cost:
+            return await callback.answer(f"Недостаточно монет! Нужно {total_cost} (ставка {bet} + корм {entry_fee})", show_alert=True)
         
         # Update cooldown
         async_session = get_session()
@@ -1137,8 +1178,8 @@ async def callback_cockfight(callback: CallbackQuery):
                 game_stat.last_cockfight = datetime.now(timezone.utc)
                 await session.commit()
         
-        # Deduct bet first
-        await update_user_balance(user_id, chat_id, -bet)
+        # Deduct bet + entry fee
+        await update_user_balance(user_id, chat_id, -total_cost)
         
         # Map tier string to enum
         tier_map = {"common": RoosterTier.COMMON, "rare": RoosterTier.RARE, "epic": RoosterTier.EPIC}
@@ -1146,6 +1187,10 @@ async def callback_cockfight(callback: CallbackQuery):
         
         # Play game
         result = cockfight_game.fight(user_id, bet, rooster_tier)
+        
+        # Apply HP damage to rooster after fight
+        hp_loss = random.randint(FIGHT_HP_LOSS_MIN, FIGHT_HP_LOSS_MAX)
+        new_hp, max_hp = await damage_rooster(user_id, chat_id, required_item, hp_loss)
         
         # Update balance with result (winnings already include bet back if won)
         if result.won:
@@ -1158,8 +1203,9 @@ async def callback_cockfight(callback: CallbackQuery):
             # Lost: bet already deducted
             new_balance = await get_user_balance(user_id, chat_id)
         
-        text = f"{result.message}\n\n💰 Баланс: {new_balance} монет"
-        await callback.message.edit_text(text, reply_markup=get_cockfight_keyboard(user_id), parse_mode="HTML")
+        text = f"{result.message}\n\n💰 Баланс: {new_balance} монет\n❤️ HP петуха: {new_hp}/{max_hp} (-{hp_loss})"
+        keyboard = await get_cockfight_keyboard(user_id, chat_id)
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await callback.answer()
     
     elif action == "back":
@@ -1170,7 +1216,8 @@ async def callback_cockfight(callback: CallbackQuery):
             f"💰 Баланс: {balance} монет\n\n"
             "Выбери петуха:"
         )
-        await callback.message.edit_text(text, reply_markup=get_cockfight_keyboard(user_id), parse_mode="HTML")
+        keyboard = await get_cockfight_keyboard(user_id, chat_id)
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await callback.answer()
 
 

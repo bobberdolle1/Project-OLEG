@@ -931,15 +931,22 @@ async def cmd_grow(msg: Message):
             )
         gain = random.randint(GROW_MIN, GROW_MAX)
         
-        # Balance: 15% chance of failure (0 cm), 5% chance of shrinkage (-1 to -3 cm)
+        # Balance: 15% chance of failure (0 cm), 5% chance of shrinkage
         roll = random.random()
-        if roll < 0.05:  # 5% shrinkage
-            gain = random.randint(-3, -1)
+        if roll < 0.05:  # 5% shrinkage - scaled by size
+            # Shrinkage: -0.3% to -1% of current size (min -1 cm, max -30 cm)
+            current_size = max(1, gs.size_cm)
+            shrink_percent = random.uniform(0.003, 0.01)
+            gain = -max(1, min(30, int(current_size * shrink_percent)))
             failure_msg = "💀 <b>УСАДКА!</b> Твой PP уменьшился!"
         elif roll < 0.20:  # 15% failure (0.05 + 0.15 = 0.20)
             gain = 0
             failure_msg = "😐 <b>НЕУДАЧА!</b> Ничего не выросло..."
         else:
+            # Growth: 0.5% to 2% of current size (min 1 cm, max 50 cm)
+            current_size = max(1, gs.size_cm)
+            grow_percent = random.uniform(0.005, 0.02)
+            gain = max(1, min(50, int(current_size * grow_percent)))
             failure_msg = None
         
         # Check for Omega cream boost (Requirements: grow_boost effect)

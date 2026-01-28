@@ -2,6 +2,7 @@ import os
 import pathlib
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 from app.config import settings
 
 
@@ -24,7 +25,15 @@ async def init_db():
     
     # Connection pool settings (важно для PostgreSQL, для SQLite игнорируется)
     pool_settings = {}
-    if not settings.database_url.startswith("sqlite"):
+    connect_args = {}
+    
+    if settings.database_url.startswith("sqlite"):
+        # SQLite-specific optimizations
+        connect_args = {
+            "check_same_thread": False,
+            "timeout": 30.0,  # Увеличенный timeout для блокировок
+        }
+    else:
         pool_settings = {
             "pool_size": 10,           # Базовый размер пула
             "max_overflow": 20,        # Дополнительные соединения при нагрузке
@@ -36,6 +45,7 @@ async def init_db():
         settings.database_url,
         echo=False,
         future=True,
+        connect_args=connect_args,
         **pool_settings
     )
     _async_session = async_sessionmaker(_engine, expire_on_commit=False)
@@ -44,6 +54,13 @@ async def init_db():
     from . import models  # noqa: F401
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Enable WAL mode for SQLite (better concurrency)
+        if settings.database_url.startswith("sqlite"):
+            await conn.execute(text("PRAGMA journal_mode=WAL"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL"))
+            await conn.execute(text("PRAGMA cache_size=-64000"))  # 64MB cache
+            await conn.execute(text("PRAGMA busy_timeout=30000"))  # 30s timeout
 
 
 def get_session() -> async_sessionmaker[AsyncSession]:

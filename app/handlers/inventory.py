@@ -101,11 +101,18 @@ def is_pp_cage(item_type: str) -> bool:
     return item_type == ItemType.PP_CAGE
 
 
+def is_rooster(item_type: str) -> bool:
+    """Check if item is a rooster."""
+    return item_type.startswith("rooster_")
+
+
 def is_booster(item_type: str) -> bool:
-    """Check if item is a booster (energy drink, lucky charm, shield)."""
+    """Check if item is a booster (energy drink, lucky charm, shield, heal potion, etc)."""
     return item_type in [
         ItemType.ENERGY_DRINK, ItemType.LUCKY_CHARM, ItemType.SHIELD,
-        ItemType.VIP_STATUS, ItemType.DOUBLE_XP
+        ItemType.VIP_STATUS, ItemType.DOUBLE_XP, ItemType.DAMAGE_BOOST,
+        ItemType.HEAL_POTION, ItemType.CRITICAL_BOOST, ItemType.COIN_MAGNET,
+        ItemType.FISHING_BAIT, ItemType.GROW_ACCELERATOR
     ]
 
 
@@ -289,6 +296,68 @@ async def apply_booster(user_id: int, chat_id: int, item_type: str) -> EffectRes
                 "effect": "double_xp",
                 "xp_bonus": xp_bonus,
                 "duration": f"{duration_hours} hours"
+            }
+        )
+    
+    elif item_type == ItemType.HEAL_POTION:
+        # Heal rooster - show selection menu
+        from app.services.rooster_hp import heal_rooster, get_rooster_hp
+        from app.services.inventory import ItemType as InvItemType
+        
+        # Check which roosters user has
+        roosters = []
+        for rooster_type in [InvItemType.ROOSTER_COMMON, InvItemType.ROOSTER_RARE, InvItemType.ROOSTER_EPIC]:
+            if await inventory_service.has_item(user_id, chat_id, rooster_type):
+                current_hp, max_hp = await get_rooster_hp(user_id, chat_id, rooster_type)
+                if current_hp < max_hp:
+                    roosters.append((rooster_type, current_hp, max_hp))
+        
+        if not roosters:
+            return EffectResult(
+                success=False,
+                message="❌ У тебя нет раненых петухов!"
+            )
+        
+        # Heal first rooster (or implement selection menu)
+        rooster_type, current_hp, max_hp = roosters[0]
+        heal_amount = item_info.effect.get("heal_amount", 50)
+        new_hp, max_hp = await heal_rooster(user_id, chat_id, rooster_type, heal_amount)
+        
+        rooster_info = ITEM_CATALOG.get(rooster_type)
+        effect_result = EffectResult(
+            success=True,
+            message=f"🧪 Использовано {item_info.emoji} {item_info.name}!\n\n"
+                    f"❤️ {rooster_info.emoji} {rooster_info.name} восстановил {heal_amount} HP!\n"
+                    f"HP: {current_hp} → {new_hp}/{max_hp}",
+            details={
+                "effect": "heal_rooster",
+                "rooster_type": rooster_type,
+                "heal_amount": heal_amount,
+                "new_hp": new_hp
+            }
+        )
+    
+    elif item_type in [ItemType.DAMAGE_BOOST, ItemType.CRITICAL_BOOST, ItemType.COIN_MAGNET, 
+                       ItemType.FISHING_BAIT, ItemType.GROW_ACCELERATOR]:
+        # Generic booster activation
+        effect_name = item_type.replace("_", " ").title()
+        duration = item_info.effect.get("duration_hours", item_info.effect.get("duration_minutes", 0) / 60)
+        
+        if duration > 0:
+            ttl = int(duration * 3600)
+            await _set_booster_effect(user_id, chat_id, item_type, item_info.effect, ttl=ttl)
+            duration_text = f"{int(duration)}ч" if duration >= 1 else f"{int(duration * 60)}мин"
+        else:
+            await _set_booster_effect(user_id, chat_id, item_type, item_info.effect)
+            duration_text = "1 использование"
+        
+        effect_result = EffectResult(
+            success=True,
+            message=f"✨ Использован {item_info.emoji} {item_info.name}!\n\n"
+                    f"⚡ Эффект активирован на {duration_text}!",
+            details={
+                "effect": item_type,
+                "duration": duration_text
             }
         )
     
@@ -856,9 +925,16 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
         # Get effect range from item catalog
         pp_boost_min = item_info.effect.get("pp_boost_min", 1)
         pp_boost_max = item_info.effect.get("pp_boost_max", 3)
+        min_cm = item_info.effect.get("min_cm", 1)
+        max_cm = item_info.effect.get("max_cm", 30)
         
-        # Generate random increase within range
-        increase = random.randint(pp_boost_min, pp_boost_max)
+        # Calculate percentage-based increase
+        current_size = max(1, game_stat.size_cm)
+        percent = random.uniform(pp_boost_min, pp_boost_max)
+        increase = int(current_size * percent / 100)
+        
+        # Apply min/max bounds
+        increase = max(min_cm, min(max_cm, increase))
         
         old_size = game_stat.size_cm
         game_stat.size_cm = old_size + increase
@@ -1028,6 +1104,13 @@ async def build_inventory_keyboard(user_id: int, chat_id: int) -> InlineKeyboard
             else:
                 btn_text = f"🔒 Надеть {item_info.name}"
                 callback_data = f"{INV_PREFIX}{user_id}:cage:on"
+        elif is_rooster(item_type):
+            # Roosters don't have inventory actions - used in /cockfight
+            # Show HP status
+            from app.services.rooster_hp import get_rooster_hp
+            current_hp, max_hp = await get_rooster_hp(user_id, chat_id, item_type)
+            btn_text = f"{item_info.emoji} {item_info.name} (x{item.quantity}) ❤️ {current_hp}/{max_hp}"
+            callback_data = None  # No action, just display
         else:
             # Use button for consumables (creams, boosters)
             btn_text = f"✨ Использовать {item_info.name}"

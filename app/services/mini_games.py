@@ -886,7 +886,9 @@ class CockfightGame:
         msg += f"{opponent_rooster.name} отвечает {opponent_rooster.special_move}! (💪 {opponent_power})\n\n"
         
         if player_power > opponent_power:
-            winnings = int(bet * (1.3 if rooster_tier == RoosterTier.COMMON else 1.6 if rooster_tier == RoosterTier.RARE else 2.0))
+            # Reduced multipliers: x1.3 -> x1.2, x1.6 -> x1.4, x2.0 -> x1.7
+            multiplier = 1.2 if rooster_tier == RoosterTier.COMMON else 1.4 if rooster_tier == RoosterTier.RARE else 1.7
+            winnings = int(bet * multiplier)
             msg += f"🎉 <b>ПОБЕДА!</b> {player_rooster.name} побеждает!\n+{winnings} монет"
             return CockfightResult(True, msg, player_rooster, opponent_rooster, player_power, opponent_power, True, winnings)
         elif player_power < opponent_power:

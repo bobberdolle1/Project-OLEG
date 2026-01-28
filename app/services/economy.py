@@ -109,13 +109,41 @@ SHOP_ITEMS: Dict[ItemType, ShopItem] = {
         375, "🛡️", Rarity.UNCOMMON, duration_hours=1
     ),
     ItemType.ENERGY_DRINK: ShopItem(
-        ItemType.ENERGY_DRINK, "Энергетик", "Сброс кулдауна /grow",
+        ItemType.ENERGY_DRINK, "Энергетик", "Сброс кулдауна рыбалки",
         225, "🥤", Rarity.UNCOMMON
     ),
     ItemType.VIP_STATUS: ShopItem(
         ItemType.VIP_STATUS, "VIP статус", "VIP бонусы на 24 часа",
         750, "👑", Rarity.EPIC, duration_hours=24
     ),
+    
+    # New boosters
+    ItemType.DAMAGE_BOOST: ShopItem(
+        ItemType.DAMAGE_BOOST, "Стероиды", "+20% урона в боях (30 мин)",
+        250, "💪", Rarity.UNCOMMON, duration_hours=0.5
+    ),
+    ItemType.HEAL_POTION: ShopItem(
+        ItemType.HEAL_POTION, "Зелье лечения", "Восстанавливает 50 HP петуху",
+        150, "🧪", Rarity.COMMON
+    ),
+    ItemType.CRITICAL_BOOST: ShopItem(
+        ItemType.CRITICAL_BOOST, "Адреналин", "+15% шанс крита в бою",
+        200, "⚡", Rarity.UNCOMMON
+    ),
+    ItemType.COIN_MAGNET: ShopItem(
+        ItemType.COIN_MAGNET, "Магнит монет", "+25% монет из игр (1ч)",
+        350, "🧲", Rarity.RARE, duration_hours=1
+    ),
+    ItemType.FISHING_BAIT: ShopItem(
+        ItemType.FISHING_BAIT, "Премиум наживка", "+30% редкой рыбы (5 раз)",
+        180, "🪱", Rarity.UNCOMMON
+    ),
+    ItemType.GROW_ACCELERATOR: ShopItem(
+        ItemType.GROW_ACCELERATOR, "Ускоритель роста", "-6 часов кулдауна /grow",
+        400, "🚀", Rarity.RARE
+    ),
+    
+    # Roosters
     ItemType.ROOSTER_COMMON: ShopItem(
         ItemType.ROOSTER_COMMON, "Обычный петух", "Базовый боец",
         300, "🐔", Rarity.COMMON

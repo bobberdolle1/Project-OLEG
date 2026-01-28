@@ -74,7 +74,7 @@ async def cmd_mafia_start(message: Message):
         await message.answer("❌ Мафия играется только в группах!")
         return
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         # Check for existing game
@@ -108,7 +108,7 @@ async def callback_mafia_join(callback: CallbackQuery):
     """Join mafia game lobby."""
     game_id = int(callback.data.split(":")[1])
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         success = await service.join_lobby(
@@ -142,7 +142,7 @@ async def callback_mafia_leave(callback: CallbackQuery):
     """Leave mafia game lobby."""
     game_id = int(callback.data.split(":")[1])
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         success = await service.leave_lobby(game_id, callback.from_user.id)
@@ -178,7 +178,7 @@ async def callback_mafia_start_game(callback: CallbackQuery):
     """Start the mafia game."""
     game_id = int(callback.data.split(":")[1])
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         success, error = await service.start_game(game_id)
@@ -260,7 +260,7 @@ async def callback_mafia_night_action(callback: CallbackQuery):
     action_type = parts[2]
     target_user_id = int(parts[3])
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         success = await service.submit_night_action(
@@ -294,7 +294,7 @@ async def callback_mafia_vote(callback: CallbackQuery):
     game_id = int(parts[1])
     target_user_id = int(parts[2])
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         success = await service.submit_vote(
@@ -318,7 +318,7 @@ async def cmd_mafia_cancel(message: Message):
     
     # TODO: Add admin check
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         game = await service.get_active_game(message.chat.id)
@@ -336,7 +336,7 @@ async def cmd_mafia_stats(message: Message):
     from app.database.models import MafiaStats
     from sqlalchemy import select, and_
     
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         result = await session.execute(
             select(MafiaStats).where(
                 and_(
@@ -382,7 +382,7 @@ async def cmd_mafia_stats(message: Message):
 # Background task to process night phase
 async def process_night_phase_task(bot, game_id: int, chat_id: int):
     """Process night phase after timeout."""
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         result = await service.process_night_phase(game_id)
@@ -437,7 +437,7 @@ async def process_night_phase_task(bot, game_id: int, chat_id: int):
 # Background task to start voting
 async def start_voting_task(bot, game_id: int, chat_id: int):
     """Start voting phase after discussion."""
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         await service.start_voting(game_id)
@@ -458,7 +458,7 @@ async def start_voting_task(bot, game_id: int, chat_id: int):
 # Background task to process voting
 async def process_voting_task(bot, game_id: int, chat_id: int):
     """Process voting after timeout."""
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         result = await service.process_voting(game_id)
@@ -524,7 +524,7 @@ async def process_voting_task(bot, game_id: int, chat_id: int):
 
 async def send_night_actions(bot: Bot, game_id: int):
     """Send night action keyboards to active roles."""
-    async with get_session() as session:
+    async_session = get_session()`n    async with async_session() as session:
         service = MafiaGameService(session)
         
         players = await service.get_game_players(game_id, alive_only=True)

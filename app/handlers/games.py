@@ -932,29 +932,29 @@ async def cmd_grow(msg: Message):
         # Hybrid growth system: fixed until 100cm, then percentage-based
         current_size = max(1, gs.size_cm)
         
-        # Balance: 15% chance of failure (0 cm), 5% chance of shrinkage
+        # Balance: 12% chance of failure (0 cm), 3% chance of shrinkage
         roll = random.random()
-        if roll < 0.05:  # 5% shrinkage
+        if roll < 0.03:  # 3% shrinkage (reduced from 5%)
             if current_size < 100:
                 # Fixed shrinkage for small sizes
                 gain = -random.randint(1, 5)
             else:
-                # Percentage shrinkage for large sizes (0.5%-1.5%)
-                shrink_percent = random.uniform(0.005, 0.015)
+                # Percentage shrinkage for large sizes (0.5%-2%)
+                shrink_percent = random.uniform(0.005, 0.02)
                 gain = -max(1, min(30, int(current_size * shrink_percent)))
             failure_msg = "💀 <b>УСАДКА!</b> Твой PP уменьшился!"
-        elif roll < 0.20:  # 15% failure (0.05 + 0.15 = 0.20)
+        elif roll < 0.15:  # 12% failure (0.03 + 0.12 = 0.15)
             gain = 0
             failure_msg = "😐 <b>НЕУДАЧА!</b> Ничего не выросло..."
         else:
-            # Normal growth
+            # Normal growth (85% chance)
             if current_size < 100:
                 # Fixed growth for small sizes (1-20 cm)
                 gain = random.randint(GROW_MIN, GROW_MAX)
             else:
-                # Percentage growth for large sizes (0.5%-2%)
-                grow_percent = random.uniform(0.005, 0.02)
-                gain = max(1, min(50, int(current_size * grow_percent)))
+                # Percentage growth for large sizes (1%-5%)
+                grow_percent = random.uniform(0.01, 0.05)
+                gain = max(2, min(100, int(current_size * grow_percent)))
             failure_msg = None
         
         # Check for Omega cream boost (Requirements: grow_boost effect)

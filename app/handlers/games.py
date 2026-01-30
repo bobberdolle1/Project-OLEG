@@ -929,24 +929,32 @@ async def cmd_grow(msg: Message):
                 f"Подожди ещё {hours}ч {minutes}м, "
                 f"не спеши, чемпион."
             )
-        gain = random.randint(GROW_MIN, GROW_MAX)
+        # Hybrid growth system: fixed until 100cm, then percentage-based
+        current_size = max(1, gs.size_cm)
         
         # Balance: 15% chance of failure (0 cm), 5% chance of shrinkage
         roll = random.random()
-        if roll < 0.05:  # 5% shrinkage - scaled by size
-            # Shrinkage: -0.3% to -1% of current size (min -1 cm, max -30 cm)
-            current_size = max(1, gs.size_cm)
-            shrink_percent = random.uniform(0.003, 0.01)
-            gain = -max(1, min(30, int(current_size * shrink_percent)))
+        if roll < 0.05:  # 5% shrinkage
+            if current_size < 100:
+                # Fixed shrinkage for small sizes
+                gain = -random.randint(1, 5)
+            else:
+                # Percentage shrinkage for large sizes (0.5%-1.5%)
+                shrink_percent = random.uniform(0.005, 0.015)
+                gain = -max(1, min(30, int(current_size * shrink_percent)))
             failure_msg = "💀 <b>УСАДКА!</b> Твой PP уменьшился!"
         elif roll < 0.20:  # 15% failure (0.05 + 0.15 = 0.20)
             gain = 0
             failure_msg = "😐 <b>НЕУДАЧА!</b> Ничего не выросло..."
         else:
-            # Growth: 0.5% to 2% of current size (min 1 cm, max 50 cm)
-            current_size = max(1, gs.size_cm)
-            grow_percent = random.uniform(0.005, 0.02)
-            gain = max(1, min(50, int(current_size * grow_percent)))
+            # Normal growth
+            if current_size < 100:
+                # Fixed growth for small sizes (1-20 cm)
+                gain = random.randint(GROW_MIN, GROW_MAX)
+            else:
+                # Percentage growth for large sizes (0.5%-2%)
+                grow_percent = random.uniform(0.005, 0.02)
+                gain = max(1, min(50, int(current_size * grow_percent)))
             failure_msg = None
         
         # Check for Omega cream boost (Requirements: grow_boost effect)

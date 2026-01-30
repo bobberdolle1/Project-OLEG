@@ -929,32 +929,41 @@ async def cmd_grow(msg: Message):
                 f"Подожди ещё {hours}ч {minutes}м, "
                 f"не спеши, чемпион."
             )
-        # Hybrid growth system: fixed until 100cm, then percentage-based
+        # Progressive growth system with multiple thresholds
         current_size = max(1, gs.size_cm)
         
         # Balance: 10% chance of failure (0 cm), 3% chance of shrinkage
         roll = random.random()
         if roll < 0.03:  # 3% shrinkage
             if current_size < 100:
-                # Fixed shrinkage for small sizes
                 gain = -random.randint(2, 8)
-            else:
-                # Percentage shrinkage for large sizes (1%-3%)
+            elif current_size < 500:
                 shrink_percent = random.uniform(0.01, 0.03)
                 gain = -max(2, min(50, int(current_size * shrink_percent)))
+            else:
+                shrink_percent = random.uniform(0.02, 0.05)
+                gain = -max(5, min(100, int(current_size * shrink_percent)))
             failure_msg = "💀 <b>УСАДКА!</b> Твой PP уменьшился!"
-        elif roll < 0.13:  # 10% failure (0.03 + 0.10 = 0.13)
+        elif roll < 0.13:  # 10% failure
             gain = 0
             failure_msg = "😐 <b>НЕУДАЧА!</b> Ничего не выросло..."
         else:
             # Normal growth (87% chance)
             if current_size < 100:
-                # Fixed growth for small sizes (5-30 cm)
+                # Early game: fixed growth (5-30 cm)
                 gain = random.randint(GROW_MIN, GROW_MAX)
-            else:
-                # Percentage growth for large sizes (3%-8%)
+            elif current_size < 500:
+                # Mid game: 3%-8% growth
                 grow_percent = random.uniform(0.03, 0.08)
                 gain = max(5, min(150, int(current_size * grow_percent)))
+            elif current_size < 2000:
+                # Late game: 5%-12% growth
+                grow_percent = random.uniform(0.05, 0.12)
+                gain = max(10, min(300, int(current_size * grow_percent)))
+            else:
+                # End game: 8%-15% growth
+                grow_percent = random.uniform(0.08, 0.15)
+                gain = max(20, min(500, int(current_size * grow_percent)))
             failure_msg = None
         
         # Check for Omega cream boost (Requirements: grow_boost effect)

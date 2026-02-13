@@ -154,21 +154,42 @@ async def job_check_pending_verifications(bot: Bot):
 
 
 async def job_daily_summary(bot: Bot):
+    """
+    Morning summary job (08:00). Summarizes yesterday.
+    Sends to summary_topic_id if set, otherwise to main chat.
+    """
+    from app.services.dailies import dailies_service
+    
     async_session = get_session()
     async with async_session() as session:
-        result = await session.execute(select(Chat))
-        chats = result.scalars().all()
+        try:
+            result = await session.execute(select(Chat))
+            chats = result.scalars().all()
 
-        for chat in chats:
-            if chat.summary_topic_id:
-                text = await summarize_chat(chat.id)
-                await bot.send_message(
-                    chat_id=chat.id,
-                    message_thread_id=chat.summary_topic_id,
-                    text=text,
-                    disable_web_page_preview=True
-                )
-                await asyncio.sleep(1)
+            for chat in chats:
+                try:
+                    # Get summary for yesterday
+                    messages = await dailies_service.get_morning_messages(
+                        chat.id, session, for_today=False
+                    )
+                    
+                    for msg in messages:
+                        text = msg.get("text")
+                        # In the morning we send to summary_topic_id if available
+                        target_topic = chat.summary_topic_id
+                        
+                        await bot.send_message(
+                            chat_id=chat.id,
+                            message_thread_id=target_topic,
+                            text=text,
+                            parse_mode="HTML",
+                            disable_web_page_preview=True
+                        )
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f"Failed morning summary for chat {chat.id}: {e}")
+        except Exception as e:
+            logger.error(f"Error in morning summary job: {e}")
 
 async def job_creative(bot: Bot):
     async_session = get_session()
@@ -597,6 +618,7 @@ async def job_dailies_evening_summary(bot: Bot):
     **Validates: Requirements 13.1, 13.4, 13.5**
     """
     from app.services.dailies import dailies_service
+    from aiogram.types import BufferedInputFile
     
     async_session = get_session()
     async with async_session() as session:
@@ -607,18 +629,34 @@ async def job_dailies_evening_summary(bot: Bot):
             
             for chat in chats:
                 try:
-                    # Get summary messages (respects settings and activity)
+                    # Get summary messages (for_today=True for evening summary)
                     messages = await dailies_service.get_morning_messages(
-                        chat.id, session
+                        chat.id, session, for_today=True
                     )
                     
-                    for message in messages:
-                        await bot.send_message(
-                            chat_id=chat.id,
-                            text=message,
-                            parse_mode="HTML",
-                            disable_web_page_preview=True
-                        )
+                    target_topic = chat.summary_topic_id
+                    
+                    for msg in messages:
+                        text = msg.get("text")
+                        photo = msg.get("photo")
+                        
+                        if photo:
+                            input_file = BufferedInputFile(photo, filename="summary.png")
+                            await bot.send_photo(
+                                chat_id=chat.id,
+                                message_thread_id=target_topic,
+                                photo=input_file,
+                                caption=text,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            await bot.send_message(
+                                chat_id=chat.id,
+                                message_thread_id=target_topic,
+                                text=text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=True
+                            )
                         await asyncio.sleep(0.5)  # Rate limiting
                     
                     if messages:
@@ -630,7 +668,7 @@ async def job_dailies_evening_summary(bot: Bot):
                     logger.error(f"Failed to send evening summary to chat {chat.id}: {e}")
                     
         except Exception as e:
-            logger.error(f"Error in morning summary job: {e}")
+            logger.error(f"Error in evening summary job: {e}")
 
 
 async def job_dailies_evening_quote_and_stats(bot: Bot):
@@ -642,6 +680,7 @@ async def job_dailies_evening_quote_and_stats(bot: Bot):
     **Validates: Requirements 13.2, 13.3, 13.4**
     """
     from app.services.dailies import dailies_service
+    from aiogram.types import BufferedInputFile
     
     async_session = get_session()
     async with async_session() as session:
@@ -657,13 +696,29 @@ async def job_dailies_evening_quote_and_stats(bot: Bot):
                         chat.id, session
                     )
                     
-                    for message in messages:
-                        await bot.send_message(
-                            chat_id=chat.id,
-                            text=message,
-                            parse_mode="HTML",
-                            disable_web_page_preview=True
-                        )
+                    target_topic = chat.summary_topic_id
+                    
+                    for msg in messages:
+                        text = msg.get("text")
+                        photo = msg.get("photo")
+                        
+                        if photo:
+                            input_file = BufferedInputFile(photo, filename="stats.png")
+                            await bot.send_photo(
+                                chat_id=chat.id,
+                                message_thread_id=target_topic,
+                                photo=input_file,
+                                caption=text,
+                                parse_mode="HTML"
+                            )
+                        else:
+                            await bot.send_message(
+                                chat_id=chat.id,
+                                message_thread_id=target_topic,
+                                text=text,
+                                parse_mode="HTML",
+                                disable_web_page_preview=True
+                            )
                         await asyncio.sleep(0.5)  # Rate limiting
                     
                     if messages:
@@ -771,10 +826,31 @@ async def job_birthday_greetings(bot: Bot):
         logger.error(f"Ошибка в job_birthday_greetings: {e}")
 
 
+async def job_generate_daily_event(bot: Bot):
+    """Generate a new daily dynamic event."""
+    from app.services.event_service import event_service, EventType
+    await event_service.generate_event(EventType.DAILY, bot)
+
+async def job_generate_weekly_event(bot: Bot):
+    """Generate a new weekly dynamic event."""
+    from app.services.event_service import event_service, EventType
+    await event_service.generate_event(EventType.WEEKLY, bot)
+
+async def job_generate_system_auction(bot: Bot):
+    """Generate a random system auction."""
+    from app.services.auction_service import auction_service
+    await auction_service.create_system_auction(bot)
+
+
 async def setup_scheduler(bot: Bot):
     global _scheduler
     if _scheduler:
         return
+        
+    # Load active events on startup
+    from app.services.event_service import event_service
+    await event_service.load_active_events()
+    
     tz = pytz.timezone(settings.timezone)
     _scheduler = AsyncIOScheduler(timezone=tz)
     _scheduler.add_job(job_daily_summary, CronTrigger(hour=8, minute=0), args=[bot], id="daily_summary")
@@ -787,6 +863,13 @@ async def setup_scheduler(bot: Bot):
     _scheduler.add_job(job_check_pending_verifications, IntervalTrigger(minutes=1), args=[bot], id="check_pending_verifications")
     # Trading v9.5: expire trades and complete auctions every minute
     _scheduler.add_job(job_expire_trades_and_auctions, IntervalTrigger(minutes=1), args=[bot], id="expire_trades_and_auctions")
+    
+    # Dynamic Events
+    _scheduler.add_job(job_generate_daily_event, CronTrigger(hour=9, minute=0), args=[bot], id="generate_daily_event")
+    _scheduler.add_job(job_generate_weekly_event, CronTrigger(day_of_week='mon', hour=10, minute=0), args=[bot], id="generate_weekly_event")
+    
+    # System Auctions (Black Market) - Every 6 hours
+    _scheduler.add_job(job_generate_system_auction, IntervalTrigger(hours=6), args=[bot], id="generate_system_auction")
     
     # Rooster HP regeneration: every hour
     _scheduler.add_job(

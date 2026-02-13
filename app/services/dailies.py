@@ -214,12 +214,14 @@ class DailyStats:
         top_growers: List of top growers (username, growth)
         top_losers: List of top losers (username, loss)
         tournament_standings: Current tournament standings
+        chart_data: PNG chart data
     """
     chat_id: int
     date: datetime
     top_growers: List[Dict[str, Any]] = field(default_factory=list)
     top_losers: List[Dict[str, Any]] = field(default_factory=list)
     tournament_standings: List[Dict[str, Any]] = field(default_factory=list)
+    chart_data: Optional[bytes] = None
 
 
 # ============================================================================
@@ -433,28 +435,16 @@ class DailiesService:
     async def generate_summary(
         self,
         chat_id: int,
-        session: Optional[AsyncSession] = None
+        session: Optional[AsyncSession] = None,
+        for_today: bool = True
     ) -> Optional[DailySummary]:
         """
         Generate daily summary for a chat.
         
-        Property 34: Skip summary on no activity
-        *For any* chat with zero messages in the past 24 hours,
-        the daily summary SHALL be skipped.
-        
-        Requirement 13.1: WHEN the time reaches 09:00 Moscow time
-        THEN the Dailies System SHALL send a #dailysummary message
-        with a digest of yesterday's events.
-        
-        Enhanced with:
-        - Toxicity thermometer (average toxicity score)
-        - Hot topics with message links
-        - Peak activity hour
-        - Top chatters
-        
         Args:
             chat_id: Telegram chat ID
             session: Optional database session
+            for_today: If True, summarizes today so far. If False, summarizes yesterday.
             
         Returns:
             DailySummary if there was activity, None otherwise
@@ -471,19 +461,21 @@ class DailiesService:
         
         try:
             now = utc_now()
-            yesterday_start = (now - timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            yesterday_end = now.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            if for_today:
+                # Today so far (from 00:00 UTC)
+                start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_time = now
+            else:
+                # Full yesterday
+                start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # Count messages from yesterday
+            # Count messages
             message_count_result = await session.execute(
                 select(func.count(MessageLog.id)).filter(
                     MessageLog.chat_id == chat_id,
-                    MessageLog.created_at >= yesterday_start,
-                    MessageLog.created_at < yesterday_end
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time
                 )
             )
             message_count = message_count_result.scalar() or 0
@@ -493,7 +485,7 @@ class DailiesService:
                 logger.debug(f"Skipping summary for chat {chat_id}: no activity")
                 return DailySummary(
                     chat_id=chat_id,
-                    date=yesterday_start,
+                    date=start_time,
                     message_count=0,
                     has_activity=False
                 )
@@ -502,43 +494,37 @@ class DailiesService:
             active_users_result = await session.execute(
                 select(func.count(func.distinct(MessageLog.user_id))).filter(
                     MessageLog.chat_id == chat_id,
-                    MessageLog.created_at >= yesterday_start,
-                    MessageLog.created_at < yesterday_end
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time
                 )
             )
             active_users = active_users_result.scalar() or 0
             
-            # Count new members (users created yesterday)
+            # Count new members (users created in range)
             new_members_result = await session.execute(
                 select(func.count(User.id)).filter(
-                    User.created_at >= yesterday_start,
-                    User.created_at < yesterday_end
+                    User.created_at >= start_time,
+                    User.created_at < end_time
                 )
             )
             new_members = new_members_result.scalar() or 0
             
-            # Count moderation actions (warnings)
-            moderation_result = await session.execute(
-                select(func.count(Warning.id)).filter(
-                    Warning.created_at >= yesterday_start,
-                    Warning.created_at < yesterday_end
-                )
+            moderation_actions = 0
+            
+            # Toxicity & incidents
+            toxicity_score, toxicity_incidents = await self._calculate_toxicity_from_messages(
+                chat_id, start_time, end_time, session
             )
-            moderation_actions = moderation_result.scalar() or 0
             
-            # ===== NEW: Toxicity thermometer (заглушка) =====
-            toxicity_score = 0.0
-            toxicity_incidents = 0
-            
-            # ===== NEW: Peak activity hour =====
+            # Peak activity hour
             peak_hour_result = await session.execute(
                 select(
                     extract('hour', MessageLog.created_at).label('hour'),
                     func.count(MessageLog.id).label('cnt')
                 ).filter(
                     MessageLog.chat_id == chat_id,
-                    MessageLog.created_at >= yesterday_start,
-                    MessageLog.created_at < yesterday_end
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time
                 ).group_by(
                     extract('hour', MessageLog.created_at)
                 ).order_by(
@@ -548,7 +534,7 @@ class DailiesService:
             peak_row = peak_hour_result.first()
             peak_hour = int(peak_row[0]) if peak_row else None
             
-            # ===== NEW: Top chatters =====
+            # Top chatters
             top_chatters_result = await session.execute(
                 select(
                     MessageLog.username,
@@ -556,8 +542,8 @@ class DailiesService:
                     func.count(MessageLog.id).label('msg_count')
                 ).filter(
                     MessageLog.chat_id == chat_id,
-                    MessageLog.created_at >= yesterday_start,
-                    MessageLog.created_at < yesterday_end
+                    MessageLog.created_at >= start_time,
+                    MessageLog.created_at < end_time
                 ).group_by(
                     MessageLog.user_id, MessageLog.username
                 ).order_by(
@@ -573,18 +559,18 @@ class DailiesService:
                 for row in top_chatters_result.all()
             ]
             
-            # ===== Hot topics (extract from messages) =====
+            # Hot topics
             hot_topics = await self._extract_hot_topics(
-                chat_id, yesterday_start, yesterday_end, session
+                chat_id, start_time, end_time, session
             )
             
-            # ===== Activity comparison with previous day =====
-            prev_day_start = yesterday_start - timedelta(days=1)
+            # Activity comparison with previous period
+            prev_start = start_time - (end_time - start_time)
             prev_count_result = await session.execute(
                 select(func.count(MessageLog.id)).filter(
                     MessageLog.chat_id == chat_id,
-                    MessageLog.created_at >= prev_day_start,
-                    MessageLog.created_at < yesterday_start
+                    MessageLog.created_at >= prev_start,
+                    MessageLog.created_at < start_time
                 )
             )
             prev_message_count = prev_count_result.scalar() or 0
@@ -593,25 +579,25 @@ class DailiesService:
             if prev_message_count > 0:
                 activity_change = ((message_count - prev_message_count) / prev_message_count) * 100
             
-            # ===== Interesting quotes =====
+            # Interesting quotes
             interesting_quotes = await self._extract_interesting_quotes(
-                chat_id, yesterday_start, yesterday_end, session
+                chat_id, start_time, end_time, session
             )
             
-            # ===== Mood analysis =====
+            # Mood analysis
             mood_score, mood_label = await self._analyze_chat_mood(
-                chat_id, yesterday_start, yesterday_end, session, toxicity_score
+                chat_id, start_time, end_time, session, toxicity_score
             )
             
-            # ===== LLM Summary =====
+            # LLM Summary
             llm_summary = await self._generate_llm_summary(
-                chat_id, yesterday_start, yesterday_end, session,
+                chat_id, start_time, end_time, session,
                 message_count, hot_topics, top_chatters
             )
             
             return DailySummary(
                 chat_id=chat_id,
-                date=yesterday_start,
+                date=start_time,
                 message_count=message_count,
                 active_users=active_users,
                 new_members=new_members,
@@ -1034,7 +1020,7 @@ class DailiesService:
                     MessageLog.created_at >= start_time,
                     MessageLog.created_at < end_time,
                     MessageLog.text.isnot(None)
-                ).order_by(func.random()).limit(50)
+                ).order_by(func.random()).limit(100)
             )
             messages = messages_result.all()
             
@@ -1045,40 +1031,40 @@ class DailiesService:
             topics_str = ", ".join([t["keyword"] for t in hot_topics[:5]]) if hot_topics else "разное"
             chatters_str = ", ".join([c["username"] for c in top_chatters[:3]]) if top_chatters else "участники"
             
-            sample_texts = [f"{m.username}: {m.text[:100]}" for m in messages[:20] if m.text]
+            sample_texts = [f"{m.username}: {m.text[:150]}" for m in messages[:40] if m.text]
             messages_sample = "\n".join(sample_texts)
             
             from app.services.ollama_client import _ollama_chat
             
-            prompt = f"""Сделай ОЧЕНЬ краткий пересказ обсуждений в чате за день (2-3 предложения).
+            prompt = f"""Сделай краткий и дерзкий пересказ обсуждений в чате за сегодня.
 
-Статистика:
+СТАТИСТИКА:
 - Сообщений: {message_count}
-- Темы: {topics_str}
-- Активные: {chatters_str}
+- Главные темы: {topics_str}
+- Топ болтунов: {chatters_str}
 
-Примеры сообщений:
+СООБЩЕНИЯ ДЛЯ АНАЛИЗА:
 {messages_sample}
 
-Требования:
-- Максимум 2-3 коротких предложения
-- Упомяни главные темы обсуждений
-- Стиль: информативно, немного с юмором
-- Без банальностей типа "участники общались"
-- Говори как будто рассказываешь другу
+ТРЕБОВАНИЯ:
+- Максимум 2-4 предложения
+- Стиль Олега: ироничный, шарящий в ИТ, немного циничный, но свой в доску
+- Никаких "сегодня участники обсуждали" — пиши сразу суть
+- Можно использовать сленг (тачка, затык, база, соя, челик)
+- Если обсуждали пиво, железо или Чехию — обязательно упомяни в своём стиле
 
-Ответь ТОЛЬКО пересказом, без вступлений."""
+Ответь ТОЛЬКО пересказом, без вступлений и кавычек."""
 
             messages_for_llm = [
-                {"role": "system", "content": "Ты — Олег, делаешь краткие пересказы чатов. Говоришь по делу, с лёгкой иронией."},
+                {"role": "system", "content": "Ты Олег — дерзкий ИТ-эксперт. Делаешь краткие и едкие пересказы чатов. Твой юмор — база."},
                 {"role": "user", "content": prompt}
             ]
             
-            summary = await _ollama_chat(messages_for_llm, temperature=0.7)
+            summary = await _ollama_chat(messages_for_llm, temperature=0.8)
             
             # Clean and validate
-            summary = summary.strip()
-            if len(summary) < 20 or len(summary) > 300:
+            summary = summary.strip().strip('"')
+            if len(summary) < 15 or len(summary) > 500:
                 return None
             
             return summary
@@ -1136,12 +1122,6 @@ class DailiesService:
         Format daily summary for display.
         
         Enhanced evening summary with LLM insights, mood, quotes, and comparisons.
-        
-        Args:
-            summary: DailySummary to format
-            
-        Returns:
-            Formatted summary string
         """
         date_str = summary.date.strftime("%d.%m.%Y")
         
@@ -1215,7 +1195,7 @@ class DailiesService:
             lines.append("━━━━━━━━━━━━━━━━━━━━")
             lines.append("🔥 ОБСУЖДАЛИ")
             lines.append("━━━━━━━━━━━━━━━━━━━━")
-            for topic in summary.hot_topics[:4]:
+            for topic in summary.hot_topics[:5]:
                 keyword = topic['keyword']
                 mentions = topic['mentions']
                 msg_id = topic.get('message_id')
@@ -1228,19 +1208,6 @@ class DailiesService:
                     lines.append(f'• <a href="{link}">{keyword}</a> ({mentions})')
                 else:
                     lines.append(f"• {keyword} ({mentions})")
-        
-        # Interesting quotes
-        if summary.interesting_quotes:
-            lines.append("")
-            lines.append("━━━━━━━━━━━━━━━━━━━━")
-            lines.append("💬 ЦИТАТЫ ДНЯ")
-            lines.append("━━━━━━━━━━━━━━━━━━━━")
-            for quote in summary.interesting_quotes[:2]:
-                text = quote['text']
-                username = quote['username']
-                lines.append(f'"{text}"')
-                lines.append(f"— {username}")
-                lines.append("")
         
         # Footer
         lines.append("━━━━━━━━━━━━━━━━━━━━")
@@ -1270,26 +1237,10 @@ class DailiesService:
     ) -> DailyQuote:
         """
         Select a daily quote (from Golden Fund or LLM-generated).
-        
-        Requirement 13.2: WHEN the time reaches 21:00 Moscow time
-        THEN the Dailies System SHALL send a #dailyquote message
-        with a wisdom quote (either from Golden Fund or generated).
-        
-        Priority:
-        1. Golden Fund (30% chance if available)
-        2. LLM-generated quote (70% chance, always try first if not Golden Fund)
-        3. Predefined category quotes (fallback only if LLM fails)
-        
-        Args:
-            chat_id: Optional chat ID to prefer chat-specific quotes
-            session: Optional database session
-            
-        Returns:
-            DailyQuote with selected quote
         """
         roll = random.random()
         
-        # 30% chance: Try Golden Fund first (real user quotes are valuable)
+        # 30% chance: Try Golden Fund first
         if roll < 0.3 and self.golden_fund_service:
             try:
                 golden_quote = await self.golden_fund_service.get_random_golden_quote(
@@ -1306,8 +1257,40 @@ class DailiesService:
             except Exception as e:
                 logger.warning(f"Failed to get golden quote: {e}")
         
+        # Get active names and persona for personalization
+        active_names = []
+        persona = "oleg"
+        
+        if chat_id:
+            try:
+                from app.services.ollama_client import recent_active_usernames
+                active_names = await recent_active_usernames(chat_id, hours=24, limit=10)
+                
+                # Fetch persona from BotConfig
+                from app.database.models import BotConfig
+                from sqlalchemy import select
+                
+                close_session = False
+                if session is None:
+                    from app.database.session import get_session
+                    async_session = get_session()
+                    session = async_session()
+                    close_session = True
+                
+                result = await session.execute(
+                    select(BotConfig.persona).filter_by(chat_id=chat_id)
+                )
+                db_persona = result.scalar_one_or_none()
+                if db_persona:
+                    persona = db_persona
+                
+                if close_session:
+                    await session.close()
+            except Exception as e:
+                logger.warning(f"Failed to fetch context for quote: {e}")
+
         # 70% chance: Generate unique quote via LLM
-        llm_quote = await self._generate_llm_quote()
+        llm_quote = await self._generate_llm_quote(active_names, persona)
         if llm_quote:
             return DailyQuote(
                 text=llm_quote,
@@ -1316,8 +1299,7 @@ class DailiesService:
                 sticker_file_id=None
             )
         
-        # Fallback: Pick from categorized quotes (only if LLM unavailable)
-        logger.warning("LLM quote generation failed, using fallback static quotes")
+        # Fallback: Pick from categorized quotes
         return self._select_category_quote()
     
     def _select_category_quote(self) -> DailyQuote:
@@ -1364,56 +1346,41 @@ class DailiesService:
             sticker_file_id=None
         )
     
-    async def _generate_llm_quote(self) -> Optional[str]:
+    async def _generate_llm_quote(self, active_names: List[str] = None, persona: str = "oleg") -> Optional[str]:
         """
-        Generate a unique daily quote using LLM.
+        Generate a unique daily quote using LLM based on persona.
         
         Returns:
             Generated quote text or None if generation fails
         """
         try:
-            from app.services.ollama_client import _ollama_chat
+            from app.services.ollama_client import _ollama_chat, get_static_system_prompt
             from datetime import datetime
             
-            # Vary the theme based on day of week
-            weekday = datetime.now().weekday()
-            themes_by_day = {
-                0: "понедельник и начало рабочей недели",
-                1: "код, баги и отладка",
-                2: "середина недели и усталость",
-                3: "дедлайны и прокрастинация",
-                4: "пятница и предвкушение выходных",
-                5: "выходные и отдых",
-                6: "воскресенье и подготовка к новой неделе",
-            }
-            theme = themes_by_day.get(weekday, "жизнь программиста")
+            # Context about active users
+            users_context = ""
+            if active_names:
+                users_context = f"Активные участники чата: {', '.join(['@' + n for n in active_names])}."
             
-            prompt = f"""Придумай короткую мысль/наблюдение дня. Сегодня тема: {theme}.
+            # Get persona-specific base instructions
+            persona_base = get_static_system_prompt(persona)
+            
+            prompt = f"""Придумай одну мемную, абсурдную или ироничную 'цитату дня' для чата. 
+{users_context}
 
-СТИЛЬ:
-- Как будто умный друг делится наблюдением за пивом
-- Можно с иронией, сарказмом, чёрным юмором
-- Без мотивационного булшита ("верь в себя", "ты можешь всё")
-- Без банальностей и очевидных истин
-- Грубовато, но не токсично
-- 1-2 предложения максимум
+ТРЕБОВАНИЯ:
+- ТВОЙ СТИЛЬ: Используй характер и манеру речи выбранной личности (см. системные инструкции ниже).
+- ТЕМА: Постирония, мемы, жизненный абсурд.
+- Избегай скучной ИТ-тематики (баги, код, прод — это скучно), если только это не часть твоей личности.
+- Можешь упомянуть кого-то из списка участников в смешном или странном контексте (но не обидно).
+- Максимум 1-2 коротких предложения.
+- Никакой мотивации и 'мудрости'. Только угар и база.
 
-ПЛОХИЕ ПРИМЕРЫ (НЕ ДЕЛАЙ ТАК):
-- "Жизнь коротка. Пиши понятный код." — слишком пафосно
-- "Верь в себя и всё получится" — кринж
-- "Каждый день — новый шанс" — банальщина
-
-ХОРОШИЕ ПРИМЕРЫ:
-- "Понедельник — это когда кофе не помогает, но ты всё равно пьёшь."
-- "Баг в пятницу вечером — это не баг, это тест на стрессоустойчивость."
-- "Оптимизация — это когда ты час ищешь способ сэкономить 5 минут."
-- "Документацию пишут те, кто уже забыл как работает код."
-- "Лучший код — тот, который удалили."
-
-Ответь ТОЛЬКО одной фразой, без кавычек и пояснений."""
+Ответь ТОЛЬКО фразой, без вступлений, кавычек и лишних слов."""
 
             messages = [
-                {"role": "system", "content": "Ты — Олег, циничный но не злой бот. Говоришь как уставший сеньор, который всё видел."},
+                {"role": "system", "content": persona_base},
+                {"role": "system", "content": "Ты мастер постиронии и мемных цитат. Твои фразы заставляют чат орать или задумываться об абсурдности бытия."},
                 {"role": "user", "content": prompt}
             ]
             
@@ -1426,22 +1393,45 @@ class DailiesService:
             quote = quote.strip().strip('"\'«»„"')
             
             # Remove common prefixes LLM might add
-            bad_prefixes = ["цитата:", "мысль:", "вот:", "ответ:", "—", "-"]
+            bad_prefixes = ["цитата:", "мысль:", "фраза:", "ответ:", "—", "-"]
             for prefix in bad_prefixes:
                 if quote.lower().startswith(prefix):
                     quote = quote[len(prefix):].strip()
             
             # Validate length
-            if len(quote) < 15 or len(quote) > 250:
+            if len(quote) < 10 or len(quote) > 300:
                 return None
             
-            # Skip if too generic/cringe
-            cringe_phrases = [
-                "верь в себя", "следуй за мечтой", "ты можешь всё", 
-                "никогда не сдавайся", "каждый день", "новый шанс",
-                "жизнь прекрасна", "будь собой", "мечты сбываются"
-            ]
-            if any(phrase in quote.lower() for phrase in cringe_phrases):
+            return quote
+            
+        except Exception as e:
+            logger.debug(f"Failed to generate LLM quote: {e}")
+            return None
+            if len(quote) < 10 or len(quote) > 300:
+                return None
+            
+            return quote
+            
+        except Exception as e:
+            logger.debug(f"Failed to generate LLM quote: {e}")
+            return None
+            
+            quote = await _ollama_chat(messages, temperature=0.95)
+            
+            if not quote:
+                return None
+            
+            # Clean up the quote
+            quote = quote.strip().strip('"\'«»„"')
+            
+            # Remove common prefixes LLM might add
+            bad_prefixes = ["цитата:", "мысль:", "фраза:", "ответ:", "—", "-"]
+            for prefix in bad_prefixes:
+                if quote.lower().startswith(prefix):
+                    quote = quote[len(prefix):].strip()
+            
+            # Validate length
+            if len(quote) < 10 or len(quote) > 250:
                 return None
             
             return quote
@@ -1455,12 +1445,6 @@ class DailiesService:
         Format daily quote for display.
         
         Requirement 13.2: Send a #dailyquote message.
-        
-        Args:
-            quote: DailyQuote to format
-            
-        Returns:
-            Formatted quote string
         """
         # Pick a random header emoji for variety
         header_emojis = ["💭", "🌙", "✨", "🔮", "💡", "🎯", "⚡"]
@@ -1472,17 +1456,17 @@ class DailiesService:
             lines.append(f'«{quote.text}»')
             lines.append(f"— {quote.author}")
             lines.append("")
-            lines.append("🏆 Из Золотого Фонда")
+            lines.append("🏆 <b>Из Золотого Фонда</b>")
         elif quote.author == "Олег":
             # LLM-generated quote
             lines.append(f'«{quote.text}»')
             lines.append("")
-            lines.append("🤖 Сгенерировано Олегом")
+            lines.append("🤖 <b>База от Олега</b>")
         else:
             lines.append(f'«{quote.text}»')
             # Add day-based footer
             lines.append("")
-            lines.append(self._get_quote_footer())
+            lines.append(f"💡 {self._get_quote_footer()}")
         
         return "\n".join(lines)
     
@@ -1491,17 +1475,17 @@ class DailiesService:
         from datetime import datetime
         
         footers = {
-            0: "Понедельник. Держись. 💪",
-            1: "Вторник. Ещё не пятница, но уже не понедельник.",
-            2: "Среда. Полпути пройдено.",
-            3: "Четверг. Почти выходные.",
-            4: "Пятница! 🎉",
-            5: "Суббота. Отдыхай.",
-            6: "Воскресенье. Завтра понедельник... 😅",
+            0: "Понедельник — день тяжёлый, но база вечна.",
+            1: "Вторник — это как понедельник, только ты уже смирился.",
+            2: "Среда — экватор абсурда пройден.",
+            3: "Четверг — почти пятница, держись за мемы.",
+            4: "Пятница! Деплоим и в бар! 🍻",
+            5: "Суббота. Время чиллить и не думать.",
+            6: "Воскресенье. Завтра опять этот цирк... 😅",
         }
         
         weekday = datetime.now().weekday()
-        return footers.get(weekday, "Хорошего дня!")
+        return footers.get(weekday, "Живи так, чтобы Олег гордился.")
     
     # =========================================================================
     # Stats Aggregation (Requirement 13.3)
@@ -1518,15 +1502,8 @@ class DailiesService:
         Requirement 13.3: WHEN the time reaches 21:00 Moscow time
         THEN the Dailies System SHALL send a #dailystats message
         with game statistics.
-        
-        Args:
-            chat_id: Telegram chat ID
-            session: Optional database session
-            
-        Returns:
-            DailyStats with aggregated statistics
         """
-        from app.database.models import GameStat, User
+        from app.database.models import GameStat, User, GameHistory
         from app.database.session import get_session
         from app.utils import utc_now
         
@@ -1538,40 +1515,82 @@ class DailiesService:
         
         try:
             now = utc_now()
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # Get top growers (by size_cm)
+            # Get top growers (by size_cm) - get top 10 for the chart
             top_growers_result = await session.execute(
-                select(GameStat, User)
-                .join(User, GameStat.user_id == User.id)
+                select(GameStat)
                 .order_by(GameStat.size_cm.desc())
-                .limit(5)
+                .limit(10)
             )
-            top_growers_rows = top_growers_result.all()
+            top_growers_stats = top_growers_result.scalars().all()
             
             top_growers = [
                 {
-                    "username": user.username or user.first_name or f"User {user.tg_user_id}",
-                    "size": game_stat.size_cm
+                    "username": gs.username or f"User {gs.tg_user_id}",
+                    "size": gs.size_cm
                 }
-                for game_stat, user in top_growers_rows
+                for gs in top_growers_stats[:5]
             ]
+            
+            # Generate chart
+            chart_data = None
+            try:
+                from app.services.top_chart import top_chart_generator
+                chart_data = top_chart_generator.generate_top10_chart(top_growers_stats)
+            except Exception as e:
+                logger.warning(f"Failed to generate top chart: {e}")
+            
+            # ===== Game Stats =====
+            # Big winners today
+            winners_result = await session.execute(
+                select(GameHistory.user_id, func.sum(GameHistory.result_amount).label('total_win'))
+                .filter(GameHistory.played_at >= start_of_day, GameHistory.result_amount > 0)
+                .group_by(GameHistory.user_id)
+                .order_by(desc('total_win'))
+                .limit(3)
+            )
+            big_winners = []
+            for row in winners_result.all():
+                user_res = await session.execute(select(User).filter(User.id == row.user_id))
+                user = user_res.scalar()
+                if user:
+                    big_winners.append({
+                        "username": user.username or user.first_name or f"ID:{user.tg_user_id}",
+                        "amount": row.total_win
+                    })
+            
+            # Most active gamblers
+            gamblers_result = await session.execute(
+                select(GameHistory.user_id, func.count(GameHistory.id).label('games_count'))
+                .filter(GameHistory.played_at >= start_of_day)
+                .group_by(GameHistory.user_id)
+                .order_by(desc('games_count'))
+                .limit(3)
+            )
+            top_gamblers = []
+            for row in gamblers_result.all():
+                user_res = await session.execute(select(User).filter(User.id == row.user_id))
+                user = user_res.scalar()
+                if user:
+                    top_gamblers.append({
+                        "username": user.username or user.first_name or f"ID:{user.tg_user_id}",
+                        "count": row.games_count
+                    })
             
             # Get top losers (lowest size_cm, but > 0)
             top_losers_result = await session.execute(
-                select(GameStat, User)
-                .join(User, GameStat.user_id == User.id)
+                select(GameStat)
                 .filter(GameStat.size_cm > 0)
                 .order_by(GameStat.size_cm.asc())
-                .limit(5)
+                .limit(3)
             )
-            top_losers_rows = top_losers_result.all()
-            
             top_losers = [
                 {
-                    "username": user.username or user.first_name or f"User {user.tg_user_id}",
-                    "size": game_stat.size_cm
+                    "username": gs.username or f"User {gs.tg_user_id}",
+                    "size": gs.size_cm
                 }
-                for game_stat, user in top_losers_rows
+                for gs in top_losers_result.scalars().all()
             ]
             
             # Get tournament standings
@@ -1595,13 +1614,18 @@ class DailiesService:
             except Exception as e:
                 logger.warning(f"Failed to get tournament standings: {e}")
             
-            return DailyStats(
+            ds = DailyStats(
                 chat_id=chat_id,
                 date=now,
                 top_growers=top_growers,
                 top_losers=top_losers,
-                tournament_standings=tournament_standings
+                tournament_standings=tournament_standings,
+                chart_data=chart_data
             )
+            # Add extra fields to the dataclass instance dynamically
+            ds.big_winners = big_winners
+            ds.top_gamblers = top_gamblers
+            return ds
             
         except Exception as e:
             logger.error(f"Failed to aggregate stats for chat {chat_id}: {e}")
@@ -1616,39 +1640,67 @@ class DailiesService:
         Format daily stats for display.
         
         Requirement 13.3: Send a #dailystats message with game statistics.
-        
-        Args:
-            stats: DailyStats to format
-            
-        Returns:
-            Formatted stats string
         """
-        lines = ["📈 #dailystats", ""]
+        lines = [
+            "📈 #dailystats",
+            "━━━━━━━━━━━━━━━━━━━━",
+            ""
+        ]
         
         # Top growers
         if stats.top_growers:
-            lines.append("🌱 Топ гроверов:")
-            for i, grower in enumerate(stats.top_growers[:3], 1):
-                emoji = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
-                lines.append(f"  {emoji} {grower['username']}: {grower['size']} см")
+            lines.append("🌱 ТОП ГРОВЕРОВ:")
+            medals = ["🥇", "🥈", "🥉", "4.", "5."]
+            for i, grower in enumerate(stats.top_growers[:5]):
+                medal = medals[i] if i < len(medals) else f"{i+1}."
+                lines.append(f"  {medal} {grower['username']}: {grower['size']} см")
             lines.append("")
         
-        # Top losers (for fun)
-        if stats.top_losers:
-            lines.append("📉 Нужна помощь:")
-            for i, loser in enumerate(stats.top_losers[:3], 1):
-                lines.append(f"  {i}. {loser['username']}: {loser['size']} см")
+        # Big winners
+        big_winners = getattr(stats, 'big_winners', [])
+        if big_winners:
+            lines.append("💰 ТОП ВЫИГРЫШИ:")
+            for i, w in enumerate(big_winners, 1):
+                medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
+                lines.append(f"  {medal} {w['username']}: {w['amount']} 🪙")
+            lines.append("")
+            
+        # Top gamblers
+        top_gamblers = getattr(stats, 'top_gamblers', [])
+        if top_gamblers:
+            lines.append("🎰 ИГРОМАНЫ ДНЯ:")
+            for i, g in enumerate(top_gamblers, 1):
+                lines.append(f"  {i}. {g['username']} — {g['count']} игр")
             lines.append("")
         
         # Tournament standings
         if stats.tournament_standings:
-            lines.append("🏆 Турнир дня:")
-            for standing in stats.tournament_standings[:5]:
-                emoji = ["🥇", "🥈", "🥉"][standing['rank']-1] if standing['rank'] <= 3 else f"{standing['rank']}."
-                lines.append(f"  {emoji} {standing['username']}: {standing['score']} ({standing['discipline']})")
+            lines.append("🏆 ТУРНИР ДНЯ:")
+            disciplines = {}
+            for s in stats.tournament_standings:
+                d = s['discipline']
+                if d not in disciplines: disciplines[d] = []
+                disciplines[d].append(s)
+            
+            for d, st in disciplines.items():
+                lines.append(f"  [{d.upper()}]")
+                for s in st[:3]:
+                    medal = ["🥇", "🥈", "🥉"][s['rank']-1] if s['rank'] <= 3 else f"{s['rank']}."
+                    lines.append(f"    {medal} {s['username']}: {s['score']}")
+            lines.append("")
+            
+        # Top losers
+        if stats.top_losers:
+            lines.append("📉 МАЛЕНЬКИЕ ПИПИСЬКИ:")
+            for i, loser in enumerate(stats.top_losers[:3], 1):
+                lines.append(f"  {i}. {loser['username']}: {loser['size']} см")
+            lines.append("")
         
-        if not stats.top_growers and not stats.tournament_standings:
-            lines.append("Пока нет статистики. Играйте больше! 🎮")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        if stats.chart_data:
+            lines.append("Смотри график роста выше! ☝️")
+        else:
+            lines.append("Играйте больше! 🎮")
         
         return "\n".join(lines)
     
@@ -1659,19 +1711,19 @@ class DailiesService:
     async def get_morning_messages(
         self,
         chat_id: int,
-        session: Optional[AsyncSession] = None
-    ) -> List[str]:
+        session: Optional[AsyncSession] = None,
+        for_today: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         Get all morning messages for a chat.
-        
-        Requirement 13.1: Morning summary at 09:00 Moscow.
         
         Args:
             chat_id: Telegram chat ID
             session: Optional database session
+            for_today: Whether to summarize today so far
             
         Returns:
-            List of formatted message strings to send
+            List of message dicts {"text": str, "photo": bytes (optional)}
         """
         messages = []
         
@@ -1679,11 +1731,11 @@ class DailiesService:
         
         # Check if summary is enabled (Property 33)
         if self.should_send_message(config, 'summary'):
-            summary = await self.generate_summary(chat_id, session)
+            summary = await self.generate_summary(chat_id, session, for_today=for_today)
             
             # Check if should skip due to no activity (Property 34)
             if not self.should_skip_summary(summary):
-                messages.append(self.format_summary(summary))
+                messages.append({"text": self.format_summary(summary)})
         
         return messages
     
@@ -1691,7 +1743,7 @@ class DailiesService:
         self,
         chat_id: int,
         session: Optional[AsyncSession] = None
-    ) -> List[str]:
+    ) -> List[Dict[str, Any]]:
         """
         Get all evening messages for a chat.
         
@@ -1702,7 +1754,7 @@ class DailiesService:
             session: Optional database session
             
         Returns:
-            List of formatted message strings to send
+            List of message dicts {"text": str, "photo": bytes (optional)}
         """
         messages = []
         
@@ -1711,12 +1763,15 @@ class DailiesService:
         # Check if quote is enabled (Property 33)
         if self.should_send_message(config, 'quote'):
             quote = await self.select_daily_quote(chat_id, session)
-            messages.append(self.format_quote(quote))
+            messages.append({"text": self.format_quote(quote)})
         
         # Check if stats is enabled (Property 33)
         if self.should_send_message(config, 'stats'):
             stats = await self.aggregate_daily_stats(chat_id, session)
-            messages.append(self.format_stats(stats))
+            messages.append({
+                "text": self.format_stats(stats),
+                "photo": stats.chart_data
+            })
         
         return messages
 

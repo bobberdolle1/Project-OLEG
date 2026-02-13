@@ -431,7 +431,14 @@ async def _process_gif_vision(message: Message, bot: Bot, animation, is_auto_rep
         
         if not analysis_result or not analysis_result.strip():
             if not is_auto_reply:
-                await safe_reply(message, "Хм, модель молчит. Попробуй другую гифку.")
+                fail_messages = [
+                    "Чё-то я залип и ничего не понял. Скинь другую гифку.",
+                    "Глаза замылились, не разберу что тут происходит. Давай следующую.",
+                    "Я чё-то втыкаю в эту анимацию и мыслей ноль. Попробуй другую.",
+                    "Эта гифка сломала мне мозг. Есть чё попроще?",
+                    "Не, я пас. Хрень какая-то, не могу разобрать."
+                ]
+                await safe_reply(message, random.choice(fail_messages))
             return
         
         # Обрезаем результат если слишком длинный

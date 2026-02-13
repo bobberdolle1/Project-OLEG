@@ -55,7 +55,7 @@ INVENTORY_CATEGORIES = {
         ItemType.FISHING_ROD_BASIC, ItemType.FISHING_ROD_PRO, ItemType.FISHING_ROD_GOLDEN,
         "diamond_rod", "cosmic_rod"
     ]),
-    "pp_items": ("🍆 PP предметы", [
+    "pp_items": ("🍆 Усиления", [
         ItemType.PP_CREAM_SMALL, ItemType.PP_CREAM_MEDIUM, 
         ItemType.PP_CREAM_LARGE, ItemType.PP_CREAM_TITAN, 
         ItemType.PP_CREAM_OMEGA, ItemType.PP_CAGE
@@ -744,7 +744,7 @@ async def toggle_cage(user_id: int, chat_id: int, activate: bool) -> EffectResul
             return EffectResult(
                 success=False,
                 message=f"❌ У тебя нет {item_info.emoji} {item_info.name}!\n"
-                        f"Купи в /shop в разделе 'Защита PP'",
+                        f"Купи в /shop в разделе 'Защита достоинства'",
                 details={"error": "no_item"}
             )
         
@@ -803,7 +803,7 @@ async def toggle_cage(user_id: int, chat_id: int, activate: bool) -> EffectResul
                 message=f"🔒 {item_info.emoji} {item_info.name} активирована!\n\n"
                         f"⏰ Действует: {expires_in}\n\n"
                         f"⚠️ Пока клетка активна:\n"
-                        f"  • PP защищён от потерь в PvP\n"
+                        f"  • Член защищён от потерь в PvP\n"
                         f"  • Мази заблокированы\n\n"
                         f"Сними через инвентарь когда захочешь",
                 details={"active": True, "expires_in": expires_in}
@@ -831,7 +831,7 @@ async def toggle_cage(user_id: int, chat_id: int, activate: bool) -> EffectResul
                 success=True,
                 message=f"🔓 {item_info.emoji} {item_info.name} снята!\n\n"
                         f"✅ Теперь можно использовать мази\n"
-                        f"⚠️ PP больше не защищён от потерь",
+                        f"⚠️ Член больше не защищён от потерь",
                 details={"active": False}
             )
         else:
@@ -865,7 +865,7 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
     if not is_pp_cream(item_type):
         return EffectResult(
             success=False,
-            message="❌ Это не мазь для PP!"
+            message="❌ Это не мазь для члена!"
         )
     
     # Get item info from catalog
@@ -977,7 +977,7 @@ async def apply_pp_cream(user_id: int, chat_id: int, item_type: str) -> EffectRe
     return EffectResult(
         success=True,
         message=f"🧴 Ты использовал {item_info.emoji} {item_info.name}!\n\n"
-                f"📈 Твой PP вырос на +{increase} см!\n"
+                f"📈 Твой писюн вырос на +{increase} см!\n"
                 f"📏 Новый размер: {new_size} см{boost_message}",
         details={
             "increase": increase,

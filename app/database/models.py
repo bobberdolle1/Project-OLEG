@@ -362,7 +362,12 @@ class Chat(Base):
     summary_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     creative_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     active_topic_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Топик где бот активен
-    auto_reply_chance: Mapped[float] = mapped_column(Float, default=0.0)  # Шанс автоответа (0.0-1.0)
+    auto_reply_chance: Mapped[float] = mapped_column(Float, default=0.0)  # Шанс текстового автоответа (0.0-1.0)
+    voice_reply_chance: Mapped[float] = mapped_column(Float, default=0.0)  # Шанс голосового автоответа (0.0-1.0)
+    video_reply_chance: Mapped[float] = mapped_column(Float, default=0.0)  # Шанс видео-автоответа (0.0-1.0)
+    auto_reply_mode: Mapped[str] = mapped_column(String(20), default="text")  # text, voice, both (legacy/override)
+    reactions_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # Включены ли реакции Олега
+    persona: Mapped[str] = mapped_column(String(32), default="default")  # Персона Олега: default, oleg_legacy
 
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
@@ -949,3 +954,24 @@ class MafiaStats(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'chat_id', name='uq_mafia_user_chat_stats'),
     )
+
+
+class GlobalEvent(Base):
+    """
+    Global dynamic events (Requirements 18.1).
+    
+    Stores active/historical AI-generated events.
+    """
+    __tablename__ = "global_events"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(20), index=True)  # weekly, daily
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text)
+    lore: Mapped[str] = mapped_column(Text)
+    modifiers: Mapped[str] = mapped_column(Text)  # JSON list of modifiers
+    
+    start_time: Mapped[datetime] = mapped_column(DateTime, index=True)
+    end_time: Mapped[datetime] = mapped_column(DateTime, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

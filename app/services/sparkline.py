@@ -30,17 +30,17 @@ class SparklineGenerator:
     Requirements: 7.1
     """
     
-    # Chart dimensions
-    WIDTH = 200
-    HEIGHT = 60
-    PADDING = 5
+    # Chart dimensions (High DPI - 2x scale)
+    WIDTH = 400
+    HEIGHT = 120
+    PADDING = 10
     
     # Colors
     BG_COLOR = (45, 45, 50)
     LINE_COLOR = (100, 200, 100)  # Green for growth
     DECLINE_COLOR = (200, 100, 100)  # Red for decline
     POINT_COLOR = (255, 255, 255)
-    GRID_COLOR = (60, 60, 65)
+    GRID_COLOR = (70, 70, 75)
     
     def __init__(self):
         """Initialize the sparkline generator."""
@@ -82,7 +82,7 @@ class SparklineGenerator:
         # Draw subtle grid lines
         for i in range(3):
             y = chart_top + (chart_height * i) // 2
-            draw.line([(chart_left, y), (chart_right, y)], fill=self.GRID_COLOR, width=1)
+            draw.line([(chart_left, y), (chart_right, y)], fill=self.GRID_COLOR, width=2)
         
         # Calculate min/max for scaling
         min_size = min(sizes)
@@ -107,12 +107,12 @@ class SparklineGenerator:
         overall_change = sum(changes)
         line_color = self.LINE_COLOR if overall_change >= 0 else self.DECLINE_COLOR
         
-        # Draw the line
+        # Draw the line (thicker for high-res)
         if len(points) >= 2:
-            draw.line(points, fill=line_color, width=2)
+            draw.line(points, fill=line_color, width=4)
         
         # Draw points
-        point_radius = 3
+        point_radius = 5
         for i, (x, y) in enumerate(points):
             # Color point based on individual change
             change = changes[i] if i < len(changes) else 0
@@ -121,7 +121,8 @@ class SparklineGenerator:
                 [(x - point_radius, y - point_radius), 
                  (x + point_radius, y + point_radius)],
                 fill=point_color,
-                outline=self.POINT_COLOR
+                outline=self.POINT_COLOR,
+                width=2
             )
         
         # Convert to bytes
@@ -143,11 +144,11 @@ class SparklineGenerator:
         if not history or len(history) < 2:
             return None
         
-        # Use larger dimensions for labeled version
-        width = 250
-        height = 80
-        padding = 10
-        label_space = 30
+        # Use larger dimensions for labeled version (2x scale)
+        width = 500
+        height = 160
+        padding = 20
+        label_space = 60
         
         sizes = [entry.get("size", 0) for entry in history]
         changes = [entry.get("change", 0) for entry in history]
@@ -175,14 +176,21 @@ class SparklineGenerator:
         # Draw min/max labels
         try:
             from PIL import ImageFont
-            font = ImageFont.load_default()
+            # Try to load a nicer font, fallback to default
+            try:
+                font = ImageFont.truetype("arial.ttf", 20)
+            except IOError:
+                try:
+                    font = ImageFont.load_default(size=20)
+                except TypeError:
+                    font = ImageFont.load_default()
         except Exception:
             font = None
         
         # Max label at top
-        draw.text((padding, chart_top), str(max_size), fill=(150, 150, 150), font=font)
+        draw.text((padding, chart_top), str(max_size), fill=(200, 200, 200), font=font)
         # Min label at bottom
-        draw.text((padding, chart_bottom - 10), str(min_size), fill=(150, 150, 150), font=font)
+        draw.text((padding, chart_bottom - 20), str(min_size), fill=(200, 200, 200), font=font)
         
         # Calculate points
         points = []
@@ -197,12 +205,12 @@ class SparklineGenerator:
         overall_change = sum(changes)
         line_color = self.LINE_COLOR if overall_change >= 0 else self.DECLINE_COLOR
         
-        # Draw line
+        # Draw line (thicker)
         if len(points) >= 2:
-            draw.line(points, fill=line_color, width=2)
+            draw.line(points, fill=line_color, width=4)
         
-        # Draw points
-        point_radius = 3
+        # Draw points (larger)
+        point_radius = 5
         for i, (x, y) in enumerate(points):
             change = changes[i] if i < len(changes) else 0
             point_color = self.LINE_COLOR if change >= 0 else self.DECLINE_COLOR
@@ -210,7 +218,8 @@ class SparklineGenerator:
                 [(x - point_radius, y - point_radius), 
                  (x + point_radius, y + point_radius)],
                 fill=point_color,
-                outline=self.POINT_COLOR
+                outline=self.POINT_COLOR,
+                width=2
             )
         
         # Convert to bytes

@@ -140,12 +140,13 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb = InlineKeyboardBuilder()
     
     kb.button(text="⚙️ Функции бота", callback_data="owner_features")
+    kb.button(text="🎭 Персона Олега", callback_data="owner_persona_menu")
     kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
     kb.button(text="📊 Статус системы", callback_data="owner_status")
     kb.button(text="💬 Управление чатами", callback_data="owner_chats")
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2, 2)
     return kb
 
 
@@ -822,6 +823,128 @@ async def cb_owner_settings(callback: CallbackQuery):
     
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
+
+
+# ============================================================================
+# Persona Management
+# ============================================================================
+
+@router.callback_query(F.data == "owner_persona_menu")
+async def cb_owner_persona_menu(callback: CallbackQuery, bot: Bot):
+    """Меню управления персоной Олега."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    # Load personas from JSON
+    import json
+    from pathlib import Path
+    
+    personas_path = Path("app/data/personas.json")
+    try:
+        with open(personas_path, "r", encoding="utf-8") as f:
+            personas_data = json.load(f)
+            personas = personas_data.get("personas", {})
+    except Exception as e:
+        logger.error(f"Failed to load personas: {e}")
+        await callback.answer("Ошибка загрузки персон", show_alert=True)
+        return
+    
+    # Get current persona for SDOC chat
+    current_persona = "oleg"  # default
+    if settings.sdoc_chat_id:
+        async with get_session()() as session:
+            chat = await session.get(Chat, settings.sdoc_chat_id)
+            if chat:
+                current_persona = chat.persona
+    
+    kb = InlineKeyboardBuilder()
+    
+    # Sort personas: oleg and oleg_legacy first, then others
+    priority_personas = ["oleg", "oleg_legacy"]
+    other_personas = [p for p in personas.keys() if p not in priority_personas]
+    sorted_personas = priority_personas + sorted(other_personas)
+    
+    for persona_id in sorted_personas:
+        if persona_id not in personas:
+            continue
+        persona_info = personas[persona_id]
+        is_current = "✅ " if persona_id == current_persona else ""
+        kb.button(
+            text=f"{is_current}{persona_info['name']}", 
+            callback_data=f"owner_set_persona:{persona_id}"
+        )
+    
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(2, 2, 2, 2, 1, 1)  # 2 per row for main personas, then others
+    
+    text = (
+        "🎭 <b>Персона Олега</b>\n\n"
+        f"Текущая: <b>{personas.get(current_persona, {}).get('name', 'Unknown')}</b>\n\n"
+        "<b>Основные персоны:</b>\n"
+        f"{'✅' if current_persona == 'oleg' else '○'} <b>Олег (Default)</b> — дерзкий техно-чувак\n"
+        f"{'✅' if current_persona == 'oleg_legacy' else '○'} <b>Олег Кузнецов (Legacy)</b> — живой человек с сетапом\n\n"
+        "<b>Альтернативные:</b>\n"
+    )
+    
+    for persona_id in other_personas:
+        if persona_id not in personas:
+            continue
+        persona_info = personas[persona_id]
+        marker = "✅" if persona_id == current_persona else "○"
+        text += f"{marker} {persona_info['name']}\n"
+    
+    text += "\n<i>Выбери персону для изменения личности Олега</i>"
+    
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_set_persona:"))
+async def cb_owner_set_persona(callback: CallbackQuery):
+    """Установить персону для SDOC чата."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    persona_id = callback.data.split(":")[1]
+    
+    if not settings.sdoc_chat_id:
+        await callback.answer("SDOC Chat ID не настроен", show_alert=True)
+        return
+    
+    # Validate persona exists
+    import json
+    from pathlib import Path
+    
+    personas_path = Path("app/data/personas.json")
+    try:
+        with open(personas_path, "r", encoding="utf-8") as f:
+            personas_data = json.load(f)
+            if persona_id not in personas_data["personas"]:
+                await callback.answer("Неизвестная персона", show_alert=True)
+                return
+            persona_name = personas_data["personas"][persona_id]["name"]
+    except Exception as e:
+        logger.error(f"Failed to load personas: {e}")
+        await callback.answer("Ошибка загрузки персон", show_alert=True)
+        return
+    
+    # Update persona in database
+    async with get_session()() as session:
+        chat = await session.get(Chat, settings.sdoc_chat_id)
+        if chat:
+            chat.persona = persona_id
+            await session.commit()
+            await callback.answer(f"Персона изменена на: {persona_name}", show_alert=True)
+        else:
+            await callback.answer("Чат не найден в БД", show_alert=True)
+            return
+    
+    # Return to persona menu
+    from aiogram import Bot
+    bot = callback.bot
+    await cb_owner_persona_menu(callback, bot)
 
 
 # ============================================================================

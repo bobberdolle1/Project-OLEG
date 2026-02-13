@@ -17,8 +17,26 @@ from app.database.models import Auction, AuctionBid
 from app.services.inventory import inventory_service, ITEM_CATALOG
 from app.services import wallet_service
 from app.utils import utc_now
+from app.services.ollama_client import generate_response
+from aiogram import Bot
+import random
 
 logger = logging.getLogger(__name__)
+
+# Constants
+EVENT_CHANNEL_ID = -1002739723  # Steam Deck OC
+EVENT_TOPIC_ID = 739723  # Games topic
+
+SYSTEM_AUCTION_ITEMS = [
+    {"type": "fishing_rod_golden", "name": "Золотая удочка", "emoji": "🎣", "base_price": 1000},
+    {"type": "fishing_rod_legendary", "name": "Легендарная удочка", "emoji": "👑", "base_price": 5000},
+    {"type": "rooster_rare", "name": "Боевой петух (Редкий)", "emoji": "🐓", "base_price": 800},
+    {"type": "rooster_epic", "name": "Боевой петух (Эпик)", "emoji": "🦃", "base_price": 2000},
+    {"type": "shield", "name": "Щит от кражи", "emoji": "🛡️", "base_price": 300},
+    {"type": "lucky_charm", "name": "Талисман удачи", "emoji": "🍀", "base_price": 250},
+    {"type": "energy_drink", "name": "Ящик энергетиков", "emoji": "⚡", "base_price": 400, "quantity": 5},
+    {"type": "vip_status", "name": "VIP статус (7 дней)", "emoji": "💎", "base_price": 3000},
+]
 
 
 @dataclass
@@ -36,6 +54,80 @@ class AuctionService:
     MIN_DURATION_HOURS = 1
     MAX_DURATION_HOURS = 72
     
+    async def create_system_auction(self, bot: Bot) -> None:
+        """Create a random system auction (Black Market)."""
+        logger.info("Generating system auction...")
+        
+        # 1. Select Random Item
+        item_def = random.choice(SYSTEM_AUCTION_ITEMS)
+        quantity = item_def.get("quantity", 1)
+        start_price = int(item_def["base_price"] * random.uniform(0.8, 1.2)) # +/- 20% price variation
+        duration = random.randint(4, 12) # 4 to 12 hours
+        
+        # 2. Generate Description via AI
+        prompt = (
+            f"Придумай короткое, смешное описание для лота на черном рынке: {item_def['emoji']} {item_def['name']} (x{quantity}). "
+            f"Продавец - таинственный барыга Олег. Стиль: киберпанк/базар. "
+            f"Не используй кавычки."
+        )
+        try:
+            description = await generate_response(
+                user_text=prompt,
+                chat_id=0,
+                username="system",
+                user_id=0,
+                system_override="Ты барыга Олег. Пиши коротко и смешно."
+            )
+        except Exception:
+            description = "Товар высшего качества, мамой клянусь!"
+
+        # 3. Create Auction Record
+        async_session = get_session()
+        async with async_session() as session:
+            # Note: We skip inventory check for system (ID 0)
+            item_data = {
+                "item_type": item_def["type"],
+                "quantity": quantity,
+                "item_name": item_def["name"],
+                "item_data": json.dumps({"is_system": True})
+            }
+            
+            ends_at = utc_now() + timedelta(hours=duration)
+            auction = Auction(
+                seller_user_id=0, # System ID
+                chat_id=EVENT_CHANNEL_ID,
+                item_data=json.dumps(item_data),
+                start_price=start_price,
+                current_price=start_price,
+                ends_at=ends_at,
+                status="active"
+            )
+            session.add(auction)
+            await session.commit()
+            
+            auction_id = auction.id
+            
+        # 4. Announce
+        text = (
+            f"🏴‍☠️ <b>ЧЁРНЫЙ РЫНОК ОТКРЫТ!</b>\n\n"
+            f"{description}\n\n"
+            f"📦 Лот: <b>{item_def['emoji']} {item_def['name']}</b> x{quantity}\n"
+            f"💰 Начальная цена: <b>{start_price} монет</b>\n"
+            f"⏳ До конца: {duration} ч.\n\n"
+            f"👉 <i>Сделайте ставку командой:</i>\n"
+            f"<code>/bid {auction_id} {start_price + 100}</code>"
+        )
+        
+        try:
+            await bot.send_message(
+                chat_id=EVENT_CHANNEL_ID,
+                message_thread_id=EVENT_TOPIC_ID,
+                text=text,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Failed to announce system auction: {e}")
+
     async def create_auction(
         self,
         seller_user_id: int,

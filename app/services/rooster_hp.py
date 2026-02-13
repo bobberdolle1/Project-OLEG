@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MAX_HP = 100
-MIN_HP_FOR_FIGHT = 20
-HP_REGEN_PER_HOUR = 5
-FIGHT_HP_LOSS_MIN = 10
-FIGHT_HP_LOSS_MAX = 30
+MIN_HP_FOR_FIGHT = 10  # Decreased from 20
+HP_REGEN_PER_HOUR = 20  # Increased from 5 (now regenerates fully in 5 hours)
+FIGHT_HP_LOSS_MIN = 5   # Decreased from 10
+FIGHT_HP_LOSS_MAX = 15  # Decreased from 30
 
 
 async def get_rooster_hp(user_id: int, chat_id: int, rooster_type: str) -> Tuple[int, int]:

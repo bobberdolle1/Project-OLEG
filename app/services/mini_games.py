@@ -81,14 +81,14 @@ FISH_CATALOG: Dict[FishRarity, List[Fish]] = {
     ],
 }
 
-# Rarity probabilities (base, can be modified by rod) - Reduced rare chances by 30%
+# Rarity probabilities (base, can be modified by rod) - Rebalanced for fun (v9.6)
 FISH_PROBABILITIES = {
-    FishRarity.TRASH: 0.20,  # Increased from 0.15
-    FishRarity.COMMON: 0.48,  # Increased from 0.45
-    FishRarity.UNCOMMON: 0.22,  # Decreased from 0.25
-    FishRarity.RARE: 0.07,  # Decreased from 0.10
-    FishRarity.EPIC: 0.025,  # Decreased from 0.04
-    FishRarity.LEGENDARY: 0.005,  # Decreased from 0.01
+    FishRarity.TRASH: 0.10,  # Decreased from 0.20
+    FishRarity.COMMON: 0.45,  # Slightly decreased
+    FishRarity.UNCOMMON: 0.25,  # Increased
+    FishRarity.RARE: 0.12,  # Increased from 0.07
+    FishRarity.EPIC: 0.06,  # Increased from 0.025
+    FishRarity.LEGENDARY: 0.02,  # Increased from 0.005
 }
 
 
@@ -105,7 +105,7 @@ class FishingResult:
 class FishingGame:
     """Fishing game logic."""
     
-    COOLDOWN_SECONDS = 90  # Increased from 30 to 90 for balance
+    COOLDOWN_SECONDS = 30  # Decreased from 90 to 30 for fun
     
     def __init__(self, random_func: Optional[Callable[[], float]] = None):
         self._random = random_func or random.random

@@ -57,14 +57,14 @@ TOURNAMENT_CONFIGS = {
     TournamentType.PP_SIZE: TournamentConfig(
         type=TournamentType.PP_SIZE,
         name="Битва Титанов",
-        description="Самый большой размер PP к концу недели",
+        description="Самый большой размер члена к концу недели",
         emoji="🍆",
         prizes=[5000, 3000, 1500]
     ),
     TournamentType.PP_GROWTH: TournamentConfig(
         type=TournamentType.PP_GROWTH,
         name="Гонка Роста",
-        description="Наибольший прирост PP за неделю",
+        description="Наибольший прирост члена за неделю",
         emoji="📈",
         prizes=[4000, 2500, 1200]
     ),

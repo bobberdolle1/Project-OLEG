@@ -26,6 +26,75 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+async def _send_video_note_fallback(msg: Message, voice_result, template_path: str) -> bool:
+    """
+    Вспомогательная функция для сборки и отправки видео-сообщения (кружочка).
+    Использует ffmpeg для склейки шаблона вайфу и сгенерированного голоса.
+    """
+    import subprocess
+    import os
+    import tempfile
+    import uuid
+    
+    # Создаем временные файлы
+    unique_id = str(uuid.uuid4())[:8]
+    temp_voice = f"data/temp_voice_{unique_id}.mp3"
+    temp_video = f"data/temp_circle_{unique_id}.mp4"
+    
+    try:
+        # Сохраняем аудио во временный файл
+        with open(temp_voice, "wb") as f:
+            f.write(voice_result.audio_data)
+            
+        duration = voice_result.duration_seconds
+        
+        # Команда FFmpeg:
+        # -stream_loop -1: зацикливаем входное видео бесконечно
+        # -i template: входной шаблон
+        # -i voice: входной звук
+        # -shortest: обрезать видео по длине самого короткого потока (в данном случае звука, так как видео зациклено)
+        # -c:v libx264 -pix_fmt yuv420p: стандартный кодек для Telegram
+        # -c:a aac: аудио кодек
+        # -y: перезаписывать если файл существует
+        cmd = [
+            'ffmpeg', '-y',
+            '-stream_loop', '-1',
+            '-i', template_path,
+            '-i', temp_voice,
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-tune', 'zerolatency',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-shortest',
+            temp_video
+        ]
+        
+        # Запускаем сборку
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if process.returncode == 0 and os.path.exists(temp_video):
+            from aiogram.types import FSInputFile
+            await msg.reply_video_note(
+                video_note=FSInputFile(temp_video)
+            )
+            logger.info(f"Video note sent successfully for persona {template_path}")
+            return True
+        else:
+            logger.error(f"FFmpeg error: {process.stderr}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to assemble video note: {e}")
+        return False
+    finally:
+        # Чистим временные файлы
+        for f in [temp_voice, temp_video]:
+            if os.path.exists(f):
+                try: os.remove(f)
+                except: pass
+
+
 async def keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event, thread_id: int = None):
     """
     Периодически отправляет статус 'typing' пока не установлен stop_event.
@@ -719,26 +788,97 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
             logger.debug(f"Suppressed duplicate error response for chat {msg.chat.id}")
             return
 
-        # Check if we should auto-voice this response (0.1% chance)
-        # **Validates: Requirements 5.2**
+        # Получаем настройки шансов из базы
+        text_chance = 0.0
+        voice_chance = 0.0
+        try:
+            async with async_session() as session:
+                chat_obj = await session.get(Chat, msg.chat.id)
+                if chat_obj:
+                    text_chance = getattr(chat_obj, "auto_reply_chance", 0.0)
+                    voice_chance = getattr(chat_obj, "voice_reply_chance", 0.0)
+        except Exception as e:
+            logger.warning(f"Failed to get reply chances for chat {msg.chat.id}: {e}")
+
+        # Проверяем, нужно ли отправлять ответ (текст или голос)
+        # Для автоответов (не прямое упоминание) используем вероятности
+        is_auto_reply = not is_direct_mention
+        
+        # 1. Решаем, отвечаем ли мы вообще
+        if is_auto_reply:
+            # Используем систему автоответов для расчета базового шанса (с учетом бустов)
+            from app.services.auto_reply import ChatSettings as AutoReplySettings, auto_reply_system
+            should_reply = auto_reply_system.should_reply(text, AutoReplySettings(auto_reply_chance=text_chance))
+        else:
+            # На упоминание или реплай отвечаем всегда
+            should_reply = True
+
+        if not should_reply:
+            return
+
+        # 2. Решаем формат ответа: Текст, ГС или Кружочек
+        video_chance = getattr(chat_obj, "video_reply_chance", 0.0) if chat_obj else 0.0
+        
+        # Нормализуем шансы
+        eff_voice_chance = voice_chance / 100.0 if voice_chance > 1.0 else voice_chance
+        eff_video_chance = video_chance / 100.0 if video_chance > 1.0 else video_chance
+        
+        # Бросаем кубики (приоритет: Видео -> Голос -> Текст)
+        roll = random.random()
+        
+        should_video = roll < eff_video_chance
+        should_voice = not should_video and (roll < (eff_video_chance + eff_voice_chance))
+        should_text = not should_video and not should_voice
+        
+        # Если в базе 0, оставляем микро-шансы для пасхалок
+        if not is_auto_reply: # При упоминании всегда есть шанс на голос
+            if not should_video and not should_voice:
+                if random.random() < 0.001: should_voice = True
+        
+        video_sent = False
         voice_sent = False
-        if tts_service.should_auto_voice():
+
+        # --- ПОПЫТКА ОТПРАВИТЬ ВИДЕО ---
+        if should_video:
+            try:
+                # Проверяем наличие шаблона для текущей личности
+                persona = getattr(chat_obj, "persona", "oleg")
+                template_path = f"assets/video_templates/{persona}.mp4"
+                
+                import os
+                if os.path.exists(template_path):
+                    # Генерируем голос для наложения
+                    voice_result = await tts_service.generate_voice(reply)
+                    if voice_result:
+                        # Собираем кружочек через ffmpeg (заглушка функции сборки)
+                        # Пока просто шлем видео как есть или ГС если не вышло
+                        video_sent = await _send_video_note_fallback(msg, voice_result, template_path)
+                
+                if not video_sent:
+                    should_voice = True # Фаллбек на голос
+            except Exception as e:
+                logger.warning(f"Video generation failed: {e}")
+                should_voice = True
+
+        # --- ПОПЫТКА ОТПРАВИТЬ ГОЛОС ---
+        if should_voice and not video_sent:
             try:
                 result = await tts_service.generate_voice(reply)
                 if result is not None:
                     await msg.reply_voice(
                         voice=result.audio_data,
-                        caption="🎤 Олег решил ответить голосом",
+                        caption=None,
                         duration=int(result.duration_seconds)
                     )
                     voice_sent = True
-                    logger.info(f"Auto-voice triggered for response to @{msg.from_user.username or msg.from_user.id}")
+                    logger.info(f"Voice response sent (auto={is_auto_reply})")
             except Exception as e:
-                logger.warning(f"Auto-voice failed, falling back to text: {e}")
+                logger.warning(f"Voice generation failed, falling back to text: {e}")
+                should_text = True
         
-        # Send text response if voice wasn't sent
+        # 3. Отправка текста (если ничего другого не улетело)
         sent_message = None
-        if not voice_sent:
+        if (should_text or (not voice_sent and not video_sent)):
             # Детальная диагностика перед отправкой
             logger.info(
                 f"[QNA SEND] chat={msg.chat.id} | topic={topic_id} | "
@@ -893,17 +1033,31 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
     except Exception as e:
         logger.error(f"Ошибка при генерации ответа: {e}")
         
-        # Показываем ошибку только если:
-        # 1. Это прямое обращение к боту
-        # 2. Не спамили ошибками недавно (не больше 1 ошибки в минуту)
+        # Показываем ошибку ТОЛЬКО если это прямое обращение
+        # Если это был автоответ — просто молчим, чтобы не палиться
+        if not is_direct_mention:
+            logger.debug(f"AI generation failed for auto-reply in {msg.chat.id}, staying silent.")
+            return
+
+        # Защита от спама ошибками
         chat_id = msg.chat.id
         current_time = time.time()
         last_error_time = _last_error_message.get(chat_id, 0)
         
-        if is_direct_mention and (current_time - last_error_time) > _ERROR_THROTTLE_DELAY:
+        if (current_time - last_error_time) > _ERROR_THROTTLE_DELAY:
             try:
-                # Выбираем случайное сообщение об ошибке
-                error_msg = random.choice(_ERROR_MESSAGES)
+                # Объединяем старые мемные ошибки с новыми живыми фразами
+                # **Validates: Requirements for variety in error messages**
+                all_possible_errors = _ERROR_MESSAGES + [
+                    "Чё-то мозги зависли. Спроси попозже.",
+                    "Я чё-то втыкаю и не могу ответить. Видимо, пора на перезагрузку.",
+                    "Интернет в коме, я ничего не слышу. Дай минуту.",
+                    "У меня чё-то зрение подвело и мысли разлетелись. Попробуй ещё раз.",
+                    "Не, я чё-то не в духе сейчас отвечать. Зайди через часик.",
+                    "Упс, Олег временно недоступен. Видимо, опять админы чё-то крутят.",
+                    "Чё-то меня переклинило. Не до вопросов сейчас."
+                ]
+                error_msg = random.choice(all_possible_errors)
                 await safe_reply(msg, error_msg)
                 _last_error_message[chat_id] = current_time
                 logger.info(f"[ERROR MSG] Sent error message to chat {chat_id}: {error_msg}")

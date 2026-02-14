@@ -896,8 +896,8 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
                     template_path = "assets/video_templates/default.mp4"
                 
                 if os.path.exists(template_path):
-                    # Генерируем голос для наложения
-                    voice_result = await tts_service.generate_voice(reply)
+                    # Генерируем голос для наложения (с учетом персоны)
+                    voice_result = await tts_service.generate_voice(reply, persona=persona)
                     if voice_result:
                         # Собираем видеосообщение через ffmpeg
                         video_sent = await _send_video_note_fallback(msg, voice_result, template_path)
@@ -911,7 +911,11 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
         # --- ПОПЫТКА ОТПРАВИТЬ ГОЛОС ---
         if should_voice and not video_sent:
             try:
-                result = await tts_service.generate_voice(reply)
+                # Получаем текущую персону для голоса
+                from app.services.ollama_client import get_global_persona
+                persona = get_global_persona()
+                
+                result = await tts_service.generate_voice(reply, persona=persona)
                 if result is not None:
                     from aiogram.types import BufferedInputFile
                     voice_file = BufferedInputFile(

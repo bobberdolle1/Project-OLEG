@@ -209,7 +209,10 @@ async def callback_voice_summary(callback: CallbackQuery):
     await callback.answer("Генерирую голос...")
     
     try:
-        result = await tts_service.generate_voice(text)
+        from app.services.ollama_client import get_global_persona
+        persona = get_global_persona()
+        
+        result = await tts_service.generate_voice(text, persona=persona)
         
         if result is None:
             # TTS unavailable - send text fallback

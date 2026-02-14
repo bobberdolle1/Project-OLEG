@@ -46,12 +46,25 @@ class TTSService:
     **Validates: Requirements 5.1, 5.2, 5.3, 5.5**
     """
     
-    # Edge TTS configuration - Russian male voice
-    EDGE_VOICE = "ru-RU-DmitryNeural"
+    # Edge TTS configuration
+    DEFAULT_VOICE = "ru-RU-DmitryNeural"
+    
+    # Mapping personas to voices and parameters
+    PERSONA_VOICES = {
+        "oleg": {"voice": "ru-RU-DmitryNeural", "pitch": "-15Hz", "rate": "+0%"},
+        "oleg_legacy": {"voice": "ru-RU-DmitryNeural", "pitch": "+0Hz", "rate": "+0%"},
+        "dude": {"voice": "ru-RU-DmitryNeural", "pitch": "-10Hz", "rate": "-20%"},
+        "stalin": {"voice": "ru-RU-DmitryNeural", "pitch": "-10Hz", "rate": "-5%"},
+        "anime": {"voice": "ru-RU-SvetlanaNeural", "pitch": "+20Hz", "rate": "+10%"},
+        "trump": {"voice": "ru-RU-DmitryNeural", "pitch": "+5Hz", "rate": "+5%"},
+        "putin": {"voice": "ru-RU-DmitryNeural", "pitch": "-5Hz", "rate": "-5%"},
+        "pozdnyakov": {"voice": "ru-RU-DmitryNeural", "pitch": "+0Hz", "rate": "+10%"},
+        "zgeek": {"voice": "ru-RU-DmitryNeural", "pitch": "-5Hz", "rate": "+5%"},
+    }
     
     def __init__(self, tts_model: Optional[str] = None):
         """Initialize TTS service."""
-        self._voice = tts_model or self.EDGE_VOICE
+        self._default_voice = tts_model or self.DEFAULT_VOICE
         self._is_available = True
         self._edge_available = True  # Track Edge TTS availability separately
     
@@ -74,7 +87,8 @@ class TTSService:
     async def generate_voice(
         self,
         text: str,
-        max_chars: int = MAX_TEXT_LENGTH
+        max_chars: int = MAX_TEXT_LENGTH,
+        persona: str = "oleg"
     ) -> Optional[TTSResult]:
         """Generate voice message from text."""
         if not text:
@@ -86,7 +100,7 @@ class TTSService:
             logger.info(f"Text truncated from {len(text)} to {len(processed_text)} chars")
         
         try:
-            audio_data = await self._generate_audio(processed_text)
+            audio_data = await self._generate_audio(processed_text, persona)
             
             if audio_data is None:
                 return None
@@ -102,7 +116,7 @@ class TTSService:
             logger.error(f"TTS generation failed: {e}")
             return None
     
-    async def _generate_audio(self, text: str) -> Optional[bytes]:
+    async def _generate_audio(self, text: str, persona: str = "oleg") -> Optional[bytes]:
         """Generate audio using Edge TTS with gTTS fallback."""
         if not self._is_available:
             logger.warning("TTS service marked as unavailable, skipping generation")
@@ -110,8 +124,8 @@ class TTSService:
         
         # Try Edge TTS first
         if self._edge_available:
-            logger.debug("Attempting Edge TTS generation...")
-            audio = await self._generate_edge_tts(text)
+            logger.debug(f"Attempting Edge TTS generation for persona {persona}...")
+            audio = await self._generate_edge_tts(text, persona)
             if audio:
                 return audio
             logger.warning("Edge TTS failed, trying gTTS fallback")
@@ -121,13 +135,20 @@ class TTSService:
         logger.debug("Attempting gTTS generation...")
         return await self._generate_gtts(text)
     
-    async def _generate_edge_tts(self, text: str) -> Optional[bytes]:
+    async def _generate_edge_tts(self, text: str, persona: str = "oleg") -> Optional[bytes]:
         """Generate audio using Edge TTS (Microsoft)."""
         try:
             import edge_tts
             
-            logger.debug(f"Edge TTS generation for: {text[:50]}...")
-            communicate = edge_tts.Communicate(text, self._voice)
+            # Get voice config for persona
+            config = self.PERSONA_VOICES.get(persona, self.PERSONA_VOICES["oleg"])
+            voice = config["voice"]
+            pitch = config["pitch"]
+            rate = config["rate"]
+            
+            logger.info(f"Edge TTS generation: persona={persona}, voice={voice}, pitch={pitch}, rate={rate}")
+            
+            communicate = edge_tts.Communicate(text, voice, pitch=pitch, rate=rate)
             
             audio_buffer = io.BytesIO()
             async for chunk in communicate.stream():

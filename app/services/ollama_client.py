@@ -812,6 +812,8 @@ User: как тебе Трамп?
 
 STATIC_OLEG_LEGACY_PROMPT = """Ты Олег Кузнецов, 28 лет, Senior DevOps Engineer из Москвы. Работаешь удаленно в крупной IT компании.
 
+{current_date}
+
 **Твой легендарный сетап 2026:**
 - CPU: AMD Ryzen 9 9800X3D (разогнан до 5.4 GHz на кастомной водянке)
 - GPU: NVIDIA RTX 5090 24GB (тоже под водой, +200 MHz на ядре)
@@ -1366,6 +1368,7 @@ SDOC_CONTEXT = """
 # Словарь персон для выбора
 PERSONA_PROMPTS = {
     "oleg": CORE_OLEG_PROMPT_TEMPLATE,
+    "oleg_legacy": STATIC_OLEG_LEGACY_PROMPT,
     "dude": THE_DUDE_PROMPT_TEMPLATE,
     "stalin": STALIN_PROMPT_TEMPLATE,
     "anime": ANIME_GIRL_PROMPT_TEMPLATE,
@@ -1377,6 +1380,7 @@ PERSONA_PROMPTS = {
 
 PERSONA_NAMES = {
     "oleg": "😎 Олег (дерзкий)",
+    "oleg_legacy": "👔 Олег Кузнецов (Legacy)",
     "dude": "🎳 The Dude (расслабленный)",
     "stalin": "☭ Сталин (авторитарный)",
     "anime": "🌸 Аниме-тян (кавайная)",
@@ -1401,6 +1405,10 @@ _random_interval: str = "hourly"  # every_message, hourly, half_day, daily
 _last_random_change: float = 0.0
 _cached_random_persona: str = "oleg"
 _random_excluded: set[str] = set()  # Исключённые из рандома персоны
+
+# Глобальные настройки формата ответов (runtime, меняется через /owner)
+_global_voice_chance: float = 0.0  # 0.0 - 1.0 (0% - 100%)
+_global_video_chance: float = 0.0  # 0.0 - 1.0 (0% - 100%)
 
 
 def _get_random_persona() -> str:
@@ -1526,6 +1534,53 @@ def set_global_persona(persona: str) -> bool:
         logger.info(f"[PERSONA] Global persona changed to: {persona}")
         return True
     return False
+
+
+def get_global_voice_chance() -> float:
+    """Получить глобальный шанс голосового ответа (0.0 - 1.0)."""
+    return _global_voice_chance
+
+
+def set_global_voice_chance(chance: float) -> bool:
+    """
+    Установить глобальный шанс голосового ответа.
+    
+    Args:
+        chance: Шанс от 0.0 до 1.0 (0% - 100%)
+        
+    Returns:
+        True если установлено успешно
+    """
+    global _global_voice_chance
+    if 0.0 <= chance <= 1.0:
+        _global_voice_chance = chance
+        logger.info(f"[VOICE] Global voice chance set to: {chance * 100:.0f}%")
+        return True
+    return False
+
+
+def get_global_video_chance() -> float:
+    """Получить глобальный шанс видео ответа (0.0 - 1.0)."""
+    return _global_video_chance
+
+
+def set_global_video_chance(chance: float) -> bool:
+    """
+    Установить глобальный шанс видео ответа.
+    
+    Args:
+        chance: Шанс от 0.0 до 1.0 (0% - 100%)
+        
+    Returns:
+        True если установлено успешно
+    """
+    global _global_video_chance
+    if 0.0 <= chance <= 1.0:
+        _global_video_chance = chance
+        logger.info(f"[VIDEO] Global video chance set to: {chance * 100:.0f}%")
+        return True
+    return False
+
 
 # Сценарии для историй (рандомные конфликты/приключения)
 STORY_SCENARIOS = [
@@ -2872,10 +2927,10 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
             # Fallback режим: используем tool_model для tools, fallback_model для финального ответа
             # tool_model (qwen) обрабатывает веб-поиск, но ответ генерирует fallback (gemma) с промптом Олега
             logger.info(f"[FALLBACK MODE] Using {tool_model} for tools, {active_model} for final response")
-            response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=active_model, num_predict=1024)
+            response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=active_model)
         else:
             # Основная модель поддерживает tools — используем её для всего
-            response = await _ollama_chat(messages, model=active_model, enable_tools=not is_fallback_model, num_predict=1024)
+            response = await _ollama_chat(messages, model=active_model, enable_tools=not is_fallback_model)
         
         # Fact-checking: проверяем ответ на галлюцинации
         if response and (needs_search or kb_info):
@@ -2913,17 +2968,17 @@ async def generate_text_reply(user_text: str, username: str | None, chat_context
                 
                 if tool_model:
                     # Используем tool_model для tools, fallback_chat для финального ответа с личностью Олега
-                    response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=fallback_chat, num_predict=1024)
+                    response = await _ollama_chat(messages, model=tool_model, enable_tools=True, final_model=fallback_chat)
                     return response
                 else:
                     # Нет tool_model — используем fallback без tools
-                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False, num_predict=1024)
+                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False)
             except Exception as fallback_err:
                 logger.error(f"Fallback with tool_model failed: {fallback_err}")
                 # Последняя попытка — только chat модель без tools
                 try:
                     logger.warning(f"Last resort: {fallback_chat} without tools")
-                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False, num_predict=1024)
+                    return await _ollama_chat(messages, model=fallback_chat, enable_tools=False)
                 except Exception as last_err:
                     logger.error(f"All fallbacks failed: {last_err}")
                     await notify_owner_service_down("Ollama", f"Все модели недоступны: {last_err}")

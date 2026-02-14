@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_session
 from app.database.models import GlobalEvent  # We will need to create this model
 from app.utils import utc_now
-from app.services.ollama_client import generate_response
+from app.services.ollama_client import generate_text_reply
 
 logger = logging.getLogger(__name__)
 
@@ -72,24 +72,19 @@ class EventService:
         
         # 2. Generate Flavor Text via AI
         prompt = (
-            f"Придумай крутое, веселое название и описание для игрового ивента в чате."
-            f"
-Тип: {event_type.value} (длится {'неделю' if event_type == EventType.WEEKLY else 'день'})."
-            f"
-Бонус: {self._get_modifier_description(selected_modifier)}."
-            f"
-Стиль: киберпанк, фэнтези, или треш-угар. С юмором."
-            f"
-Ответ верни в JSON формате: {{'title': '...', 'description': '...', 'lore': '...'}}"
+            f"Придумай крутое, веселое название и описание для игрового ивента в чате.\n"
+            f"Тип: {event_type.value} (длится {'неделю' if event_type == EventType.WEEKLY else 'день'}).\n"
+            f"Бонус: {self._get_modifier_description(selected_modifier)}.\n"
+            f"Стиль: киберпанк, фэнтези, или треш-угар. С юмором.\n"
+            f"Ответ верни в JSON формате: {{'title': '...', 'description': '...', 'lore': '...'}}"
         )
         
         try:
-            ai_response = await generate_response(
+            ai_response = await generate_text_reply(
                 user_text=prompt,
-                chat_id=0,
                 username="system",
-                user_id=0,
-                system_override="Ты гейм-мастер Олег. Отвечай ТОЛЬКО валидным JSON."
+                chat_context=None,
+                conversation_history=None
             )
             # Clean up response to get JSON
             ai_response = ai_response.replace("```json", "").replace("```", "").strip()
@@ -158,10 +153,13 @@ class EventService:
             
             now = utc_now()
             for event in events:
-                # Check expiration
-                if event.end_time and event.end_time < now:
-                    event.is_active = False
-                    continue
+                # Check expiration - ensure both datetimes are timezone-aware
+                if event.end_time:
+                    # Make end_time timezone-aware if it's naive
+                    end_time_aware = event.end_time if event.end_time.tzinfo else event.end_time.replace(tzinfo=now.tzinfo)
+                    if end_time_aware < now:
+                        event.is_active = False
+                        continue
                 
                 event_obj = {
                     "type": EventType(event.type),
@@ -199,17 +197,10 @@ class EventService:
         duration = "Эта неделя" if event["type"] == EventType.WEEKLY else "Сегодня"
         
         text = (
-            f"🚨 <b>НОВЫЙ ИВЕНТ: {event['title']}</b> 🚨
-
-"
-            f"{event['lore']}
-
-"
-            f"⚡ <b>Бонус:</b> {event['description']}
-"
-            f"⏳ <b>Длительность:</b> {duration}
-
-"
+            f"🚨 <b>НОВЫЙ ИВЕНТ: {event['title']}</b> 🚨\n\n"
+            f"{event['lore']}\n\n"
+            f"⚡ <b>Бонус:</b> {event['description']}\n"
+            f"⏳ <b>Длительность:</b> {duration}\n\n"
             f"<i>Успей воспользоваться!</i>"
         )
         

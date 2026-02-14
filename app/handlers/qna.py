@@ -29,11 +29,11 @@ router = Router()
 async def _send_video_note_fallback(msg: Message, voice_result, template_path: str) -> bool:
     """
     Вспомогательная функция для сборки и отправки видео-сообщения (кружочка).
-    Использует ffmpeg для склейки шаблона вайфу и сгенерированного голоса.
+    Использует ffmpeg для наложения голоса на видео шаблон.
+    Шаблон уже обрезан до 640x640 без звука.
     """
     import subprocess
     import os
-    import tempfile
     import uuid
     
     # Создаем временные файлы
@@ -45,25 +45,26 @@ async def _send_video_note_fallback(msg: Message, voice_result, template_path: s
         # Сохраняем аудио во временный файл
         with open(temp_voice, "wb") as f:
             f.write(voice_result.audio_data)
-            
-        duration = voice_result.duration_seconds
         
         # Команда FFmpeg:
-        # -stream_loop -1: зацикливаем входное видео бесконечно
-        # -i template: входной шаблон
-        # -i voice: входной звук
-        # -shortest: обрезать видео по длине самого короткого потока (в данном случае звука, так как видео зациклено)
-        # -c:v libx264 -pix_fmt yuv420p: стандартный кодек для Telegram
-        # -c:a aac: аудио кодек
-        # -y: перезаписывать если файл существует
+        # 1. -stream_loop -1: зацикливаем видео
+        # 2. Фильтр-пайплайн:
+        #    - scale=-1:640: масштабируем по высоте до 640 (ширина пропорционально)
+        #    - crop=640:640: обрезаем центр до квадрата 640x640
+        #    - setsar=1: устанавливаем соотношение сторон пикселя 1:1
+        # 3. -shortest: обрезать по длине самого короткого потока (звука)
+        # 4. -c:v libx264: кодируем видео в h264 (нужно для кропа/скейла)
+        # 5. -pix_fmt yuv420p: совместимый формат пикселей
+        # 6. -c:a aac: кодируем аудио в AAC
         cmd = [
             'ffmpeg', '-y',
             '-stream_loop', '-1',
             '-i', template_path,
             '-i', temp_voice,
+            '-vf', 'scale=-1:640,crop=640:640,setsar=1',
             '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-tune', 'zerolatency',
+            '-preset', 'veryfast',
+            '-crf', '23',
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-shortest',
@@ -78,7 +79,7 @@ async def _send_video_note_fallback(msg: Message, voice_result, template_path: s
             await msg.reply_video_note(
                 video_note=FSInputFile(temp_video)
             )
-            logger.info(f"Video note sent successfully for persona {template_path}")
+            logger.info(f"Video note sent successfully")
             return True
         else:
             logger.error(f"FFmpeg error: {process.stderr}")
@@ -95,20 +96,21 @@ async def _send_video_note_fallback(msg: Message, voice_result, template_path: s
                 except: pass
 
 
-async def keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event, thread_id: int = None):
+async def keep_typing(bot: Bot, chat_id: int, stop_event: asyncio.Event, thread_id: int = None, action: str = "typing"):
     """
-    Периодически отправляет статус 'typing' пока не установлен stop_event.
+    Периодически отправляет статус (typing/record_voice/record_video_note) пока не установлен stop_event.
     Telegram сбрасывает статус через 5 секунд, поэтому обновляем каждые 4 секунды.
     
     Args:
         bot: Bot instance
         chat_id: ID чата
-        stop_event: Event для остановки typing
+        stop_event: Event для остановки
         thread_id: ID топика для супергрупп с форумами (message_thread_id)
+        action: Тип действия (typing, record_voice, record_video_note)
     """
     while not stop_event.is_set():
         try:
-            await bot.send_chat_action(chat_id, "typing", message_thread_id=thread_id)
+            await bot.send_chat_action(chat_id, action, message_thread_id=thread_id)
         except Exception:
             pass  # Игнорируем ошибки
         await asyncio.sleep(4)
@@ -736,9 +738,9 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
 
     logger.info(f"[QNA PROCESS] Обрабатываем от {user_tag}: \"{text[:50]}...\"")
     
-    # Запускаем фоновую задачу для поддержания статуса "печатает..."
+    # Запускаем статус "печатает" сразу
     stop_typing = asyncio.Event()
-    typing_task = asyncio.create_task(keep_typing(msg.bot, msg.chat.id, stop_typing, topic_id))
+    typing_task = asyncio.create_task(keep_typing(msg.bot, msg.chat.id, stop_typing, topic_id, "typing"))
 
     try:
         # Получаем контекст чата (название, описание, тип)
@@ -791,14 +793,19 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
         # Получаем настройки шансов из базы
         text_chance = 0.0
         voice_chance = 0.0
+        video_chance = 0.0
         try:
             async with async_session() as session:
                 chat_obj = await session.get(Chat, msg.chat.id)
                 if chat_obj:
                     text_chance = getattr(chat_obj, "auto_reply_chance", 0.0)
-                    voice_chance = getattr(chat_obj, "voice_reply_chance", 0.0)
         except Exception as e:
             logger.warning(f"Failed to get reply chances for chat {msg.chat.id}: {e}")
+        
+        # Получаем глобальные настройки голоса и видео
+        from app.services.ollama_client import get_global_voice_chance, get_global_video_chance
+        voice_chance = get_global_voice_chance() * 100  # Конвертируем в проценты
+        video_chance = get_global_video_chance() * 100
 
         # Проверяем, нужно ли отправлять ответ (текст или голос)
         # Для автоответов (не прямое упоминание) используем вероятности
@@ -817,7 +824,7 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
             return
 
         # 2. Решаем формат ответа: Текст, ГС или Кружочек
-        video_chance = getattr(chat_obj, "video_reply_chance", 0.0) if chat_obj else 0.0
+        # video_chance уже получен выше вместе с text_chance и voice_chance
         
         # Нормализуем шансы
         eff_voice_chance = voice_chance / 100.0 if voice_chance > 1.0 else voice_chance
@@ -835,23 +842,57 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
             if not should_video and not should_voice:
                 if random.random() < 0.001: should_voice = True
         
+        # Определяем статус в зависимости от формата ответа и обновляем его
+        if should_video:
+            chat_action = "record_video_note"
+        elif should_voice:
+            chat_action = "record_voice"
+        else:
+            chat_action = "typing"
+        
+        # Обновляем статус если изменился (останавливаем старый, запускаем новый)
+        if chat_action != "typing":
+            stop_typing.set()
+            if typing_task:
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+            stop_typing.clear()
+            typing_task = asyncio.create_task(keep_typing(msg.bot, msg.chat.id, stop_typing, topic_id, chat_action))
+        
         video_sent = False
         voice_sent = False
 
         # --- ПОПЫТКА ОТПРАВИТЬ ВИДЕО ---
         if should_video:
             try:
-                # Проверяем наличие шаблона для текущей личности
-                persona = getattr(chat_obj, "persona", "oleg")
-                template_path = f"assets/video_templates/{persona}.mp4"
+                # Получаем текущую персону
+                from app.services.ollama_client import get_global_persona
+                persona = get_global_persona()
+                
+                # Маппинг персон на файлы (если отличаются)
+                persona_files = {
+                    "anime": "default",  # Олежка-тян
+                    "oleg_legacy": "olegkuznec",
+                    "zgeek": "olegz",
+                    "pozdnyakov": "pozdnyacov",
+                    "dude": "thedude"
+                }
+                
+                filename = persona_files.get(persona, persona)
+                template_path = f"assets/video_templates/{filename}.mp4"
                 
                 import os
+                if not os.path.exists(template_path):
+                    template_path = "assets/video_templates/default.mp4"
+                
                 if os.path.exists(template_path):
                     # Генерируем голос для наложения
                     voice_result = await tts_service.generate_voice(reply)
                     if voice_result:
-                        # Собираем кружочек через ffmpeg (заглушка функции сборки)
-                        # Пока просто шлем видео как есть или ГС если не вышло
+                        # Собираем видеосообщение через ffmpeg
                         video_sent = await _send_video_note_fallback(msg, voice_result, template_path)
                 
                 if not video_sent:
@@ -865,8 +906,13 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
             try:
                 result = await tts_service.generate_voice(reply)
                 if result is not None:
+                    from aiogram.types import BufferedInputFile
+                    voice_file = BufferedInputFile(
+                        file=result.audio_data,
+                        filename="voice.mp3"
+                    )
                     await msg.reply_voice(
-                        voice=result.audio_data,
+                        voice=voice_file,
                         caption=None,
                         duration=int(result.duration_seconds)
                     )
@@ -1069,13 +1115,14 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
             else:
                 logger.debug(f"[ERROR SKIP] Error throttled (last: {current_time - last_error_time:.1f}s ago)")
     finally:
-        # Останавливаем статус "печатает..."
+        # Останавливаем статус
         stop_typing.set()
-        typing_task.cancel()
-        try:
-            await typing_task
-        except asyncio.CancelledError:
-            pass
+        if typing_task:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
 
 
 @router.message(Command("myhistory"))

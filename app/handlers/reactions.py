@@ -321,27 +321,28 @@ async def on_reaction(event: MessageReactionUpdated):
                 logger.warning(f"Failed to send combo message: {e}")
     
     # ========================================================================
-    # RARE REACTIONS - 5% chance for special response
+    # RARE REACTIONS - DISABLED (was spamming chats)
     # ========================================================================
-    if random.random() < 0.05:
-        set_cooldown(chat_id, message_id)
-        rare_messages = [
-            "Редкая реакция разблокирована! ✨",
-            "Ого, это было неожиданно 🎲",
-            "Критический хит реакцией! 💥",
-            "Легендарный ответ активирован 🌟",
-            "RNG благосклонен к тебе 🎰",
-        ]
-        try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=random.choice(rare_messages),
-                message_thread_id=thread_id
-            )
-            logger.info(f"Rare reaction triggered in chat {chat_id}, message {message_id}")
-            return
-        except Exception as e:
-            logger.warning(f"Failed to send rare reaction: {e}")
+    # Rare reactions disabled to prevent spam in general chat
+    # if random.random() < 0.001:  # Reduced from 5% to 0.1% if re-enabled
+    #     set_cooldown(chat_id, message_id)
+    #     rare_messages = [
+    #         "Редкая реакция разблокирована! ✨",
+    #         "Ого, это было неожиданно 🎲",
+    #         "Критический хит реакцией! 💥",
+    #         "Легендарный ответ активирован 🌟",
+    #         "RNG благосклонен к тебе 🎰",
+    #     ]
+    #     try:
+    #         await bot.send_message(
+    #             chat_id=chat_id,
+    #             text=random.choice(rare_messages),
+    #             message_thread_id=thread_id
+    #         )
+    #         logger.info(f"Rare reaction triggered in chat {chat_id}, message {message_id}")
+    #         return
+    #     except Exception as e:
+    #         logger.warning(f"Failed to send rare reaction: {e}")
     
     # ========================================================================
     # CATEGORY-BASED RESPONSES
@@ -427,41 +428,41 @@ async def on_reaction(event: MessageReactionUpdated):
                 logger.warning(f"Failed to send funny message: {e}")
         return
     
-    # Sad reactions
-    sad_match = new_emojis & SAD_REACTIONS
-    if sad_match:
-        set_cooldown(chat_id, message_id)
-        if random.random() < 0.5:  # 50% comfort
-            comfort_messages = [
-                "Не грусти 🥺",
-                "Всё будет хорошо 💙",
-                "Держись там 💪",
-                "Обнял 🤗",
-            ]
-            try:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=random.choice(comfort_messages),
-                    message_thread_id=thread_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send comfort message: {e}")
-        else:  # 50% troll
-            troll_messages = [
-                "Ну не реви 😏",
-                "Слёзы не помогут 🙄",
-                "Драма-квин 💅",
-                "Ой, всё 😤",
-            ]
-            try:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=random.choice(troll_messages),
-                    message_thread_id=thread_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send troll message: {e}")
-        return
+    # Sad reactions - DISABLED
+    # sad_match = new_emojis & SAD_REACTIONS
+    # if sad_match:
+    #     set_cooldown(chat_id, message_id)
+    #     if random.random() < 0.5:  # 50% comfort
+    #         comfort_messages = [
+    #             "Не грусти 🥺",
+    #             "Всё будет хорошо 💙",
+    #             "Держись там 💪",
+    #             "Обнял 🤗",
+    #         ]
+    #         try:
+    #             await bot.send_message(
+    #                 chat_id=chat_id,
+    #                 text=random.choice(comfort_messages),
+    #                 message_thread_id=thread_id
+    #             )
+    #         except Exception as e:
+    #             logger.warning(f"Failed to send comfort message: {e}")
+    #     else:  # 50% troll
+    #         troll_messages = [
+    #             "Ну не реви 😏",
+    #             "Слёзы не помогут 🙄",
+    #             "Драма-квин 💅",
+    #             "Ой, всё 😤",
+    #         ]
+    #         try:
+    #             await bot.send_message(
+    #                 chat_id=chat_id,
+    #                 text=random.choice(troll_messages),
+    #                 message_thread_id=thread_id
+    #             )
+    #         except Exception as e:
+    #             logger.warning(f"Failed to send troll message: {e}")
+    #     return
     
     # Thinking reactions
     thinking_match = new_emojis & THINKING_REACTIONS

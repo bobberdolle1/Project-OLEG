@@ -758,7 +758,7 @@ async def job_birthday_greetings(bot: Bot):
     Запускается в 10:00 по Москве.
     """
     from app.services.user_memory import user_memory
-    from app.services.ollama_client import generate_response
+    from app.services.ollama_client import generate_text_reply
     
     try:
         tz = pytz.timezone(settings.timezone)
@@ -790,12 +790,11 @@ async def job_birthday_greetings(bot: Bot):
                 # Генерируем персональное поздравление через LLM
                 prompt = f"Напиши короткое (2-3 предложения) поздравление с днём рождения для {name}. Будь в своём стиле — циничный, но добрый. Без эмодзи в начале."
                 
-                greeting = await generate_response(
+                greeting = await generate_text_reply(
                     user_text=prompt,
-                    chat_id=chat_id,
                     username="system",
-                    user_id=0,
-                    system_override="Ты Олег — циничный IT-гигачад. Поздравь человека с ДР коротко и с юмором."
+                    chat_context=None,
+                    conversation_history=None
                 )
                 
                 # Fallback если LLM недоступен

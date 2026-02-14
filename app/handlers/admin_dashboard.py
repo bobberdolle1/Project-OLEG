@@ -109,22 +109,12 @@ class AdminDashboard:
         async with get_session()() as session:
             chat = await session.get(Chat, chat_id)
             text_reply_pct = int((chat.auto_reply_chance or 0) * 100) if chat else 0
-            voice_reply_pct = int((chat.voice_reply_chance or 0) * 100) if chat else 0
-            video_reply_pct = int((chat.video_reply_chance or 0) * 100) if chat else 0
             reactions_status = "Вкл" if (chat and chat.reactions_enabled) else "Выкл"
         
         keyboard = InlineKeyboardBuilder()
         keyboard.button(
-            text=f"📝 Текст: {text_reply_pct}%", 
+            text=f"📝 Автоответ: {text_reply_pct}%", 
             callback_data=f"adm_autoreply_{chat_id}"
-        )
-        keyboard.button(
-            text=f"🎤 Голос: {voice_reply_pct}%",
-            callback_data=f"adm_voicechance_{chat_id}"
-        )
-        keyboard.button(
-            text=f"🎬 Видео: {video_reply_pct}%",
-            callback_data=f"adm_videochance_{chat_id}"
         )
         keyboard.button(
             text=f"😊 Реакции: {reactions_status}",
@@ -354,58 +344,6 @@ async def cb_behavior_menu(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.startswith("adm_voicechance_"))
-async def cb_voicechance_menu(callback: CallbackQuery):
-    """Show voice auto-reply options."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    
-    keyboard = InlineKeyboardBuilder()
-    for pct in [0, 1, 5, 10, 20, 30, 50]:
-        label = "Выкл" if pct == 0 else f"{pct}%"
-        keyboard.button(text=label, callback_data=f"adm_setvoice_{chat_id}_{pct}")
-    keyboard.button(text="🔙 Назад", callback_data=f"adm_beh_{chat_id}")
-    keyboard.adjust(3, 4, 1)
-    
-    await callback.message.edit_text(
-        "🎤 <b>Шанс голосового ответа</b>\n\n"
-        "Выбери вероятность автоматического голосового ответа (ГС) на сообщения:",
-        reply_markup=keyboard.as_markup()
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("adm_setvoice_"))
-async def cb_set_voicechance(callback: CallbackQuery):
-    """Set voice auto-reply chance."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    chat_id = int(parts[2])
-    pct = int(parts[3])
-    
-    async with get_session()() as session:
-        chat = await session.get(Chat, chat_id)
-        if chat:
-            chat.voice_reply_chance = pct / 100.0
-            await session.commit()
-    
-    await callback.answer(f"Шанс ГС установлен на {pct}%", show_alert=True)
-    
-    # Return to behavior menu
-    keyboard = await dashboard.build_behavior_menu(chat_id)
-    await callback.message.edit_text(
-        "⚙️ <b>Поведение</b>\n\n"
-        "Настройки поведения бота:",
-        reply_markup=keyboard.as_markup()
-    )
-
-
 @router.callback_query(F.data.startswith("adm_autoreply_"))
 async def cb_autoreply_menu(callback: CallbackQuery):
     """Show auto-reply options. Requirements: 7.4"""
@@ -448,60 +386,6 @@ async def cb_set_autoreply(callback: CallbackQuery):
             await session.commit()
     
     await callback.answer(f"Шанс текста установлен на {pct}%", show_alert=True)
-    
-    # Return to behavior menu
-    keyboard = await dashboard.build_behavior_menu(chat_id)
-    await callback.message.edit_text(
-        "⚙️ <b>Поведение</b>\n\n"
-        "Настройки поведения бота:",
-        reply_markup=keyboard.as_markup()
-    )
-
-
-@router.callback_query(F.data.startswith("adm_videochance_"))
-async def cb_videochance_menu(callback: CallbackQuery):
-    """Show video auto-reply options."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    chat_id = int(callback.data.split("_")[2])
-    
-    keyboard = InlineKeyboardBuilder()
-    for pct in [0, 1, 5, 10, 20]:
-        label = "Выкл" if pct == 0 else f"{pct}%"
-        keyboard.button(text=label, callback_data=f"adm_setvideo_{chat_id}_{pct}")
-    keyboard.button(text="🔙 Назад", callback_data=f"adm_beh_{chat_id}")
-    keyboard.adjust(3, 3, 1)
-    
-    await callback.message.edit_text(
-        "🎬 <b>Шанс видео-ответа</b>\n\n"
-        "Выбери вероятность автоматического видео-ответа (кружочка) на сообщения:\n"
-        "<i>(Требует наличия шаблонов видео в папке бота)</i>",
-        reply_markup=keyboard.as_markup(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("adm_setvideo_"))
-async def cb_set_videochance(callback: CallbackQuery):
-    """Set video auto-reply chance."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("Доступ запрещён", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    chat_id = int(parts[2])
-    pct = int(parts[3])
-    
-    async with get_session()() as session:
-        chat = await session.get(Chat, chat_id)
-        if chat:
-            chat.video_reply_chance = pct / 100.0
-            await session.commit()
-    
-    await callback.answer(f"Шанс видео установлен на {pct}%", show_alert=True)
     
     # Return to behavior menu
     keyboard = await dashboard.build_behavior_menu(chat_id)

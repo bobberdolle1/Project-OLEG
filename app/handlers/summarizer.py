@@ -220,8 +220,13 @@ async def callback_voice_summary(callback: CallbackQuery):
             return
         
         # Send voice message
+        from aiogram.types import BufferedInputFile
+        voice_file = BufferedInputFile(
+            file=result.audio_data,
+            filename="voice.mp3"
+        )
         await callback.message.reply_voice(
-            voice=result.audio_data,
+            voice=voice_file,
             caption="🎤 Пересказ голосом Олега",
             duration=int(result.duration_seconds)
         )

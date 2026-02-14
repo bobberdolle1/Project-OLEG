@@ -488,7 +488,64 @@ async def _process_single_image(msg: Message, is_auto_reply: bool) -> None:
             prefixes = ["👀 ", "🤔 ", "Хм, ", "О, ", "Ничёсе, ", "Гляди-ка, "]
             analysis_result = random.choice(prefixes) + analysis_result
 
-        await safe_reply(msg, analysis_result)
+        # Определяем формат ответа (текст/голос/видео) используя глобальные настройки
+        from app.services.ollama_client import get_global_voice_chance, get_global_video_chance
+        import random as _random
+        
+        voice_chance = get_global_voice_chance()
+        video_chance = get_global_video_chance()
+        
+        # Бросаем кубики (приоритет: Видео -> Голос -> Текст)
+        roll = _random.random()
+        should_video = roll < video_chance
+        should_voice = not should_video and (roll < (video_chance + voice_chance))
+        
+        video_sent = False
+        voice_sent = False
+        
+        # --- ПОПЫТКА ОТПРАВИТЬ ВИДЕО ---
+        if should_video:
+            try:
+                from app.services.tts import tts_service
+                template_path = "assets/video_templates/default.mp4"
+                
+                import os
+                if os.path.exists(template_path):
+                    voice_result = await tts_service.generate_voice(analysis_result)
+                    if voice_result:
+                        from app.handlers.qna import _send_video_note_fallback
+                        video_sent = await _send_video_note_fallback(msg, voice_result, template_path)
+                
+                if not video_sent:
+                    should_voice = True
+            except Exception as e:
+                logger.warning(f"Video generation failed for vision: {e}")
+                should_voice = True
+        
+        # --- ПОПЫТКА ОТПРАВИТЬ ГОЛОС ---
+        if should_voice and not video_sent:
+            try:
+                from app.services.tts import tts_service
+                from aiogram.types import BufferedInputFile
+                
+                result = await tts_service.generate_voice(analysis_result)
+                if result is not None:
+                    voice_file = BufferedInputFile(
+                        file=result.audio_data,
+                        filename="voice.mp3"
+                    )
+                    await msg.reply_voice(
+                        voice=voice_file,
+                        caption=None,
+                        duration=int(result.duration_seconds)
+                    )
+                    voice_sent = True
+            except Exception as e:
+                logger.warning(f"Voice generation failed for vision: {e}")
+        
+        # --- ТЕКСТОВЫЙ ОТВЕТ (если голос/видео не сработали) ---
+        if not video_sent and not voice_sent:
+            await safe_reply(msg, analysis_result)
         
         if is_auto_reply:
             logger.info(f"Auto-reply to image in chat {msg.chat.id}")

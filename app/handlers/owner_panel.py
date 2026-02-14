@@ -110,6 +110,8 @@ class OwnerStates(StatesGroup):
     waiting_broadcast_text = State()  # Legacy, now accepts any content
     waiting_broadcast_confirm = State()
     waiting_broadcast_content = State()  # New: any content type
+    waiting_voice_percent = State()  # Ввод процента для голоса
+    waiting_video_percent = State()  # Ввод процента для видео
 
 
 # ============================================================================
@@ -141,12 +143,13 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     
     kb.button(text="⚙️ Функции бота", callback_data="owner_features")
     kb.button(text="🎭 Персона Олега", callback_data="owner_persona_menu")
+    kb.button(text="🎤 Формат ответов", callback_data="owner_format_menu")
     kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
     kb.button(text="📊 Статус системы", callback_data="owner_status")
     kb.button(text="💬 Управление чатами", callback_data="owner_chats")
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1)
     return kb
 
 
@@ -898,53 +901,6 @@ async def cb_owner_persona_menu(callback: CallbackQuery, bot: Bot):
     
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("owner_set_persona:"))
-async def cb_owner_set_persona(callback: CallbackQuery):
-    """Установить персону для SDOC чата."""
-    if not is_owner(callback.from_user.id):
-        await callback.answer("⛔ Доступ запрещён", show_alert=True)
-        return
-    
-    persona_id = callback.data.split(":")[1]
-    
-    if not settings.sdoc_chat_id:
-        await callback.answer("SDOC Chat ID не настроен", show_alert=True)
-        return
-    
-    # Validate persona exists
-    import json
-    from pathlib import Path
-    
-    personas_path = Path("app/data/personas.json")
-    try:
-        with open(personas_path, "r", encoding="utf-8") as f:
-            personas_data = json.load(f)
-            if persona_id not in personas_data["personas"]:
-                await callback.answer("Неизвестная персона", show_alert=True)
-                return
-            persona_name = personas_data["personas"][persona_id]["name"]
-    except Exception as e:
-        logger.error(f"Failed to load personas: {e}")
-        await callback.answer("Ошибка загрузки персон", show_alert=True)
-        return
-    
-    # Update persona in database
-    async with get_session()() as session:
-        chat = await session.get(Chat, settings.sdoc_chat_id)
-        if chat:
-            chat.persona = persona_id
-            await session.commit()
-            await callback.answer(f"Персона изменена на: {persona_name}", show_alert=True)
-        else:
-            await callback.answer("Чат не найден в БД", show_alert=True)
-            return
-    
-    # Return to persona menu
-    from aiogram import Bot
-    bot = callback.bot
-    await cb_owner_persona_menu(callback, bot)
 
 
 # ============================================================================
@@ -1719,6 +1675,7 @@ async def cb_owner_persona(callback: CallbackQuery):
         f"{mode_text}\n\n"
         "<b>Доступные персоны:</b>\n"
         "• 😎 <b>Олег</b> — дерзкий, уверенный, подкалывает\n"
+        "• 👔 <b>Олег Кузнецов</b> — живой человек, Senior DevOps\n"
         "• 🎳 <b>The Dude</b> — расслабленный, философский\n"
         "• ☭ <b>Сталин</b> — авторитарный, советская риторика\n"
         "• 🌸 <b>Аниме-тян</b> — кавайная, милая, с эмодзи\n"
@@ -2853,3 +2810,234 @@ async def cb_owner_wipe_all_confirm(callback: CallbackQuery):
         reply_markup=kb.as_markup()
     )
     await callback.answer()
+
+
+# ============================================================================
+# Формат ответов (голос/видео)
+# ============================================================================
+
+@router.callback_query(F.data == "owner_format_menu")
+async def cb_owner_format_menu(callback: CallbackQuery):
+    """Меню настройки формата ответов."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    from app.services.ollama_client import get_global_voice_chance, get_global_video_chance
+    
+    voice_pct = int(get_global_voice_chance() * 100)
+    video_pct = int(get_global_video_chance() * 100)
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text=f"🎤 Голос: {voice_pct}%", callback_data="owner_voice_menu")
+    kb.button(text=f"🎬 Видео: {video_pct}%", callback_data="owner_video_menu")
+    kb.button(text="🔙 Назад", callback_data="owner_main")
+    kb.adjust(1)
+    
+    await callback.message.edit_text(
+        "🎤 <b>Формат ответов</b>\n\n"
+        "Глобальные настройки формата ответов Олега:\n\n"
+        "• <b>Голос</b> — шанс ответить голосовым сообщением\n"
+        "• <b>Видео</b> — шанс ответить видеосообщением (кружочком)\n\n"
+        "Приоритет: Видео → Голос → Текст",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner_voice_menu")
+async def cb_owner_voice_menu(callback: CallbackQuery):
+    """Меню настройки голоса."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    for pct in [0, 10, 25, 50, 75, 100]:
+        label = "Выкл" if pct == 0 else f"{pct}%"
+        kb.button(text=label, callback_data=f"owner_setvoice_{pct}")
+    kb.button(text="✏️ Свой %", callback_data="owner_voice_custom")
+    kb.button(text="🔙 Назад", callback_data="owner_format_menu")
+    kb.adjust(3, 3, 1, 1)
+    
+    await callback.message.edit_text(
+        "🎤 <b>Шанс голосового ответа</b>\n\n"
+        "Выбери вероятность голосового ответа:",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_setvoice_"))
+async def cb_owner_set_voice(callback: CallbackQuery):
+    """Установить шанс голоса."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    pct = int(callback.data.split("_")[2])
+    
+    from app.services.ollama_client import set_global_voice_chance
+    set_global_voice_chance(pct / 100.0)
+    
+    await callback.answer(f"✅ Голос установлен на {pct}%", show_alert=True)
+    await cb_owner_format_menu(callback)
+
+
+@router.callback_query(F.data == "owner_voice_custom")
+async def cb_owner_voice_custom(callback: CallbackQuery, state: FSMContext):
+    """Запросить ввод своего процента для голоса."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await state.set_state(OwnerStates.waiting_voice_percent)
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data="owner_voice_menu")
+    
+    await callback.message.edit_text(
+        "🎤 <b>Свой процент для голоса</b>\n\n"
+        "Введи число от 0 до 100:",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_voice_percent)
+async def handle_voice_percent(msg: Message, state: FSMContext):
+    """Обработка ввода процента для голоса."""
+    if not is_owner(msg.from_user.id):
+        return
+    
+    try:
+        pct = int(msg.text.strip())
+        if not 0 <= pct <= 100:
+            raise ValueError
+        
+        from app.services.ollama_client import set_global_voice_chance
+        set_global_voice_chance(pct / 100.0)
+        
+        await msg.answer(f"✅ Голос установлен на {pct}%")
+        await state.clear()
+        
+        # Показываем меню формата
+        from app.services.ollama_client import get_global_voice_chance, get_global_video_chance
+        voice_pct = int(get_global_voice_chance() * 100)
+        video_pct = int(get_global_video_chance() * 100)
+        
+        kb = InlineKeyboardBuilder()
+        kb.button(text=f"🎤 Голос: {voice_pct}%", callback_data="owner_voice_menu")
+        kb.button(text=f"🎬 Видео: {video_pct}%", callback_data="owner_video_menu")
+        kb.button(text="🔙 Назад", callback_data="owner_main")
+        kb.adjust(1)
+        
+        await msg.answer(
+            "🎤 <b>Формат ответов</b>\n\n"
+            "Глобальные настройки формата ответов Олега:\n\n"
+            "• <b>Голос</b> — шанс ответить голосовым сообщением\n"
+            "• <b>Видео</b> — шанс ответить видеосообщением (кружочком)\n\n"
+            "Приоритет: Видео → Голос → Текст",
+            reply_markup=kb.as_markup()
+        )
+    except ValueError:
+        await msg.answer("❌ Введи число от 0 до 100")
+
+
+@router.callback_query(F.data == "owner_video_menu")
+async def cb_owner_video_menu(callback: CallbackQuery):
+    """Меню настройки видео."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    kb = InlineKeyboardBuilder()
+    for pct in [0, 10, 25, 50, 75, 100]:
+        label = "Выкл" if pct == 0 else f"{pct}%"
+        kb.button(text=label, callback_data=f"owner_setvideo_{pct}")
+    kb.button(text="✏️ Свой %", callback_data="owner_video_custom")
+    kb.button(text="🔙 Назад", callback_data="owner_format_menu")
+    kb.adjust(3, 3, 1, 1)
+    
+    await callback.message.edit_text(
+        "🎬 <b>Шанс видео-ответа</b>\n\n"
+        "Выбери вероятность видео-ответа (кружочка):",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner_setvideo_"))
+async def cb_owner_set_video(callback: CallbackQuery):
+    """Установить шанс видео."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    pct = int(callback.data.split("_")[2])
+    
+    from app.services.ollama_client import set_global_video_chance
+    set_global_video_chance(pct / 100.0)
+    
+    await callback.answer(f"✅ Видео установлено на {pct}%", show_alert=True)
+    await cb_owner_format_menu(callback)
+
+
+@router.callback_query(F.data == "owner_video_custom")
+async def cb_owner_video_custom(callback: CallbackQuery, state: FSMContext):
+    """Запросить ввод своего процента для видео."""
+    if not is_owner(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    
+    await state.set_state(OwnerStates.waiting_video_percent)
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Отмена", callback_data="owner_video_menu")
+    
+    await callback.message.edit_text(
+        "🎬 <b>Свой процент для видео</b>\n\n"
+        "Введи число от 0 до 100:",
+        reply_markup=kb.as_markup()
+    )
+    await callback.answer()
+
+
+@router.message(OwnerStates.waiting_video_percent)
+async def handle_video_percent(msg: Message, state: FSMContext):
+    """Обработка ввода процента для видео."""
+    if not is_owner(msg.from_user.id):
+        return
+    
+    try:
+        pct = int(msg.text.strip())
+        if not 0 <= pct <= 100:
+            raise ValueError
+        
+        from app.services.ollama_client import set_global_video_chance
+        set_global_video_chance(pct / 100.0)
+        
+        await msg.answer(f"✅ Видео установлено на {pct}%")
+        await state.clear()
+        
+        # Показываем меню формата
+        from app.services.ollama_client import get_global_voice_chance, get_global_video_chance
+        voice_pct = int(get_global_voice_chance() * 100)
+        video_pct = int(get_global_video_chance() * 100)
+        
+        kb = InlineKeyboardBuilder()
+        kb.button(text=f"🎤 Голос: {voice_pct}%", callback_data="owner_voice_menu")
+        kb.button(text=f"🎬 Видео: {video_pct}%", callback_data="owner_video_menu")
+        kb.button(text="🔙 Назад", callback_data="owner_main")
+        kb.adjust(1)
+        
+        await msg.answer(
+            "🎤 <b>Формат ответов</b>\n\n"
+            "Глобальные настройки формата ответов Олега:\n\n"
+            "• <b>Голос</b> — шанс ответить голосовым сообщением\n"
+            "• <b>Видео</b> — шанс ответить видеосообщением (кружочком)\n\n"
+            "Приоритет: Видео → Голос → Текст",
+            reply_markup=kb.as_markup()
+        )
+    except ValueError:
+        await msg.answer("❌ Введи число от 0 до 100")

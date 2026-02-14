@@ -17,7 +17,7 @@ from app.database.models import Auction, AuctionBid
 from app.services.inventory import inventory_service, ITEM_CATALOG
 from app.services import wallet_service
 from app.utils import utc_now
-from app.services.ollama_client import generate_response
+from app.services.ollama_client import generate_text_reply
 from aiogram import Bot
 import random
 
@@ -71,12 +71,11 @@ class AuctionService:
             f"Не используй кавычки."
         )
         try:
-            description = await generate_response(
+            description = await generate_text_reply(
                 user_text=prompt,
-                chat_id=0,
                 username="system",
-                user_id=0,
-                system_override="Ты барыга Олег. Пиши коротко и смешно."
+                chat_context=None,
+                conversation_history=None
             )
         except Exception:
             description = "Товар высшего качества, мамой клянусь!"

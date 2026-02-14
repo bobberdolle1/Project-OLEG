@@ -89,28 +89,57 @@ class MessageLoggerMiddleware(BaseMiddleware):
                 except Exception:
                     await session.rollback()
             
-            # Extract facts from ALL messages for /whois dossier (background task)
+            # Extract facts ONLY when user directly interacts with Oleg (replies, mentions, or DM)
             if text and len(text) >= 10 and event.from_user:
-                import asyncio
-                from app.services.ollama_client import extract_facts_from_message, store_fact_to_memory
-                from app.services.user_memory import user_memory
+                # Check if this is a direct interaction with the bot
+                is_direct_interaction = False
                 
-                async def extract_facts_background():
-                    try:
-                        user_info = {"username": event.from_user.username} if event.from_user.username else {}
-                        topic_id = getattr(event, 'message_thread_id', None)
-                        new_facts = await extract_facts_from_message(text, event.chat.id, user_info, topic_id=topic_id)
-                        if new_facts:
-                            for fact in new_facts:
-                                await store_fact_to_memory(fact['text'], event.chat.id, fact['metadata'], topic_id=topic_id)
-                            await user_memory.update_profile_from_facts(
-                                event.chat.id, event.from_user.id, event.from_user.username, new_facts
-                            )
-                            logger.debug(f"[FACTS] Extracted {len(new_facts)} facts from message in chat {event.chat.id}")
-                    except Exception as e:
-                        logger.debug(f"Background fact extraction failed: {e}")
+                # 1. Private message (DM)
+                if event.chat.type == "private":
+                    is_direct_interaction = True
                 
-                asyncio.create_task(extract_facts_background())
+                # 2. Reply to bot's message
+                elif event.reply_to_message and event.reply_to_message.from_user:
+                    bot_info = await event.bot.get_me()
+                    if event.reply_to_message.from_user.id == bot_info.id:
+                        is_direct_interaction = True
+                
+                # 3. Bot mentioned in text
+                elif event.text:
+                    bot_info = await event.bot.get_me()
+                    text_lower = event.text.lower()
+                    # Check for @username mention
+                    if bot_info.username and f"@{bot_info.username.lower()}" in text_lower:
+                        is_direct_interaction = True
+                    # Check for "олег" mentions
+                    oleg_triggers = ["олег", "олега", "олегу", "олегом", "олеге", "oleg"]
+                    for trigger in oleg_triggers:
+                        if re.search(rf'\b{trigger}\b', text_lower):
+                            is_direct_interaction = True
+                            break
+                
+                # Only extract facts if user is directly interacting with Oleg
+                if is_direct_interaction:
+                    import asyncio
+                    from app.services.ollama_client import extract_facts_from_message, store_fact_to_memory
+                    from app.services.user_memory import user_memory
+                    
+                    async def extract_facts_background():
+                        try:
+                            user_info = {"username": event.from_user.username} if event.from_user.username else {}
+                            topic_id = getattr(event, 'message_thread_id', None)
+                            new_facts = await extract_facts_from_message(text, event.chat.id, user_info, topic_id=topic_id)
+                            if new_facts:
+                                for fact in new_facts:
+                                    await store_fact_to_memory(fact['text'], event.chat.id, fact['metadata'], topic_id=topic_id)
+                                await user_memory.update_profile_from_facts(
+                                    event.chat.id, event.from_user.id, event.from_user.username, new_facts
+                                )
+                                logger.debug(f"[FACTS] Extracted {len(new_facts)} facts from direct interaction in chat {event.chat.id}")
+                        except Exception as e:
+                            logger.debug(f"Background fact extraction failed: {e}")
+                    
+                    asyncio.create_task(extract_facts_background())
 
             # Track message metrics
             try:

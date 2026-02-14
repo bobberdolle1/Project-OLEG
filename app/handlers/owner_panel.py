@@ -137,21 +137,6 @@ def is_owner(user_id: int) -> bool:
 # Главное меню владельца
 # ============================================================================
 
-def build_owner_main_menu() -> InlineKeyboardBuilder:
-    """Построить главное меню владельца."""
-    kb = InlineKeyboardBuilder()
-    
-    kb.button(text="⚙️ Функции бота", callback_data="owner_features")
-    kb.button(text="🎭 Персона Олега", callback_data="owner_persona_menu")
-    kb.button(text="🎤 Формат ответов", callback_data="owner_format_menu")
-    kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
-    kb.button(text="📊 Статус системы", callback_data="owner_status")
-    kb.button(text="💬 Управление чатами", callback_data="owner_chats")
-    kb.button(text="🔧 Настройки", callback_data="owner_settings")
-    
-    kb.adjust(2, 2, 2, 1)
-    return kb
-
 
 # ============================================================================
 # Команда /owner - главная точка входа
@@ -1631,6 +1616,7 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     
     kb.button(text="⚙️ Функции бота", callback_data="owner_features")
     kb.button(text="🎭 Персона", callback_data="owner_persona")
+    kb.button(text="🎤 Формат ответов", callback_data="owner_format_menu")
     kb.button(text="📢 Рассылка", callback_data="owner_broadcast")
     kb.button(text="📊 Статус системы", callback_data="owner_status")
     kb.button(text="📈 Общая статистика", callback_data="owner_stats")
@@ -1641,7 +1627,7 @@ def build_owner_main_menu() -> InlineKeyboardBuilder:
     kb.button(text="🔧 Настройки", callback_data="owner_settings")
     kb.button(text="🚨 Экстренные действия", callback_data="owner_emergency")
     
-    kb.adjust(2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2)
     return kb
 
 

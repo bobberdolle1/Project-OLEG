@@ -32,9 +32,9 @@ async def _send_video_note_fallback(msg: Message, voice_result, template_path: s
     Использует ffmpeg для наложения голоса на видео шаблон.
     Шаблон уже обрезан до 640x640 без звука.
     """
-    import subprocess
     import os
     import uuid
+    import asyncio
     
     # Создаем временные файлы
     unique_id = str(uuid.uuid4())[:8]
@@ -46,33 +46,40 @@ async def _send_video_note_fallback(msg: Message, voice_result, template_path: s
         with open(temp_voice, "wb") as f:
             f.write(voice_result.audio_data)
         
-        # Команда FFmpeg:
-        # 1. -stream_loop -1: зацикливаем видео
-        # 2. Фильтр-пайплайн:
-        #    - scale=-1:640: масштабируем по высоте до 640 (ширина пропорционально)
-        #    - crop=640:640: обрезаем центр до квадрата 640x640
-        #    - setsar=1: устанавливаем соотношение сторон пикселя 1:1
-        # 3. -shortest: обрезать по длине самого короткого потока (звука)
-        # 4. -c:v libx264: кодируем видео в h264 (нужно для кропа/скейла)
-        # 5. -pix_fmt yuv420p: совместимый формат пикселей
-        # 6. -c:a aac: кодируем аудио в AAC
+        # Команда FFmpeg (async version) - Optimized for pre-processed templates
         cmd = [
             'ffmpeg', '-y',
             '-stream_loop', '-1',
             '-i', template_path,
             '-i', temp_voice,
-            '-vf', 'scale=-1:640,crop=640:640,setsar=1',
+            '-vf', 'setsar=1', # Input is already 640x640, just ensure SAR is 1:1
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-crf', '23',
+            '-preset', 'ultrafast',
+            '-tune', 'zerolatency',
+            '-crf', '28',
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-shortest',
             temp_video
         ]
         
-        # Запускаем сборку
-        process = subprocess.run(cmd, capture_output=True, text=True)
+        # Запускаем сборку асинхронно
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        try:
+            # 20 секунд должно хватить с головой для склейки готового видео
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20.0)
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            logger.error("FFmpeg generation timed out (20s)")
+            return False
         
         if process.returncode == 0 and os.path.exists(temp_video):
             from aiogram.types import FSInputFile
@@ -82,7 +89,7 @@ async def _send_video_note_fallback(msg: Message, voice_result, template_path: s
             logger.info(f"Video note sent successfully")
             return True
         else:
-            logger.error(f"FFmpeg error: {process.stderr}")
+            logger.error(f"FFmpeg error: {stderr.decode()}")
             return False
             
     except Exception as e:

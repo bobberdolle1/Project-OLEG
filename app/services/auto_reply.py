@@ -47,7 +47,7 @@ class AutoReplySystem:
     BASE_PROBABILITY_MAX: float = 0.05  # 5%
     
     # Message length filter (Requirements 2.2)
-    MIN_MESSAGE_LENGTH: int = 15
+    MIN_MESSAGE_LENGTH: int = 2
     
     # Blocked short phrases - не отвечаем на короткие фразы (Requirements 2.3)
     BLOCKED_SHORT_PHRASES: set = {

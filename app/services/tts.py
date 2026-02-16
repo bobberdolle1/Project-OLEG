@@ -13,6 +13,7 @@ This module provides TTS functionality including:
 import io
 import logging
 import random
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -93,11 +94,20 @@ class TTSService:
         """Generate voice message from text."""
         if not text:
             return None
+            
+        # Clean text from special symbols (keep alphanumeric and basic punctuation)
+        # Allow Cyrillic, Latin, numbers, and basic punctuation
+        clean_text = re.sub(r'[^\w\s.,!?;:()\-—"\'«»]', '', text)
+        # Remove multiple spaces
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
         
-        processed_text, was_truncated = self.truncate_text(text, max_chars)
+        if not clean_text:
+            return None
+        
+        processed_text, was_truncated = self.truncate_text(clean_text, max_chars)
         
         if was_truncated:
-            logger.info(f"Text truncated from {len(text)} to {len(processed_text)} chars")
+            logger.info(f"Text truncated from {len(clean_text)} to {len(processed_text)} chars")
         
         try:
             audio_data = await self._generate_audio(processed_text, persona)

@@ -83,7 +83,7 @@ REACTION_COOLDOWN = 30.0  # 30 seconds cooldown per message
 # Combo tracking - multiple users reacting with same emoji
 # Key: message_id, Value: {emoji: [(user_id, timestamp)]}
 _reaction_combos: Dict[int, Dict[str, List[Tuple[int, float]]]] = {}
-COMBO_THRESHOLD = 3  # Number of users needed for combo
+COMBO_THRESHOLD = 5  # Number of users needed for combo
 COMBO_WINDOW = 60.0  # Time window for combo (seconds)
 
 
@@ -352,32 +352,17 @@ async def on_reaction(event: MessageReactionUpdated):
     flirty_match = new_emojis & FLIRTY_REACTIONS
     if flirty_match:
         set_cooldown(chat_id, message_id)
-        if random.random() < 0.7:  # 70% react back
-            response_emoji = random.choice(["😏", "😉", "💋", "🔥", "😘"])
-            try:
-                await bot.set_message_reaction(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    reaction=[ReactionTypeEmoji(emoji=response_emoji)]
-                )
-                logger.info(f"Oleg flirted back with {response_emoji}")
-            except Exception as e:
-                logger.warning(f"Failed to set flirty reaction: {e}")
-        else:  # 30% send message
-            flirty_messages = [
-                "Ой, флиртуем? 😏",
-                "Смелый какой 😉",
-                "Продолжай в том же духе 💋",
-                "Интересное предложение 🔥",
-            ]
-            try:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=random.choice(flirty_messages),
-                    message_thread_id=thread_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send flirty message: {e}")
+        # Always react back with emoji, no text spam
+        response_emoji = random.choice(["😏", "😉", "💋", "🔥", "😘"])
+        try:
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=response_emoji)]
+            )
+            logger.info(f"Oleg flirted back with {response_emoji}")
+        except Exception as e:
+            logger.warning(f"Failed to set flirty reaction: {e}")
         return
     
     # Surprised reactions
@@ -400,32 +385,17 @@ async def on_reaction(event: MessageReactionUpdated):
     funny_match = new_emojis & FUNNY_REACTIONS
     if funny_match:
         set_cooldown(chat_id, message_id)
-        if random.random() < 0.8:  # 80% react back
-            response_emoji = random.choice(["😂", "🤣", "😎", "💯", "🔥"])
-            try:
-                await bot.set_message_reaction(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    reaction=[ReactionTypeEmoji(emoji=response_emoji)]
-                )
-                logger.info(f"Oleg laughed back with {response_emoji}")
-            except Exception as e:
-                logger.warning(f"Failed to set funny reaction: {e}")
-        else:  # 20% send message
-            funny_messages = [
-                "Рад что смешно 😂",
-                "Вот это юмор! 🤣",
-                "Комик, блин 😎",
-                "Смеёмся вместе 💯",
-            ]
-            try:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=random.choice(funny_messages),
-                    message_thread_id=thread_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send funny message: {e}")
+        # Always react back with emoji
+        response_emoji = random.choice(["😂", "🤣", "😎", "💯", "🔥"])
+        try:
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=message_id,
+                reaction=[ReactionTypeEmoji(emoji=response_emoji)]
+            )
+            logger.info(f"Oleg laughed back with {response_emoji}")
+        except Exception as e:
+            logger.warning(f"Failed to set funny reaction: {e}")
         return
     
     # Sad reactions - DISABLED

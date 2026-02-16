@@ -722,10 +722,36 @@ class DailiesService:
                 
                 hot_topics = []
                 for item in topics_data[:8]:
+                    topic_text = item.get("topic", "Тема")
+                    msg_id = item.get("msg_id")
+                    
+                    # Verify if msg_id exists in our sample, if not/missing, try to find a relevant message
+                    if not msg_id or not any(m.message_id == msg_id for m in messages):
+                        # Try to find a message containing part of the topic keywords
+                        # Split topic into words and find a message containing them
+                        topic_words = [w.lower() for w in re.findall(r'\w+', topic_text) if len(w) > 3]
+                        found_msg = None
+                        
+                        if topic_words:
+                            for msg in messages:
+                                if not msg.text: continue
+                                text_lower = msg.text.lower()
+                                # If any significant word from topic is in message
+                                if any(w in text_lower for w in topic_words):
+                                    found_msg = msg
+                                    break
+                        
+                        if found_msg:
+                            msg_id = found_msg.message_id
+                        elif messages:
+                            # Fallback to random message from sample if we can't match
+                            # Better than no link? Maybe not. Let's leave it None if we can't match.
+                            pass
+
                     topic = {
-                        "keyword": item.get("topic", "Тема"),
+                        "keyword": topic_text,
                         "mentions": item.get("count", 10),
-                        "message_id": item.get("msg_id"),
+                        "message_id": msg_id,
                         "chat_id": chat_id
                     }
                     hot_topics.append(topic)
@@ -981,15 +1007,15 @@ class DailiesService:
             
             # Determine label
             if mood_score >= 75:
-                mood_label = "Отличное настроение! 🌟"
+                mood_label = "Райский сад 🌸"
             elif mood_score >= 60:
-                mood_label = "Позитивно 😊"
+                mood_label = "Лампово 🍺"
             elif mood_score >= 45:
-                mood_label = "Нейтрально"
+                mood_label = "Стабильное болото 🐸"
             elif mood_score >= 30:
-                mood_label = "Напряжённо 😐"
+                mood_label = "Духота 📉"
             else:
-                mood_label = "Тяжёлый день 😔"
+                mood_label = "Токсичный полигон ☢️"
             
             return mood_score, mood_label
             
@@ -1117,6 +1143,58 @@ class DailiesService:
             return True
         return not summary.has_activity
     
+    def format_morning_summary(self, summary: DailySummary) -> str:
+        """
+        Format morning summary (yesterday's recap).
+        
+        Distinct style from evening summary to avoid repetition.
+        Focuses on "Briefing" style.
+        """
+        date_str = summary.date.strftime("%d.%m")
+        
+        lines = [
+            f"☕️ #morningbriefing за {date_str}",
+            "",
+        ]
+        
+        # LLM Summary (shorter intro)
+        if summary.llm_summary:
+            lines.append(f"{summary.llm_summary}")
+            lines.append("")
+        
+        lines.append("📉 ИТОГИ ВЧЕРА:")
+        lines.append(f"• Сообщений: {summary.message_count}")
+        lines.append(f"• Актив: {summary.active_users} чел.")
+        
+        if summary.new_members > 0:
+            lines.append(f"• Новых: +{summary.new_members}")
+            
+        # Highlight top discussion only
+        if summary.hot_topics:
+            top_topic = summary.hot_topics[0]
+            keyword = top_topic['keyword']
+            msg_id = top_topic.get('message_id')
+            
+            lines.append("")
+            lines.append("🔥 ГЛАВНАЯ ТЕМА:")
+            if msg_id and summary.chat_id:
+                chat_id_str = str(abs(summary.chat_id))
+                if chat_id_str.startswith("100"):
+                    chat_id_str = chat_id_str[3:]
+                link = f"https://t.me/c/{chat_id_str}/{msg_id}"
+                lines.append(f'👉 <a href="{link}">{keyword}</a>')
+            else:
+                lines.append(f"👉 {keyword}")
+
+        # Mood (simple emoji)
+        lines.append("")
+        lines.append(f"Вайб вчерашнего дня: {summary.mood_label}")
+        
+        lines.append("")
+        lines.append("Всем продуктивного дня! 🚀")
+        
+        return "\n".join(lines)
+
     def format_summary(self, summary: DailySummary) -> str:
         """
         Format daily summary for display.
@@ -1173,10 +1251,8 @@ class DailiesService:
         # Toxicity (compact)
         toxicity_emoji = self._get_toxicity_emoji(summary.toxicity_score)
         toxicity_label = self._get_toxicity_label(summary.toxicity_score)
-        lines.append(f"{toxicity_emoji} Токсичность: {summary.toxicity_score:.0f}% — {toxicity_label}")
-        
-        if summary.toxicity_incidents > 0:
-            lines.append(f"🚨 Инцидентов: {summary.toxicity_incidents}")
+        # Remove percentage and "Incidents" to avoid confusion
+        lines.append(f"{toxicity_emoji} Токсичность: {toxicity_label}")
         
         # Top chatters (compact)
         if summary.top_chatters:
@@ -1735,7 +1811,12 @@ class DailiesService:
             
             # Check if should skip due to no activity (Property 34)
             if not self.should_skip_summary(summary):
-                messages.append({"text": self.format_summary(summary)})
+                if not for_today:
+                    # Morning briefing (yesterday's recap)
+                    messages.append({"text": self.format_morning_summary(summary)})
+                else:
+                    # Evening summary (today's recap)
+                    messages.append({"text": self.format_summary(summary)})
         
         return messages
     

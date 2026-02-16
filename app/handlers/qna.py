@@ -801,11 +801,13 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
         text_chance = 0.0
         voice_chance = 0.0
         video_chance = 0.0
+        current_persona = "oleg"  # Default persona
         try:
             async with async_session() as session:
                 chat_obj = await session.get(Chat, msg.chat.id)
                 if chat_obj:
                     text_chance = getattr(chat_obj, "auto_reply_chance", 0.0)
+                    current_persona = getattr(chat_obj, "persona", "oleg")
         except Exception as e:
             logger.warning(f"Failed to get reply chances for chat {msg.chat.id}: {e}")
         
@@ -876,8 +878,7 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
         if should_video:
             try:
                 # Получаем текущую персону
-                from app.services.ollama_client import get_global_persona
-                persona = get_global_persona()
+                persona = current_persona
                 
                 # Маппинг персон на файлы (если отличаются)
                 persona_files = {
@@ -912,8 +913,7 @@ async def _process_qna_message(msg: Message, is_direct_mention: bool = False):
         if should_voice and not video_sent:
             try:
                 # Получаем текущую персону для голоса
-                from app.services.ollama_client import get_global_persona
-                persona = get_global_persona()
+                persona = current_persona
                 
                 result = await tts_service.generate_voice(reply, persona=persona)
                 if result is not None:

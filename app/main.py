@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import aiohttp
 
 # uvloop — быстрый event loop для Linux/macOS (даёт ~20-30% прирост I/O)
 if sys.platform != "win32":
@@ -25,10 +26,11 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from app.config import settings
 from app.logger import setup_logging
-from app.database.session import init_db, async_session
+from app.database.session import init_db
 from app.database.models import Chat
 from app.handlers import qna, games, achievements, auctions, quests, guilds, team_wars, duos, statistics, vision, random_responses, help
 from app.handlers.trading import router as trading_router
@@ -392,8 +394,56 @@ async def main():
                 return _original_dumps(*args, **kwargs)
         json.dumps = _patched_dumps
         logger.info("orjson: включен (monkey-patch json.dumps)")
-    
-    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
+    # Настраиваем сессию с HTTP прокси для обхода блокировок
+    session = None
+    if settings.mtproto_enabled:
+        logger.info("Настраиваем HTTP прокси для обхода блокировок...")
+
+        # Основной и fallback прокси
+        proxy_list = [
+            "http://127.0.0.1:8082",       # Основной (финский SOCKS5)
+            "http://127.0.0.1:8083",       # Fallback 1
+            "http://host.docker.internal:8082",  # Fallback 2
+        ]
+
+        for proxy_url in proxy_list:
+            try:
+                logger.info(f"Тестируем прокси {proxy_url}...")
+
+                connector = aiohttp.TCPConnector()
+                aio_session = aiohttp.ClientSession(connector=connector)
+
+                async with aio_session.get(
+                    f"https://api.telegram.org/bot{settings.bot_token}/getMe",
+                    proxy=proxy_url,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("ok"):
+                        username = data["result"]["username"]
+                        logger.info(f"✅ Прокси работает: {proxy_url} (бот: @{username})")
+                        await aio_session.close()
+
+                        # Патчим aiohttp чтобы ВСЕ запросы шли через этот прокси
+                        _orig_request = aiohttp.ClientSession._request
+                        async def _proxied_request(self, method, url, **kwargs):
+                            kwargs['proxy'] = proxy_url
+                            return await _orig_request(self, method, url, **kwargs)
+                        aiohttp.ClientSession._request = _proxied_request
+
+                        session = AiohttpSession()
+                        break
+                    else:
+                        await aio_session.close()
+            except Exception as e:
+                logger.debug(f"Прокси {proxy_url} не работает: {type(e).__name__}")
+
+    if session is None:
+        logger.warning("⚠️ Ни один прокси не работает, пробуем напрямую...")
+        session = AiohttpSession()
+
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML), session=session)
     
     dp = build_dp()
 

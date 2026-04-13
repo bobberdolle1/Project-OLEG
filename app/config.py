@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = Field(..., min_length=10, description="Telegram bot token from BotFather")
     owner_id: Optional[int] = Field(None, description="Bot owner's Telegram ID")
+
+    # MTProto Proxy (for bypassing Telegram blocks in Russia)
+    # Proxy server: max.ru.rightarion.ru:443
+    mtproto_enabled: bool = Field(default=False, description="Enable MTProto proxy for Telegram connection")
+    mtproto_server: str = Field(default="", description="MTProto proxy server hostname (e.g. max.ru.rightarion.ru)")
+    mtproto_port: int = Field(default=443, ge=1, le=65535, description="MTProto proxy server port")
+    mtproto_secret: str = Field(default="", description="MTProto proxy secret (hex format, e.g. eedcaae509a2455bbfc6165f1708fd5c586d61782e7275)")
     
     # SDOC (Steam Deck OC) - родной дом Олега
     sdoc_chat_id: Optional[int] = Field(default=None, description="SDOC group chat ID (Олег работает только тут)")
